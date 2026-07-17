@@ -30,23 +30,33 @@
     "stageAll": "全部暂存",
     "unstageAll": "全部取消暂存",
     "messagePlaceholder": "提交信息...",
+    "messageShortcutHint": "（Ctrl+Enter 提交）",
     "aiGenerate": "AI 生成",
     "generating": "生成中...",
     "commit": "提交",
     "committing": "提交中...",
+    "commitShortcut": "提交（Ctrl+Enter）",
     "stagedCount": "{{count}} 已暂存",
     "commitAndPush": "提交并推送",
     "committingAndPushing": "提交并推送中...",
     "push": "推送",
     "pushing": "推送中...",
+    "pull": "拉取",
+    "pulling": "拉取中...",
     "aheadHint": "领先远程 {{count}} 个提交",
+    "behindHint": "落后远程 {{count}} 个提交",
     "pushSuccessTitle": "推送成功",
     "pushSuccessBody": "已将 {{branch}} 分支推送到远程仓库。",
-    "pushSuccessBodyGeneric": "推送完成。"
+    "pushSuccessBodyGeneric": "推送完成。",
+    "pullSuccessTitle": "拉取成功",
+    "pullSuccessBody": "已从远程仓库获取最新提交并合并到当前分支。"
   },
   "fileList": {
     "noStaged": "无已暂存的改动",
-    "noChanges": "无改动"
+    "noChanges": "无改动",
+    "discard": "丢弃修改",
+    "discardTitle": "丢弃修改确认",
+    "discardConfirm": "确定要丢弃 {{file}} 的未暂存修改吗？此操作不可恢复。"
   },
   "branches": {
     "title": "分支",
@@ -55,7 +65,8 @@
     "branchNamePlaceholder": "分支名",
     "local": "本地",
     "remote": "远程",
-    "history": "历史"
+    "history": "历史",
+    "noDiff": "该提交没有可显示的改动"
   },
   "review": {
     "title": "AI 代码审查",
@@ -117,7 +128,14 @@
     "model": "模型",
     "baseUrl": "基础 URL",
     "ollamaHint": "需要本地运行 Ollama。从",
-    "ollamaHintEnd": "安装"
+    "ollamaHintEnd": "安装",
+    "about": "关于",
+    "version": "版本",
+    "copyright": "版权所有",
+    "author": "作者",
+    "contact": "联系方式",
+    "copy": "复制",
+    "copied": "已复制"
   },
   "languages": {
     "zh": "中文",

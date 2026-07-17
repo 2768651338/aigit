@@ -44,6 +44,8 @@ pub fn run() {
             config_cmd::get_config,
             config_cmd::save_config,
             config_cmd::add_recent_repo,
+            git_cmd::pull,
+            git_cmd::discard_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running aigit application");

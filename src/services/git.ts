@@ -111,4 +111,14 @@ export const gitService = {
     ensureTauri();
     return invoke<string>("push", { path, setUpstream });
   },
+
+  pull: (path: string) => {
+    ensureTauri();
+    return invoke<string>("pull", { path });
+  },
+
+  discardFiles: (path: string, files: string[]) => {
+    ensureTauri();
+    return invoke<void>("discard_files", { path, files });
+  },
 };

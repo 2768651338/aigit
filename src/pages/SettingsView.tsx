@@ -2,10 +2,15 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "@/stores/aiStore";
 import type { AppConfig, AiProviderConfig, PromptsConfig } from "@/types";
-import { CheckIcon, AlertCircleIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import clsx from "clsx";
+
+const AUTHOR = "田小橙";
+const QQ = "2768651338";
+const EMAIL = "2768651338@qq.com";
+const APP_VERSION = "1.0.0";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
@@ -19,6 +24,7 @@ export function SettingsView() {
   const { config, loadConfig, saveConfig, error } = useSettingsStore();
   const [local, setLocal] = useState<AppConfig | null>(null);
   const [saved, setSaved] = useState(false);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
     if (!config) {
@@ -51,6 +57,16 @@ export function SettingsView() {
     await saveConfig(local);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  };
+
+  const handleCopy = async (text: string, field: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 1500);
+    } catch (e) {
+      console.warn("[aigit] Copy to clipboard failed:", e);
+    }
   };
 
   // Live-apply language change before save for immediate feedback
@@ -336,6 +352,76 @@ export function SettingsView() {
             </div>
           </section>
         )}
+
+        {/* About / Copyright */}
+        <section className="mt-2 pt-6 border-t border-border">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-semibold text-text-primary">
+              {t("settings.about")}
+            </h3>
+            <span className="text-2xs text-text-muted">
+              {t("settings.version")} <span className="font-mono text-accent">v{APP_VERSION}</span>
+            </span>
+          </div>
+          <div className="space-y-2 text-xs">
+            <div className="flex items-center gap-2">
+              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+                {t("settings.author")}
+              </span>
+              <span className="text-text-primary font-medium">{AUTHOR}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+                {t("settings.contact")}
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-text-secondary">QQ</span>
+                <span className="text-text-primary font-mono">{QQ}</span>
+                <button
+                  onClick={() => handleCopy(QQ, "qq")}
+                  className="text-text-muted hover:text-accent transition-colors"
+                  title={t("settings.copy")}
+                  aria-label={t("settings.copy")}
+                >
+                  {copiedField === "qq" ? (
+                    <CheckIcon size={12} className="text-success" />
+                  ) : (
+                    <CopyIcon size={12} />
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+                Email
+              </span>
+              <div className="flex items-center gap-2">
+                <MailIcon size={12} className="text-text-muted" />
+                <a
+                  href={`mailto:${EMAIL}`}
+                  className="text-accent hover:underline font-mono"
+                >
+                  {EMAIL}
+                </a>
+                <button
+                  onClick={() => handleCopy(EMAIL, "email")}
+                  className="text-text-muted hover:text-accent transition-colors"
+                  title={t("settings.copy")}
+                  aria-label={t("settings.copy")}
+                >
+                  {copiedField === "email" ? (
+                    <CheckIcon size={12} className="text-success" />
+                  ) : (
+                    <CopyIcon size={12} />
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+          <p className="mt-4 text-2xs text-text-muted">
+            © {new Date().getFullYear()} {AUTHOR}. {t("settings.copyright")}.
+          </p>
+        </section>
       </div>
     </div>
   );

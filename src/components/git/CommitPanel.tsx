@@ -11,6 +11,7 @@ import {
   MinusIcon,
   AlertCircleIcon,
   SendIcon,
+  DownloadIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
 
@@ -28,15 +29,18 @@ export function CommitPanel() {
     unstageFiles,
     commit,
     push,
+    pull,
     refreshStatus,
     repoInfo,
     pushing,
+    pulling,
   } = useRepoStore();
   const { generateCommitMessage, loading: aiLoading, error: aiError, clearError: clearAiError } = useAiStore();
   const { config } = useSettingsStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
   const ahead = repoInfo?.ahead ?? 0;
+  const behind = repoInfo?.behind ?? 0;
   const branch = repoInfo?.current_branch ?? "";
 
   const handleAiGenerate = async () => {
@@ -111,6 +115,20 @@ export function CommitPanel() {
     await runPushWithDialog();
   };
 
+  const handlePull = async () => {
+    setPushError(null);
+    try {
+      await pull();
+      await showMessage(
+        t("commit.pullSuccessTitle"),
+        t("commit.pullSuccessBody"),
+        "success"
+      );
+    } catch (e) {
+      setPushError(formatError(e));
+    }
+  };
+
   const handleUnstageAll = () => {
     const stagedFiles = fileStatuses.filter((f) => f.staged).map((f) => f.path);
     if (stagedFiles.length > 0) {
@@ -118,7 +136,17 @@ export function CommitPanel() {
     }
   };
 
-  const busy = committing || commitAndPushing || pushing;
+  // Ctrl/Cmd+Enter inside the commit message textarea triggers commit.
+  const handleMessageKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      if (message.trim() && !busy && stagedCount > 0) {
+        handleCommit();
+      }
+    }
+  };
+
+  const busy = committing || commitAndPushing || pushing || pulling;
 
   return (
     <div className="flex flex-col h-full">
@@ -151,7 +179,7 @@ export function CommitPanel() {
         </div>
       )}
 
-      {/* Push error display (kept inline so users can read full git stderr) */}
+      {/* Push/Pull error display (kept inline so users can read full git stderr) */}
       {pushError && (
         <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 text-danger text-2xs border-b border-danger/20">
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
@@ -179,7 +207,8 @@ export function CommitPanel() {
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          placeholder={t("commit.messagePlaceholder")}
+          onKeyDown={handleMessageKeyDown}
+          placeholder={t("commit.messagePlaceholder") + t("commit.messageShortcutHint")}
           className="w-full h-full bg-bg-base border border-border rounded p-3 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 resize-none"
           spellCheck={false}
         />
@@ -199,6 +228,11 @@ export function CommitPanel() {
           {aiLoading ? t("commit.generating") : t("commit.aiGenerate")}
         </button>
         <div className="flex-1" />
+        {behind > 0 && (
+          <span className="text-2xs text-danger" title={t("commit.behindHint", { count: behind })}>
+            ↓{behind}
+          </span>
+        )}
         {ahead > 0 && (
           <span className="text-2xs text-accent" title={t("commit.aheadHint", { count: ahead })}>
             ↑{ahead}
@@ -207,6 +241,18 @@ export function CommitPanel() {
         <span className="text-2xs text-text-muted">
           {t("commit.stagedCount", { count: stagedCount })}
         </span>
+        {/* Pull button - visible when there are upstream commits to fetch */}
+        {behind > 0 && (
+          <button
+            onClick={handlePull}
+            disabled={busy}
+            className="btn-secondary"
+            title={t("commit.pull")}
+          >
+            <DownloadIcon size={14} />
+            {pulling ? t("commit.pulling") : t("commit.pull")}
+          </button>
+        )}
         {/* Push-only button (visible when there are unpushed commits) */}
         {ahead > 0 && (
           <button
@@ -234,6 +280,7 @@ export function CommitPanel() {
           onClick={handleCommit}
           disabled={!message.trim() || busy || stagedCount === 0}
           className="btn-primary"
+          title={t("commit.commitShortcut")}
         >
           <CheckIcon size={14} />
           {committing ? t("commit.committing") : t("commit.commit")}

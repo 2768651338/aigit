@@ -30,23 +30,33 @@
     "stageAll": "Stage all",
     "unstageAll": "Unstage all",
     "messagePlaceholder": "Commit message...",
+    "messageShortcutHint": " (Ctrl+Enter to commit)",
     "aiGenerate": "AI Generate",
     "generating": "Generating...",
     "commit": "Commit",
     "committing": "Committing...",
+    "commitShortcut": "Commit (Ctrl+Enter)",
     "stagedCount": "{{count}} staged",
     "commitAndPush": "Commit & Push",
     "committingAndPushing": "Committing & Pushing...",
     "push": "Push",
     "pushing": "Pushing...",
+    "pull": "Pull",
+    "pulling": "Pulling...",
     "aheadHint": "{{count}} commit(s) ahead of remote",
+    "behindHint": "{{count}} commit(s) behind remote",
     "pushSuccessTitle": "Push Succeeded",
     "pushSuccessBody": "Branch {{branch}} has been pushed to the remote.",
-    "pushSuccessBodyGeneric": "Push complete."
+    "pushSuccessBodyGeneric": "Push complete.",
+    "pullSuccessTitle": "Pull Succeeded",
+    "pullSuccessBody": "Latest commits fetched and merged into the current branch."
   },
   "fileList": {
     "noStaged": "No staged changes",
-    "noChanges": "No changes"
+    "noChanges": "No changes",
+    "discard": "Discard changes",
+    "discardTitle": "Discard changes?",
+    "discardConfirm": "Discard unstaged changes in {{file}}? This cannot be undone."
   },
   "branches": {
     "title": "Branches",
@@ -55,7 +65,8 @@
     "branchNamePlaceholder": "branch-name",
     "local": "Local",
     "remote": "Remote",
-    "history": "History"
+    "history": "History",
+    "noDiff": "No diff available for this commit"
   },
   "review": {
     "title": "AI Code Review",
@@ -117,7 +128,14 @@
     "model": "Model",
     "baseUrl": "Base URL",
     "ollamaHint": "Requires Ollama running locally. Install from",
-    "ollamaHintEnd": ""
+    "ollamaHintEnd": "",
+    "about": "About",
+    "version": "Version",
+    "copyright": "Copyright",
+    "author": "Author",
+    "contact": "Contact",
+    "copy": "Copy",
+    "copied": "Copied"
   },
   "languages": {
     "zh": "中文",

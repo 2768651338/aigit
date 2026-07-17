@@ -1,101 +1,234 @@
+import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
+import { gitService } from "@/services/git";
+import { formatError } from "@/utils/error";
 import type { LogEntry } from "@/types";
-import { GitBranchIcon } from "@/components/common/Icons";
+import { GitBranchIcon, AlertCircleIcon } from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function BranchGraph() {
-  const { log, branches } = useRepoStore();
+  const { t } = useTranslation();
+  const { log, branches, currentPath } = useRepoStore();
+  const [selectedHash, setSelectedHash] = useState<string | null>(null);
+  const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
+  const [diffText, setDiffText] = useState<string>("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const laneMap = computeLanes(log);
 
-  return (
-    <div className="overflow-auto h-full">
-      <div className="min-w-full">
-        {log.map((entry, idx) => {
-          const lanes = laneMap.get(entry.hash) ?? { lane: 0, maxLanes: 1 };
-          const isMerge = entry.parents.length > 1;
-          const localRefs = entry.refs.filter((r) => !r.includes("/"));
+  const handleEntryClick = async (entry: LogEntry) => {
+    if (!currentPath) return;
+    // Toggle off if clicking the same entry again.
+    if (selectedHash === entry.hash) {
+      setSelectedHash(null);
+      setSelectedEntry(null);
+      setDiffText("");
+      setError(null);
+      return;
+    }
+    setSelectedHash(entry.hash);
+    setSelectedEntry(entry);
+    setDiffText("");
+    setError(null);
+    setLoading(true);
+    try {
+      const diff = await gitService.getCommitDiff(currentPath, entry.hash);
+      setDiffText(diff);
+    } catch (e) {
+      setError(formatError(e));
+    } finally {
+      setLoading(false);
+    }
+  };
 
-          return (
-            <div
-              key={entry.hash}
-              className="flex items-center gap-2 px-3 py-1.5 hover:bg-bg-hover/50 group cursor-pointer"
-              style={{ minHeight: "32px" }}
-            >
-              {/* Graph lane */}
-              <div className="relative flex items-center" style={{ width: `${Math.max(lanes.maxLanes + 1, 1) * 20}px` }}>
+  return (
+    <div className="flex h-full">
+      {/* Commit list */}
+      <div className="flex-1 overflow-auto h-full">
+        <div className="min-w-full">
+          {log.map((entry, idx) => {
+            const lanes = laneMap.get(entry.hash) ?? { lane: 0, maxLanes: 1 };
+            const isMerge = entry.parents.length > 1;
+            const localRefs = entry.refs.filter((r) => !r.includes("/"));
+            const isSelected = selectedHash === entry.hash;
+
+            return (
+              <div
+                key={entry.hash}
+                onClick={() => handleEntryClick(entry)}
+                className={clsx(
+                  "flex items-center gap-2 px-3 py-1.5 cursor-pointer group",
+                  isSelected ? "bg-accent-glow" : "hover:bg-bg-hover/50"
+                )}
+                style={{ minHeight: "32px" }}
+              >
+                {/* Graph lane */}
                 <div
-                  className="absolute rounded-full"
-                  style={{
-                    left: `${lanes.lane * 20 + 6}px`,
-                    width: "8px",
-                    height: "8px",
-                    backgroundColor: isMerge ? "#ffa502" : "#d4ff3a",
-                  }}
-                />
-                {/* Vertical line for parent */}
-                {idx < log.length - 1 && (
+                  className="relative flex items-center"
+                  style={{ width: `${Math.max(lanes.maxLanes + 1, 1) * 20}px` }}
+                >
                   <div
-                    className="absolute top-1/2 w-px bg-border"
+                    className="absolute rounded-full"
                     style={{
-                      left: `${lanes.lane * 20 + 10}px`,
-                      height: "100%",
+                      left: `${lanes.lane * 20 + 6}px`,
+                      width: "8px",
+                      height: "8px",
+                      backgroundColor: isMerge ? "#ffa502" : "#d4ff3a",
                     }}
                   />
-                )}
+                  {/* Vertical line for parent */}
+                  {idx < log.length - 1 && (
+                    <div
+                      className="absolute top-1/2 w-px bg-border"
+                      style={{
+                        left: `${lanes.lane * 20 + 10}px`,
+                        height: "100%",
+                      }}
+                    />
+                  )}
+                </div>
+
+                {/* Refs */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {localRefs.map((ref) => (
+                    <span
+                      key={ref}
+                      className={clsx(
+                        "badge text-2xs",
+                        branches.find((b) => b.name === ref)?.is_current
+                          ? "bg-accent text-bg-base"
+                          : "bg-bg-elevated text-text-secondary border border-border"
+                      )}
+                    >
+                      <GitBranchIcon size={10} className="mr-1" />
+                      {ref}
+                    </span>
+                  ))}
+                  {entry.refs
+                    .filter((r) => r.includes("/"))
+                    .map((ref) => (
+                      <span
+                        key={ref}
+                        className="badge text-2xs bg-bg-elevated text-text-muted border border-border-subtle"
+                      >
+                        {ref.replace("origin/", "")}
+                      </span>
+                    ))}
+                </div>
+
+                {/* Hash */}
+                <span className="font-mono text-2xs text-text-muted shrink-0">
+                  {entry.short_hash}
+                </span>
+
+                {/* Message */}
+                <span className="text-xs text-text-primary truncate flex-1">
+                  {entry.message}
+                </span>
+
+                {/* Author */}
+                <span className="text-2xs text-text-muted shrink-0 hidden sm:block">
+                  {entry.author}
+                </span>
+
+                {/* Date */}
+                <span className="text-2xs text-text-muted shrink-0">
+                  {formatDate(entry.timestamp)}
+                </span>
               </div>
-
-              {/* Refs */}
-              <div className="flex items-center gap-1 shrink-0">
-                {localRefs.map((ref) => (
-                  <span
-                    key={ref}
-                    className={clsx(
-                      "badge text-2xs",
-                      branches.find((b) => b.name === ref)?.is_current
-                        ? "bg-accent text-bg-base"
-                        : "bg-bg-elevated text-text-secondary border border-border"
-                    )}
-                  >
-                    <GitBranchIcon size={10} className="mr-1" />
-                    {ref}
-                  </span>
-                ))}
-                {entry.refs.filter((r) => r.includes("/")).map((ref) => (
-                  <span
-                    key={ref}
-                    className="badge text-2xs bg-bg-elevated text-text-muted border border-border-subtle"
-                  >
-                    {ref.replace("origin/", "")}
-                  </span>
-                ))}
-              </div>
-
-              {/* Hash */}
-              <span className="font-mono text-2xs text-text-muted shrink-0">
-                {entry.short_hash}
-              </span>
-
-              {/* Message */}
-              <span className="text-xs text-text-primary truncate flex-1">
-                {entry.message}
-              </span>
-
-              {/* Author */}
-              <span className="text-2xs text-text-muted shrink-0 hidden sm:block">
-                {entry.author}
-              </span>
-
-              {/* Date */}
-              <span className="text-2xs text-text-muted shrink-0">
-                {formatDate(entry.timestamp)}
-              </span>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
+
+      {/* Right panel: commit diff (visible only when an entry is selected) */}
+      {selectedEntry && (
+        <div className="w-1/2 border-l border-border flex flex-col overflow-hidden">
+          {/* Header */}
+          <div className="flex items-center gap-2 px-4 h-10 border-b border-border shrink-0">
+            <span className="font-mono text-2xs text-text-muted">
+              {selectedEntry.short_hash}
+            </span>
+            <span className="text-sm font-medium text-text-primary truncate flex-1">
+              {selectedEntry.message.split("\n")[0]}
+            </span>
+            <button
+              onClick={() => {
+                setSelectedHash(null);
+                setSelectedEntry(null);
+                setDiffText("");
+                setError(null);
+              }}
+              className="btn-ghost text-2xs"
+              title={t("changes.dismiss")}
+            >
+              ✕
+            </button>
+          </div>
+
+          {/* Meta */}
+          <div className="px-4 py-2 border-b border-border text-2xs text-text-muted shrink-0">
+            {selectedEntry.author} &lt;{selectedEntry.email}&gt; ·{" "}
+            {new Date(selectedEntry.timestamp * 1000).toLocaleString()}
+          </div>
+
+          {/* Diff content */}
+          <div className="flex-1 overflow-auto">
+            {error && (
+              <div className="flex items-start gap-2 p-3 m-3 bg-danger/10 text-danger text-xs rounded border border-danger/20">
+                <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
+                <span className="flex-1 break-words whitespace-pre-wrap">{error}</span>
+              </div>
+            )}
+            {loading && (
+              <div className="flex items-center justify-center py-12 text-text-muted text-sm">
+                {t("review.analyzing")}
+              </div>
+            )}
+            {!loading && !error && diffText && (
+              <pre className="font-mono text-2xs text-text-primary p-3 whitespace-pre-wrap break-all">
+                {colorizePatch(diffText)}
+              </pre>
+            )}
+            {!loading && !error && !diffText && (
+              <div className="flex items-center justify-center py-12 text-text-muted text-sm">
+                {t("branches.noDiff")}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+/**
+ * Render a unified-diff patch string with simple line-level coloring.
+ * Returns an array of React nodes — one per line — so the parent <pre>
+ * can lay them out without us re-implementing a full diff viewer.
+ */
+function colorizePatch(patch: string): React.ReactNode[] {
+  return patch.split("\n").map((line, i) => {
+    let className = "text-text-secondary";
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      className = "text-text-primary font-semibold";
+    } else if (line.startsWith("@@")) {
+      className = "text-accent";
+    } else if (line.startsWith("+") && !line.startsWith("+++")) {
+      className = "text-success";
+    } else if (line.startsWith("-") && !line.startsWith("---")) {
+      className = "text-danger";
+    } else if (line.startsWith("diff ") || line.startsWith("index ")) {
+      className = "text-info font-semibold";
+    }
+    return (
+      <div key={i} className={className}>
+        {line || " "}
+      </div>
+    );
+  });
 }
 
 function formatDate(timestamp: number): string {

@@ -111,3 +111,15 @@ pub fn push(path: String, set_upstream: Option<bool>) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
     git::remote::push_current_branch(&repo, set_upstream.unwrap_or(false))
 }
+
+#[tauri::command]
+pub fn pull(path: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::pull_current_branch(&repo)
+}
+
+#[tauri::command]
+pub fn discard_files(path: String, files: Vec<String>) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::commit::discard_files(&repo, &files)
+}

@@ -74,3 +74,58 @@ pub fn push_branch(workdir: &Path, branch: &str, set_upstream: bool) -> AppResul
 
     Ok(combined.trim().to_string())
 }
+
+/// Pull current branch from its upstream remote using the system `git` CLI.
+///
+/// Same rationale as `push_current_branch`: reuse the user's existing auth
+/// configuration (SSH keys, credential.helper) instead of trying to re-implement
+/// it via libgit2.
+pub fn pull_current_branch(repo: &Repository) -> AppResult<String> {
+    // Resolve the current branch name.
+    let head = repo.head()?;
+    let branch_name = head
+        .shorthand()
+        .ok_or_else(|| AppError::Git(git2::Error::from_str("HEAD is not a named ref")))?
+        .to_string();
+
+    // Resolve the workdir to run git in.
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+
+    let args = vec!["pull".to_string(), "origin".to_string(), branch_name.clone()];
+
+    let output = Command::new("git")
+        .args(&args)
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| {
+            AppError::General(format!(
+                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
+            ))
+        })?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+
+    if !output.status.success() {
+        let msg = if stderr.trim().is_empty() {
+            stdout.clone()
+        } else {
+            stderr.clone()
+        };
+        return Err(AppError::General(format!(
+            "拉取失败（分支 {branch_name}）：\n{msg}"
+        )));
+    }
+
+    let combined = if stdout.trim().is_empty() {
+        stderr
+    } else if stderr.trim().is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+
+    Ok(combined.trim().to_string())
+}

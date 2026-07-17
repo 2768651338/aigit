@@ -1,9 +1,11 @@
 {
   "name": "aigit",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AI-Driven Git Tool for Windows",
+  "author": "田小橙 <2768651338@qq.com> (QQ: 2768651338)",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",

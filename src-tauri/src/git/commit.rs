@@ -77,3 +77,50 @@ pub fn amend_message(repo: &Repository, message: &str) -> AppResult<String> {
 
     Ok(oid.to_string())
 }
+
+/// Discard uncommitted changes in the given working-tree files using the
+/// system `git checkout -- <paths>`. We use the CLI (not libgit2) because
+/// libgit2's checkout API is fiddly to configure correctly for path-limited
+/// discards on Windows, and we already depend on the system git for push/pull.
+///
+/// - Empty `paths` discards ALL working-tree modifications (unstaged + untracked
+///   files are NOT removed; only tracked modifications are reverted). Pass
+///   specific paths to limit scope.
+/// - This is a DESTRUCTIVE operation; callers should confirm with the user.
+pub fn discard_files(repo: &Repository, paths: &[String]) -> AppResult<()> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+
+    let mut args = vec!["checkout".to_string(), "--".to_string()];
+    if paths.is_empty() {
+        args.push(".".to_string());
+    } else {
+        for p in paths {
+            args.push(p.clone());
+        }
+    }
+
+    let output = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| {
+            AppError::General(format!(
+                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
+            ))
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let msg = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
+        return Err(AppError::General(format!("丢弃修改失败：\n{msg}")));
+    }
+
+    Ok(())
+}

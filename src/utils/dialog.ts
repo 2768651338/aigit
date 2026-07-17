@@ -1,4 +1,4 @@
-import { message as tauriMessage } from "@tauri-apps/plugin-dialog";
+import { message as tauriMessage, confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { isTauriEnv } from "./env";
 
 export type DialogKind = "info" | "success" | "warning" | "error";
@@ -39,3 +39,35 @@ export async function showMessage(
   const prefix = kind === "error" ? "❌ " : kind === "warning" ? "⚠ " : kind === "success" ? "✓ " : "";
   alert(`${prefix}${title}\n\n${message}`);
 }
+
+/**
+ * Show a Yes/No confirmation dialog.
+ *
+ * Returns true if the user confirmed (Yes/OK), false otherwise.
+ * Uses the Tauri dialog `confirm` helper inside the WebView, and
+ * falls back to the browser `confirm` primitive elsewhere.
+ *
+ * Use this before destructive operations (discard changes, delete
+ * branch, force push, etc.) to give the user a chance to cancel.
+ */
+export async function confirmDialog(
+  title: string,
+  message: string,
+  kind: DialogKind = "warning"
+): Promise<boolean> {
+  if (isTauriEnv()) {
+    try {
+      const confirmed = await tauriConfirm(message, {
+        title,
+        kind: toTauriKind(kind),
+        okLabel: "确定",
+        cancelLabel: "取消",
+      });
+      return confirmed;
+    } catch (e) {
+      console.warn("[aigit] Tauri confirm unavailable, falling back to confirm():", e);
+    }
+  }
+  return window.confirm(`${title}\n\n${message}`);
+}
+

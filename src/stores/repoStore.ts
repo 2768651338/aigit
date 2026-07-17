@@ -22,6 +22,7 @@ interface RepoState {
   loading: boolean;
   error: string | null;
   pushing: boolean;
+  pulling: boolean;
 
   openRepo: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -29,8 +30,10 @@ interface RepoState {
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   stageAll: () => Promise<void>;
+  discardFiles: (files: string[]) => Promise<void>;
   commit: (message: string) => Promise<string>;
   push: (setUpstream?: boolean) => Promise<string>;
+  pull: () => Promise<string>;
   refreshBranches: () => Promise<void>;
   refreshLog: () => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
@@ -51,6 +54,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   loading: false,
   error: null,
   pushing: false,
+  pulling: false,
 
   openRepo: async (path: string) => {
     set({ loading: true, error: null });
@@ -138,6 +142,21 @@ export const useRepoStore = create<RepoState>((set, get) => ({
     }
   },
 
+  discardFiles: async (files: string[]) => {
+    const { currentPath } = get();
+    if (!currentPath) return;
+    try {
+      await gitService.discardFiles(currentPath, files);
+      await get().refreshStatus();
+      const { selectedFile } = get();
+      if (selectedFile) {
+        await get().selectFile(selectedFile);
+      }
+    } catch (e) {
+      set({ error: formatError(e) });
+    }
+  },
+
   commit: async (message: string) => {
     const { currentPath } = get();
     if (!currentPath) throw new Error("No repository open");
@@ -172,6 +191,33 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       throw e;
     } finally {
       set({ pushing: false });
+    }
+  },
+
+  pull: async () => {
+    const { currentPath } = get();
+    if (!currentPath) throw new Error("No repository open");
+    set({ pulling: true, error: null });
+    try {
+      const result = await gitService.pull(currentPath);
+      // Refresh everything — pull may bring new commits affecting status,
+      // branch pointers, and the commit graph.
+      try {
+        await get().refreshStatus();
+        await get().refreshBranches();
+        await get().refreshLog();
+        const info = await gitService.getRepoInfo(currentPath);
+        set({ repoInfo: info });
+      } catch {
+        // ignore — pull itself succeeded
+      }
+      return result;
+    } catch (e) {
+      const msg = formatError(e);
+      set({ error: msg });
+      throw e;
+    } finally {
+      set({ pulling: false });
     }
   },
 

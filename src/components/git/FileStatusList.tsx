@@ -1,7 +1,8 @@
 import { useRepoStore } from "@/stores/repoStore";
 import { useTranslation } from "react-i18next";
 import type { FileStatus } from "@/types";
-import { PlusIcon, MinusIcon } from "@/components/common/Icons";
+import { PlusIcon, MinusIcon, UndoIcon } from "@/components/common/Icons";
+import { confirmDialog } from "@/utils/dialog";
 import clsx from "clsx";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -28,7 +29,7 @@ interface FileStatusListProps {
 
 export function FileStatusList({ staged }: FileStatusListProps) {
   const { t } = useTranslation();
-  const { fileStatuses, selectedFile, selectFile, stageFiles, unstageFiles } =
+  const { fileStatuses, selectedFile, selectFile, stageFiles, unstageFiles, discardFiles } =
     useRepoStore();
   const files = useMemoFilteredFiles(fileStatuses, staged);
 
@@ -38,6 +39,19 @@ export function FileStatusList({ staged }: FileStatusListProps) {
     } else {
       stageFiles([file.path]);
     }
+  };
+
+  // Discard working-tree modifications for a single file.
+  // Destructive — requires user confirmation via native dialog.
+  const handleDiscard = async (file: FileStatus, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirmed = await confirmDialog(
+      t("fileList.discardTitle"),
+      t("fileList.discardConfirm", { file: file.path }),
+      "warning"
+    );
+    if (!confirmed) return;
+    await discardFiles([file.path]);
   };
 
   if (files.length === 0) {
@@ -82,6 +96,18 @@ export function FileStatusList({ staged }: FileStatusListProps) {
           <span className="flex-1 truncate text-xs text-text-primary">
             {file.path}
           </span>
+          {/* Discard button — only for unstaged tracked modifications.
+              Hidden for untracked files (git checkout won't help) and
+              only shown on hover to keep the list scannable. */}
+          {!staged && file.status !== "untracked" && (
+            <button
+              onClick={(e) => handleDiscard(file, e)}
+              className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+              title={t("fileList.discard")}
+            >
+              <UndoIcon size={12} />
+            </button>
+          )}
           {file.old_path && file.old_path !== file.path && (
             <span className="text-2xs text-text-muted truncate max-w-24">
               ← {file.old_path}
