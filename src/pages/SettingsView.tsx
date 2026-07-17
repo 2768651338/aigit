@@ -10,7 +10,7 @@ import clsx from "clsx";
 const AUTHOR = "田小橙";
 const QQ = "2768651338";
 const EMAIL = "2768651338@qq.com";
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.0.1";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
