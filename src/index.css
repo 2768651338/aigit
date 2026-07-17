@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: "Inter", system-ui, sans-serif;
+    background-color: #0a0a0a;
+    color: #e5e5e5;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    user-select: none;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #333333;
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #444444;
+  }
+
+  /* Text selection */
+  ::selection {
+    background: rgba(212, 255, 58, 0.25);
+    color: #ffffff;
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors duration-150 select-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-accent text-bg-base hover:bg-accent-dim font-semibold;
+  }
+
+  .btn-secondary {
+    @apply btn bg-bg-elevated text-text-primary border border-border hover:bg-bg-hover;
+  }
+
+  .btn-ghost {
+    @apply btn text-text-secondary hover:text-text-primary hover:bg-bg-hover;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger/10 text-danger border border-danger/30 hover:bg-danger/20;
+  }
+
+  .input {
+    @apply w-full bg-bg-base border border-border rounded px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 transition-colors;
+  }
+
+  .card {
+    @apply bg-bg-surface border border-border rounded-lg;
+  }
+
+  .nav-item {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary cursor-pointer transition-colors duration-100 hover:text-text-primary hover:bg-bg-hover;
+  }
+
+  .nav-item-active {
+    @apply nav-item text-accent bg-accent-glow;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-1.5 py-0.5 text-2xs font-medium rounded;
+  }
+
+  .diff-add {
+    @apply text-success bg-success/5;
+  }
+
+  .diff-del {
+    @apply text-danger bg-danger/5;
+  }
+
+  .diff-context {
+    @apply text-text-muted;
+  }
+
+  .diff-hunk-header {
+    @apply text-info/60 bg-info/5;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+}

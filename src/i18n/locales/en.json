@@ -1,0 +1,118 @@
+{
+  "nav": {
+    "changes": "Changes",
+    "branches": "Branches",
+    "review": "AI Review",
+    "chat": "AI Chat",
+    "settings": "Settings"
+  },
+  "sidebar": {
+    "openRepo": "Open repository",
+    "detached": "detached",
+    "notSet": "not set"
+  },
+  "statusBar": {
+    "noRepo": "No repository",
+    "staged": "{{count}} staged",
+    "modified": "{{count}} modified"
+  },
+  "changes": {
+    "title": "Changes",
+    "refresh": "Refresh",
+    "dismiss": "dismiss",
+    "stagedChanges": "Staged Changes",
+    "changes": "Changes",
+    "selectFile": "Select a file",
+    "noRepoTitle": "No Repository Open",
+    "noRepoDesc": "Click \"Open repository\" in the sidebar to select a Git repository, or use the folder icon to start working."
+  },
+  "commit": {
+    "stageAll": "Stage all",
+    "unstageAll": "Unstage all",
+    "messagePlaceholder": "Commit message...",
+    "aiGenerate": "AI Generate",
+    "generating": "Generating...",
+    "commit": "Commit",
+    "committing": "Committing...",
+    "stagedCount": "{{count}} staged"
+  },
+  "fileList": {
+    "noStaged": "No staged changes",
+    "noChanges": "No changes"
+  },
+  "branches": {
+    "title": "Branches",
+    "openRepoHint": "Open a repository to view branches",
+    "newBranch": "New branch",
+    "branchNamePlaceholder": "branch-name",
+    "local": "Local",
+    "remote": "Remote",
+    "history": "History"
+  },
+  "review": {
+    "title": "AI Code Review",
+    "staged": "Staged",
+    "allChanges": "All Changes",
+    "runReview": "Run Review",
+    "reviewing": "Reviewing...",
+    "file": "File:",
+    "allFiles": "All files",
+    "provider": "Provider: {{provider}}",
+    "analyzing": "Analyzing changes...",
+    "emptyHint": "Click \"Run Review\" to have the AI analyze your code changes for bugs, security issues, and improvement suggestions.",
+    "openRepoHint": "Open a repository to run AI code review"
+  },
+  "chat": {
+    "title": "Repository Assistant",
+    "context": "Context: {{name}}",
+    "clear": "Clear",
+    "emptyHint": "Ask anything about your repository",
+    "suggestion1": "What was the last commit about?",
+    "suggestion2": "Summarize recent changes",
+    "suggestion3": "What branches exist?",
+    "inputPlaceholder": "Ask about your repository... (Enter to send, Shift+Enter for newline)",
+    "configureHint": "Configure an AI provider in Settings to start chatting"
+  },
+  "settings": {
+    "title": "Settings",
+    "saved": "Saved",
+    "save": "Save",
+    "loading": "Loading settings...",
+    "aiProvider": "AI Provider",
+    "genParams": "Generation Parameters",
+    "temperature": "Temperature: {{value}}",
+    "precise": "Precise",
+    "balanced": "Balanced",
+    "creative": "Creative",
+    "maxTokens": "Max Tokens: {{value}}",
+    "interface": "Interface",
+    "language": "Language",
+    "fontSize": "Font Size: {{value}}px",
+    "showDiffInline": "Show diff inline",
+    "recentRepos": "Recent Repositories",
+    "prompts": "AI Prompts",
+    "promptsHint": "Leave empty to use the built-in default. Custom prompts are sent as the system message to the AI.",
+    "promptCommit": "Commit Message Prompt",
+    "promptReview": "Code Review Prompt",
+    "promptChat": "Repo Chat Prompt",
+    "promptReset": "Reset to default",
+    "promptUseDefault": "Use default",
+    "promptCustomized": "Customized",
+    "promptLoadingDefault": "Loading default prompt...",
+    "promptExpand": "Expand to edit",
+    "promptCollapse": "Collapse",
+    "openaiConfig": "OpenAI Configuration",
+    "claudeConfig": "Claude Configuration",
+    "deepseekConfig": "DeepSeek Configuration",
+    "ollamaConfig": "Ollama Configuration",
+    "apiKey": "API Key",
+    "model": "Model",
+    "baseUrl": "Base URL",
+    "ollamaHint": "Requires Ollama running locally. Install from",
+    "ollamaHintEnd": ""
+  },
+  "languages": {
+    "zh": "中文",
+    "en": "English"
+  }
+}

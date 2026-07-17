@@ -1,0 +1,118 @@
+{
+  "nav": {
+    "changes": "改动",
+    "branches": "分支",
+    "review": "AI 审查",
+    "chat": "AI 对话",
+    "settings": "设置"
+  },
+  "sidebar": {
+    "openRepo": "打开仓库",
+    "detached": "分离头指针",
+    "notSet": "未配置"
+  },
+  "statusBar": {
+    "noRepo": "无仓库",
+    "staged": "{{count}} 已暂存",
+    "modified": "{{count}} 已修改"
+  },
+  "changes": {
+    "title": "改动",
+    "refresh": "刷新",
+    "dismiss": "忽略",
+    "stagedChanges": "已暂存的改动",
+    "changes": "改动",
+    "selectFile": "选择一个文件",
+    "noRepoTitle": "未打开仓库",
+    "noRepoDesc": "点击侧边栏的\"打开仓库\"选择一个 Git 仓库，或使用文件夹图标开始工作。"
+  },
+  "commit": {
+    "stageAll": "全部暂存",
+    "unstageAll": "全部取消暂存",
+    "messagePlaceholder": "提交信息...",
+    "aiGenerate": "AI 生成",
+    "generating": "生成中...",
+    "commit": "提交",
+    "committing": "提交中...",
+    "stagedCount": "{{count}} 已暂存"
+  },
+  "fileList": {
+    "noStaged": "无已暂存的改动",
+    "noChanges": "无改动"
+  },
+  "branches": {
+    "title": "分支",
+    "openRepoHint": "打开仓库以查看分支",
+    "newBranch": "新建分支",
+    "branchNamePlaceholder": "分支名",
+    "local": "本地",
+    "remote": "远程",
+    "history": "历史"
+  },
+  "review": {
+    "title": "AI 代码审查",
+    "staged": "已暂存",
+    "allChanges": "全部改动",
+    "runReview": "运行审查",
+    "reviewing": "审查中...",
+    "file": "文件：",
+    "allFiles": "所有文件",
+    "provider": "提供商：{{provider}}",
+    "analyzing": "正在分析改动...",
+    "emptyHint": "点击\"运行审查\"让 AI 分析代码改动，发现 bug、安全问题和改进建议。",
+    "openRepoHint": "打开仓库以运行 AI 代码审查"
+  },
+  "chat": {
+    "title": "仓库助手",
+    "context": "上下文：{{name}}",
+    "clear": "清空",
+    "emptyHint": "向你的仓库提问任何问题",
+    "suggestion1": "最近一次提交是关于什么的？",
+    "suggestion2": "总结最近的改动",
+    "suggestion3": "有哪些分支？",
+    "inputPlaceholder": "询问关于你的仓库的问题...（回车发送，Shift+回车换行）",
+    "configureHint": "在设置中配置 AI 提供商后即可开始对话"
+  },
+  "settings": {
+    "title": "设置",
+    "saved": "已保存",
+    "save": "保存",
+    "loading": "加载设置中...",
+    "aiProvider": "AI 提供商",
+    "genParams": "生成参数",
+    "temperature": "温度：{{value}}",
+    "precise": "精确",
+    "balanced": "均衡",
+    "creative": "创意",
+    "maxTokens": "最大 Token 数：{{value}}",
+    "interface": "界面",
+    "language": "语言",
+    "fontSize": "字体大小：{{value}}px",
+    "showDiffInline": "内联显示 diff",
+    "recentRepos": "最近仓库",
+    "prompts": "AI 提示词",
+    "promptsHint": "留空则使用内置默认提示词。自定义提示词将作为系统消息发送给 AI。",
+    "promptCommit": "提交信息生成提示词",
+    "promptReview": "代码审查提示词",
+    "promptChat": "仓库问答提示词",
+    "promptReset": "重置为默认",
+    "promptUseDefault": "使用默认",
+    "promptCustomized": "已自定义",
+    "promptLoadingDefault": "加载默认提示词中...",
+    "promptExpand": "展开编辑",
+    "promptCollapse": "收起",
+    "openaiConfig": "OpenAI 配置",
+    "claudeConfig": "Claude 配置",
+    "deepseekConfig": "DeepSeek 配置",
+    "ollamaConfig": "Ollama 配置",
+    "apiKey": "API 密钥",
+    "model": "模型",
+    "baseUrl": "基础 URL",
+    "ollamaHint": "需要本地运行 Ollama。从",
+    "ollamaHintEnd": "安装"
+  },
+  "languages": {
+    "zh": "中文",
+    "en": "English"
+  }
+}
