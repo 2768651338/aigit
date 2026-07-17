@@ -89,11 +89,18 @@ pub async fn generate_commit_message(
     config: AppConfig,
 ) -> AppResult<String> {
     let repo = git::repo::open_repo(&repo_path)?;
+    // Prefer staged changes; fall back to all working-directory changes so
+    // users can generate a commit message without staging first.
     let diffs = git::diff::get_staged_diff(&repo, None)?;
+    let diffs = if diffs.is_empty() {
+        git::diff::get_workdir_diff(&repo, None)?
+    } else {
+        diffs
+    };
 
     if diffs.is_empty() {
         return Err(AppError::Ai(
-            "No staged changes to analyze. Stage some files first.".to_string(),
+            "No changes to analyze. Modify some files first.".to_string(),
         ));
     }
 

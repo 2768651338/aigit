@@ -39,6 +39,7 @@ export function CommitPanel() {
   const { config } = useSettingsStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
+  const hasChanges = fileStatuses.length > 0;
   const ahead = repoInfo?.ahead ?? 0;
   const behind = repoInfo?.behind ?? 0;
   const branch = repoInfo?.current_branch ?? "";
@@ -61,10 +62,19 @@ export function CommitPanel() {
     }
   };
 
+  // If there are working-directory changes but nothing is staged yet,
+  // auto-stage all so the user can commit without manual staging.
+  const ensureStaged = async () => {
+    if (stagedCount === 0 && hasChanges) {
+      await stageAll();
+    }
+  };
+
   const handleCommit = async () => {
     if (!message.trim()) return;
     setCommitting(true);
     try {
+      await ensureStaged();
       await commit(message);
       setMessage("");
       await refreshStatus();
@@ -98,6 +108,7 @@ export function CommitPanel() {
     setCommitAndPushing(true);
     setPushError(null);
     try {
+      await ensureStaged();
       await commit(message);
       setMessage("");
       // Push after a successful commit. If upstream is not configured,
@@ -140,7 +151,7 @@ export function CommitPanel() {
   const handleMessageKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      if (message.trim() && !busy && stagedCount > 0) {
+      if (message.trim() && !busy && hasChanges) {
         handleCommit();
       }
     }
@@ -196,9 +207,9 @@ export function CommitPanel() {
           {t("changes.noRepoTitle")}
         </div>
       )}
-      {currentPath && stagedCount === 0 && (
+      {currentPath && !hasChanges && (
         <div className="px-3 py-1.5 text-2xs text-text-muted bg-bg-elevated border-b border-border">
-          {t("fileList.noStaged")} — {t("commit.stageAll")} →
+          {t("fileList.noChanges")}
         </div>
       )}
 
@@ -218,7 +229,7 @@ export function CommitPanel() {
       <div className="flex items-center gap-2 p-3 border-t border-border">
         <button
           onClick={handleAiGenerate}
-          disabled={!currentPath || aiLoading || stagedCount === 0}
+          disabled={!currentPath || aiLoading}
           className={clsx(
             "btn-secondary",
             "border-accent/30 text-accent hover:bg-accent-glow"
@@ -268,7 +279,7 @@ export function CommitPanel() {
         {/* Commit & Push button */}
         <button
           onClick={handleCommitAndPush}
-          disabled={!message.trim() || busy || stagedCount === 0}
+          disabled={!message.trim() || busy || !hasChanges}
           className="btn-secondary"
           title={t("commit.commitAndPush")}
         >
@@ -278,7 +289,7 @@ export function CommitPanel() {
         {/* Commit-only button */}
         <button
           onClick={handleCommit}
-          disabled={!message.trim() || busy || stagedCount === 0}
+          disabled={!message.trim() || busy || !hasChanges}
           className="btn-primary"
           title={t("commit.commitShortcut")}
         >

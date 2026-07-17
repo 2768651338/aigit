@@ -1,6 +1,6 @@
 [package]
 name = "aigit"
-version = "1.0.0"
+version = "1.0.1"
 description = "AI-Driven Git Tool"
 authors = ["aigit"]
 edition = "2021"
