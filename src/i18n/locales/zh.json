@@ -39,7 +39,10 @@
     "committingAndPushing": "提交并推送中...",
     "push": "推送",
     "pushing": "推送中...",
-    "aheadHint": "领先远程 {{count}} 个提交"
+    "aheadHint": "领先远程 {{count}} 个提交",
+    "pushSuccessTitle": "推送成功",
+    "pushSuccessBody": "已将 {{branch}} 分支推送到远程仓库。",
+    "pushSuccessBodyGeneric": "推送完成。"
   },
   "fileList": {
     "noStaged": "无已暂存的改动",

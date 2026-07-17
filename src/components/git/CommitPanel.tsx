@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { formatError } from "@/utils/error";
+import { showMessage } from "@/utils/dialog";
 import {
   SparklesIcon,
   CheckIcon,
@@ -30,14 +31,13 @@ export function CommitPanel() {
     refreshStatus,
     repoInfo,
     pushing,
-    pushMessage,
-    clearPushMessage,
   } = useRepoStore();
   const { generateCommitMessage, loading: aiLoading, error: aiError, clearError: clearAiError } = useAiStore();
   const { config } = useSettingsStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
   const ahead = repoInfo?.ahead ?? 0;
+  const branch = repoInfo?.current_branch ?? "";
 
   const handleAiGenerate = async () => {
     if (!currentPath) {
@@ -71,6 +71,24 @@ export function CommitPanel() {
     }
   };
 
+  // Runs push and reports the outcome via a native modal dialog.
+  // Returns true on success, false on failure.
+  const runPushWithDialog = async (): Promise<boolean> => {
+    setPushError(null);
+    try {
+      await push(true);
+      const body = branch
+        ? t("commit.pushSuccessBody", { branch })
+        : t("commit.pushSuccessBodyGeneric");
+      await showMessage(t("commit.pushSuccessTitle"), body, "success");
+      return true;
+    } catch (e) {
+      const msg = formatError(e);
+      setPushError(msg);
+      return false;
+    }
+  };
+
   const handleCommitAndPush = async () => {
     if (!message.trim()) return;
     setCommitAndPushing(true);
@@ -80,11 +98,7 @@ export function CommitPanel() {
       setMessage("");
       // Push after a successful commit. If upstream is not configured,
       // pass set_upstream=true so the branch tracks origin on first push.
-      try {
-        await push(true);
-      } catch (e) {
-        setPushError(formatError(e));
-      }
+      await runPushWithDialog();
       await refreshStatus();
     } catch (e) {
       console.error(e);
@@ -94,12 +108,7 @@ export function CommitPanel() {
   };
 
   const handlePushOnly = async () => {
-    setPushError(null);
-    try {
-      await push(true);
-    } catch (e) {
-      setPushError(formatError(e));
-    }
+    await runPushWithDialog();
   };
 
   const handleUnstageAll = () => {
@@ -142,18 +151,7 @@ export function CommitPanel() {
         </div>
       )}
 
-      {/* Push success message */}
-      {pushMessage && !pushError && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-success/10 text-success text-2xs border-b border-success/20">
-          <CheckIcon size={14} className="shrink-0 mt-0.5" />
-          <span className="flex-1 break-words whitespace-pre-wrap">{pushMessage}</span>
-          <button onClick={clearPushMessage} className="shrink-0 hover:underline">
-            {t("changes.dismiss")}
-          </button>
-        </div>
-      )}
-
-      {/* Push error display */}
+      {/* Push error display (kept inline so users can read full git stderr) */}
       {pushError && (
         <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 text-danger text-2xs border-b border-danger/20">
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />

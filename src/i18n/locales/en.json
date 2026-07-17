@@ -39,7 +39,10 @@
     "committingAndPushing": "Committing & Pushing...",
     "push": "Push",
     "pushing": "Pushing...",
-    "aheadHint": "{{count}} commit(s) ahead of remote"
+    "aheadHint": "{{count}} commit(s) ahead of remote",
+    "pushSuccessTitle": "Push Succeeded",
+    "pushSuccessBody": "Branch {{branch}} has been pushed to the remote.",
+    "pushSuccessBodyGeneric": "Push complete."
   },
   "fileList": {
     "noStaged": "No staged changes",

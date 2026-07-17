@@ -21,7 +21,6 @@ interface RepoState {
   log: LogEntry[];
   loading: boolean;
   error: string | null;
-  pushMessage: string | null;
   pushing: boolean;
 
   openRepo: (path: string) => Promise<void>;
@@ -38,7 +37,6 @@ interface RepoState {
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   clearError: () => void;
-  clearPushMessage: () => void;
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
@@ -52,7 +50,6 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   log: [],
   loading: false,
   error: null,
-  pushMessage: null,
   pushing: false,
 
   openRepo: async (path: string) => {
@@ -158,10 +155,9 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   push: async (setUpstream?: boolean) => {
     const { currentPath } = get();
     if (!currentPath) throw new Error("No repository open");
-    set({ pushing: true, pushMessage: null, error: null });
+    set({ pushing: true, error: null });
     try {
       const result = await gitService.push(currentPath, setUpstream);
-      set({ pushMessage: result || "推送成功" });
       // Refresh repo info to update ahead/behind counters.
       try {
         const info = await gitService.getRepoInfo(currentPath);
@@ -172,7 +168,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       return result;
     } catch (e) {
       const msg = formatError(e);
-      set({ error: msg, pushMessage: null });
+      set({ error: msg });
       throw e;
     } finally {
       set({ pushing: false });
@@ -239,5 +235,4 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   },
 
   clearError: () => set({ error: null }),
-  clearPushMessage: () => set({ pushMessage: null }),
 }));
