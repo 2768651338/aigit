@@ -2,20 +2,42 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
-import { SparklesIcon, CheckIcon, PlusIcon, MinusIcon, AlertCircleIcon } from "@/components/common/Icons";
+import { formatError } from "@/utils/error";
+import {
+  SparklesIcon,
+  CheckIcon,
+  PlusIcon,
+  MinusIcon,
+  AlertCircleIcon,
+  SendIcon,
+} from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function CommitPanel() {
   const { t } = useTranslation();
   const [message, setMessage] = useState("");
   const [committing, setCommitting] = useState(false);
+  const [commitAndPushing, setCommitAndPushing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
-  const { currentPath, fileStatuses, stageAll, unstageFiles, commit, refreshStatus } =
-    useRepoStore();
+  const {
+    currentPath,
+    fileStatuses,
+    stageAll,
+    unstageFiles,
+    commit,
+    push,
+    refreshStatus,
+    repoInfo,
+    pushing,
+    pushMessage,
+    clearPushMessage,
+  } = useRepoStore();
   const { generateCommitMessage, loading: aiLoading, error: aiError, clearError: clearAiError } = useAiStore();
   const { config } = useSettingsStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
+  const ahead = repoInfo?.ahead ?? 0;
 
   const handleAiGenerate = async () => {
     if (!currentPath) {
@@ -31,7 +53,6 @@ export function CommitPanel() {
       const msg = await generateCommitMessage(currentPath, config);
       setMessage(msg);
     } catch (e) {
-      // error is already stored in aiStore.error and rendered below
       console.error("[aigit] AI Generate failed in panel:", e);
     }
   };
@@ -50,12 +71,45 @@ export function CommitPanel() {
     }
   };
 
+  const handleCommitAndPush = async () => {
+    if (!message.trim()) return;
+    setCommitAndPushing(true);
+    setPushError(null);
+    try {
+      await commit(message);
+      setMessage("");
+      // Push after a successful commit. If upstream is not configured,
+      // pass set_upstream=true so the branch tracks origin on first push.
+      try {
+        await push(true);
+      } catch (e) {
+        setPushError(formatError(e));
+      }
+      await refreshStatus();
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setCommitAndPushing(false);
+    }
+  };
+
+  const handlePushOnly = async () => {
+    setPushError(null);
+    try {
+      await push(true);
+    } catch (e) {
+      setPushError(formatError(e));
+    }
+  };
+
   const handleUnstageAll = () => {
     const stagedFiles = fileStatuses.filter((f) => f.staged).map((f) => f.path);
     if (stagedFiles.length > 0) {
       unstageFiles(stagedFiles);
     }
   };
+
+  const busy = committing || commitAndPushing || pushing;
 
   return (
     <div className="flex flex-col h-full">
@@ -83,6 +137,28 @@ export function CommitPanel() {
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
           <span className="flex-1 break-words">{aiError}</span>
           <button onClick={clearAiError} className="shrink-0 hover:underline">
+            {t("changes.dismiss")}
+          </button>
+        </div>
+      )}
+
+      {/* Push success message */}
+      {pushMessage && !pushError && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-success/10 text-success text-2xs border-b border-success/20">
+          <CheckIcon size={14} className="shrink-0 mt-0.5" />
+          <span className="flex-1 break-words whitespace-pre-wrap">{pushMessage}</span>
+          <button onClick={clearPushMessage} className="shrink-0 hover:underline">
+            {t("changes.dismiss")}
+          </button>
+        </div>
+      )}
+
+      {/* Push error display */}
+      {pushError && (
+        <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 text-danger text-2xs border-b border-danger/20">
+          <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
+          <span className="flex-1 break-words whitespace-pre-wrap">{pushError}</span>
+          <button onClick={() => setPushError(null)} className="shrink-0 hover:underline">
             {t("changes.dismiss")}
           </button>
         </div>
@@ -125,12 +201,40 @@ export function CommitPanel() {
           {aiLoading ? t("commit.generating") : t("commit.aiGenerate")}
         </button>
         <div className="flex-1" />
+        {ahead > 0 && (
+          <span className="text-2xs text-accent" title={t("commit.aheadHint", { count: ahead })}>
+            ↑{ahead}
+          </span>
+        )}
         <span className="text-2xs text-text-muted">
           {t("commit.stagedCount", { count: stagedCount })}
         </span>
+        {/* Push-only button (visible when there are unpushed commits) */}
+        {ahead > 0 && (
+          <button
+            onClick={handlePushOnly}
+            disabled={busy}
+            className="btn-secondary"
+            title={t("commit.push")}
+          >
+            <SendIcon size={14} />
+            {pushing ? t("commit.pushing") : t("commit.push")}
+          </button>
+        )}
+        {/* Commit & Push button */}
+        <button
+          onClick={handleCommitAndPush}
+          disabled={!message.trim() || busy || stagedCount === 0}
+          className="btn-secondary"
+          title={t("commit.commitAndPush")}
+        >
+          <SendIcon size={14} />
+          {commitAndPushing ? t("commit.committingAndPushing") : t("commit.commitAndPush")}
+        </button>
+        {/* Commit-only button */}
         <button
           onClick={handleCommit}
-          disabled={!message.trim() || committing || stagedCount === 0}
+          disabled={!message.trim() || busy || stagedCount === 0}
           className="btn-primary"
         >
           <CheckIcon size={14} />

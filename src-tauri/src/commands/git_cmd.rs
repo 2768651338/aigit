@@ -105,3 +105,9 @@ pub fn get_commit_diff(path: String, hash: String) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
     git::branch::get_commit_diff(&repo, &hash)
 }
+
+#[tauri::command]
+pub fn push(path: String, set_upstream: Option<bool>) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::push_current_branch(&repo, set_upstream.unwrap_or(false))
+}

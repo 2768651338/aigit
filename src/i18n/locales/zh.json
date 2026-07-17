@@ -34,7 +34,12 @@
     "generating": "生成中...",
     "commit": "提交",
     "committing": "提交中...",
-    "stagedCount": "{{count}} 已暂存"
+    "stagedCount": "{{count}} 已暂存",
+    "commitAndPush": "提交并推送",
+    "committingAndPushing": "提交并推送中...",
+    "push": "推送",
+    "pushing": "推送中...",
+    "aheadHint": "领先远程 {{count}} 个提交"
   },
   "fileList": {
     "noStaged": "无已暂存的改动",

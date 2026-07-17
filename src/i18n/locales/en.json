@@ -34,7 +34,12 @@
     "generating": "Generating...",
     "commit": "Commit",
     "committing": "Committing...",
-    "stagedCount": "{{count}} staged"
+    "stagedCount": "{{count}} staged",
+    "commitAndPush": "Commit & Push",
+    "committingAndPushing": "Committing & Pushing...",
+    "push": "Push",
+    "pushing": "Pushing...",
+    "aheadHint": "{{count}} commit(s) ahead of remote"
   },
   "fileList": {
     "noStaged": "No staged changes",

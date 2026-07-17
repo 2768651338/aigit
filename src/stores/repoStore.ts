@@ -8,6 +8,7 @@ import type {
 } from "@/types";
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
+import { formatError } from "@/utils/error";
 
 interface RepoState {
   currentPath: string | null;
@@ -20,6 +21,8 @@ interface RepoState {
   log: LogEntry[];
   loading: boolean;
   error: string | null;
+  pushMessage: string | null;
+  pushing: boolean;
 
   openRepo: (path: string) => Promise<void>;
   refreshStatus: () => Promise<void>;
@@ -28,12 +31,14 @@ interface RepoState {
   unstageFiles: (files: string[]) => Promise<void>;
   stageAll: () => Promise<void>;
   commit: (message: string) => Promise<string>;
+  push: (setUpstream?: boolean) => Promise<string>;
   refreshBranches: () => Promise<void>;
   refreshLog: () => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   clearError: () => void;
+  clearPushMessage: () => void;
 }
 
 export const useRepoStore = create<RepoState>((set, get) => ({
@@ -47,6 +52,8 @@ export const useRepoStore = create<RepoState>((set, get) => ({
   log: [],
   loading: false,
   error: null,
+  pushMessage: null,
+  pushing: false,
 
   openRepo: async (path: string) => {
     set({ loading: true, error: null });
@@ -58,7 +65,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       await get().refreshBranches();
       await get().refreshLog();
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     } finally {
       set({ loading: false });
     }
@@ -71,7 +78,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       const statuses = await gitService.getStatus(currentPath);
       set({ fileStatuses: statuses });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -89,7 +96,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       ]);
       set({ workdirDiff: workdir, stagedDiff: staged });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -104,7 +111,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         await get().selectFile(selectedFile);
       }
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -119,7 +126,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
         await get().selectFile(selectedFile);
       }
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -130,7 +137,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       await gitService.stageAll(currentPath);
       await get().refreshStatus();
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -143,8 +150,32 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       await get().refreshLog();
       return hash;
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
       throw e;
+    }
+  },
+
+  push: async (setUpstream?: boolean) => {
+    const { currentPath } = get();
+    if (!currentPath) throw new Error("No repository open");
+    set({ pushing: true, pushMessage: null, error: null });
+    try {
+      const result = await gitService.push(currentPath, setUpstream);
+      set({ pushMessage: result || "推送成功" });
+      // Refresh repo info to update ahead/behind counters.
+      try {
+        const info = await gitService.getRepoInfo(currentPath);
+        set({ repoInfo: info });
+      } catch {
+        // ignore — push itself succeeded
+      }
+      return result;
+    } catch (e) {
+      const msg = formatError(e);
+      set({ error: msg, pushMessage: null });
+      throw e;
+    } finally {
+      set({ pushing: false });
     }
   },
 
@@ -155,7 +186,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       const branches = await gitService.listBranches(currentPath);
       set({ branches });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -166,7 +197,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       const log = await gitService.getLog(currentPath, 100);
       set({ log });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -181,7 +212,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       const info = await gitService.getRepoInfo(currentPath);
       set({ repoInfo: info });
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -192,7 +223,7 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       await gitService.createBranch(currentPath, name);
       await get().refreshBranches();
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
@@ -203,9 +234,10 @@ export const useRepoStore = create<RepoState>((set, get) => ({
       await gitService.deleteBranch(currentPath, name);
       await get().refreshBranches();
     } catch (e) {
-      set({ error: String(e) });
+      set({ error: formatError(e) });
     }
   },
 
   clearError: () => set({ error: null }),
+  clearPushMessage: () => set({ pushMessage: null }),
 }));

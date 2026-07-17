@@ -34,6 +34,7 @@ pub fn run() {
             git_cmd::delete_branch,
             git_cmd::get_log,
             git_cmd::get_commit_diff,
+            git_cmd::push,
             // AI commands
             ai_cmd::generate_commit_message,
             ai_cmd::review_code,

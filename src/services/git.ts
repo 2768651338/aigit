@@ -106,4 +106,9 @@ export const gitService = {
     ensureTauri();
     return invoke<string>("get_commit_diff", { path, hash });
   },
+
+  push: (path: string, setUpstream?: boolean) => {
+    ensureTauri();
+    return invoke<string>("push", { path, setUpstream });
+  },
 };
