@@ -6,10 +6,17 @@
     "chat": "AI Chat",
     "settings": "Settings"
   },
+  "common": {
+    "ok": "OK",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss"
+  },
   "sidebar": {
     "openRepo": "Open repository",
     "detached": "detached",
-    "notSet": "not set"
+    "notSet": "not set",
+    "shortcutPrefix": "⌘",
+    "changesCount": "{{count}} changes"
   },
   "tabs": {
     "close": "Close tab",
@@ -24,17 +31,19 @@
     "committingAndPushing": "Committing & pushing...",
     "pushing": "Pushing...",
     "pulling": "Pulling...",
-    "aiWorking": "AI working..."
+    "aiWorking": "AI working...",
+    "detachedHead": "HEAD"
   },
   "changes": {
     "title": "Changes",
     "refresh": "Refresh",
-    "dismiss": "dismiss",
+    "dismiss": "Dismiss",
+    "openRepo": "Open repository",
     "stagedChanges": "Staged Changes",
     "changes": "Changes",
     "selectFile": "Select a file",
     "noRepoTitle": "No Repository Open",
-    "noRepoDesc": "Click \"Open repository\" in the sidebar to select a Git repository, or use the folder icon to start working."
+    "noRepoDesc": "Select a Git repository to start, or use the + button in the top tab bar to open one."
   },
   "commit": {
     "stageAll": "Stage all",
@@ -70,11 +79,16 @@
   "fileList": {
     "noStaged": "No staged changes",
     "noChanges": "No changes",
+    "stage": "Stage {{file}}",
+    "unstage": "Unstage {{file}}",
     "discard": "Discard changes",
     "discardTitle": "Discard changes?",
     "discardConfirm": "Discard unstaged changes in {{file}}? This cannot be undone.",
     "discarded": "Discarded changes in {{file}}",
     "discardFailed": "Failed to discard changes"
+  },
+  "diff": {
+    "noChanges": "No changes to display"
   },
   "branches": {
     "title": "Branches",
@@ -91,7 +105,8 @@
     "switched": "Switched to branch {{name}}",
     "switchFailed": "Failed to switch branch",
     "branchDeleted": "Deleted branch {{name}}",
-    "branchDeleteFailed": "Failed to delete branch"
+    "branchDeleteFailed": "Failed to delete branch",
+    "deleteAria": "Delete branch {{name}}"
   },
   "review": {
     "title": "AI Code Review",
@@ -120,7 +135,9 @@
     "configureHint": "Configure an AI provider in Settings to start chatting",
     "openRepoHint": "Open a repository from the tab bar first",
     "thinking": "Thinking...",
-    "errorTitle": "Chat error"
+    "errorTitle": "Chat error",
+    "copy": "Copy",
+    "send": "Send"
   },
   "settings": {
     "title": "Settings",

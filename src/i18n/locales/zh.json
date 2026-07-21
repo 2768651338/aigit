@@ -6,10 +6,17 @@
     "chat": "AI 对话",
     "settings": "设置"
   },
+  "common": {
+    "ok": "确定",
+    "cancel": "取消",
+    "dismiss": "关闭"
+  },
   "sidebar": {
     "openRepo": "打开仓库",
     "detached": "分离头指针",
-    "notSet": "未配置"
+    "notSet": "未配置",
+    "shortcutPrefix": "⌘",
+    "changesCount": "{{count}} 个改动"
   },
   "tabs": {
     "close": "关闭标签",
@@ -24,17 +31,19 @@
     "committingAndPushing": "提交并推送中...",
     "pushing": "推送中...",
     "pulling": "拉取中...",
-    "aiWorking": "AI 处理中..."
+    "aiWorking": "AI 处理中...",
+    "detachedHead": "HEAD"
   },
   "changes": {
     "title": "改动",
     "refresh": "刷新",
     "dismiss": "忽略",
+    "openRepo": "打开仓库",
     "stagedChanges": "已暂存的改动",
     "changes": "改动",
     "selectFile": "选择一个文件",
     "noRepoTitle": "未打开仓库",
-    "noRepoDesc": "点击侧边栏的\"打开仓库\"选择一个 Git 仓库，或使用文件夹图标开始工作。"
+    "noRepoDesc": "选择一个 Git 仓库开始工作，或使用顶部标签栏的 + 按钮打开新仓库。"
   },
   "commit": {
     "stageAll": "全部暂存",
@@ -70,11 +79,16 @@
   "fileList": {
     "noStaged": "无已暂存的改动",
     "noChanges": "无改动",
+    "stage": "暂存 {{file}}",
+    "unstage": "取消暂存 {{file}}",
     "discard": "丢弃修改",
     "discardTitle": "丢弃修改确认",
     "discardConfirm": "确定要丢弃 {{file}} 的未暂存修改吗？此操作不可恢复。",
     "discarded": "已丢弃 {{file}} 的修改",
     "discardFailed": "丢弃修改失败"
+  },
+  "diff": {
+    "noChanges": "无可显示的改动"
   },
   "branches": {
     "title": "分支",
@@ -91,7 +105,8 @@
     "switched": "已切换到分支 {{name}}",
     "switchFailed": "切换分支失败",
     "branchDeleted": "已删除分支 {{name}}",
-    "branchDeleteFailed": "删除分支失败"
+    "branchDeleteFailed": "删除分支失败",
+    "deleteAria": "删除分支 {{name}}"
   },
   "review": {
     "title": "AI 代码审查",
@@ -120,7 +135,9 @@
     "configureHint": "在设置中配置 AI 提供商后即可开始对话",
     "openRepoHint": "请先在顶部标签栏打开一个仓库",
     "thinking": "思考中...",
-    "errorTitle": "AI 对话出错"
+    "errorTitle": "AI 对话出错",
+    "copy": "复制",
+    "send": "发送"
   },
   "settings": {
     "title": "设置",

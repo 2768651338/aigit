@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { TabBar } from "@/components/layout/TabBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
 import { ReviewView } from "@/pages/ReviewView";
@@ -41,6 +42,35 @@ export default function App() {
     }
   }, [config, i18n]);
 
+  // Global keyboard shortcuts:
+  //   Cmd/Ctrl + 1..5  — switch views (changes/branches/review/chat/settings)
+  //   Cmd/Ctrl + R     — refresh current repo status
+  // Ignore when the user is typing in an input/textarea/select or using
+  // modifier combos we don't handle (e.g. Cmd/Ctrl+Shift+R devtools reload).
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (!mod || e.altKey || e.shiftKey) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      if (e.key >= "1" && e.key <= "5") {
+        const views: ViewType[] = ["changes", "branches", "review", "chat", "settings"];
+        const idx = Number(e.key) - 1;
+        if (idx < views.length) {
+          e.preventDefault();
+          setActiveView(views[idx]);
+        }
+      } else if (e.key === "r" || e.key === "R") {
+        e.preventDefault();
+        useRepoStore.getState().refreshStatus();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   // Restore the set of open tabs from the previous session.
   // Falls back to recent_repos[0] for older configs that predate open_repos.
   useEffect(() => {
@@ -72,22 +102,26 @@ export default function App() {
   }, [config, openRepo, setActiveRepo]);
 
   return (
-    <div className="flex flex-col h-screen bg-bg-base text-text-primary">
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar activeView={activeView} onViewChange={setActiveView} />
-        <main className="flex-1 flex flex-col overflow-hidden">
-          <TabBar />
-          <div className="flex-1 overflow-hidden">
-            {activeView === "changes" && <ChangesView />}
-            {activeView === "branches" && <BranchesView />}
-            {activeView === "review" && <ReviewView />}
-            {activeView === "chat" && <ChatView />}
-            {activeView === "settings" && <SettingsView />}
-          </div>
-        </main>
+    <ErrorBoundary>
+      <div className="flex flex-col h-screen bg-bg-base text-text-primary">
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar activeView={activeView} onViewChange={setActiveView} />
+          <main className="flex-1 flex flex-col overflow-hidden">
+            <TabBar />
+            <div className="flex-1 overflow-hidden">
+              <ErrorBoundary>
+                {activeView === "changes" && <ChangesView />}
+                {activeView === "branches" && <BranchesView />}
+                {activeView === "review" && <ReviewView />}
+                {activeView === "chat" && <ChatView />}
+                {activeView === "settings" && <SettingsView />}
+              </ErrorBoundary>
+            </div>
+          </main>
+        </div>
+        <StatusBar />
+        <Toaster />
       </div>
-      <StatusBar />
-      <Toaster />
-    </div>
+    </ErrorBoundary>
   );
 }

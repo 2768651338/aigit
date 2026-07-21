@@ -1,5 +1,6 @@
 import { message as tauriMessage, confirm as tauriConfirm } from "@tauri-apps/plugin-dialog";
 import { isTauriEnv } from "./env";
+import i18n from "@/i18n";
 
 export type DialogKind = "info" | "success" | "warning" | "error";
 
@@ -60,8 +61,8 @@ export async function confirmDialog(
       const confirmed = await tauriConfirm(message, {
         title,
         kind: toTauriKind(kind),
-        okLabel: "确定",
-        cancelLabel: "取消",
+        okLabel: i18n.t("common.ok"),
+        cancelLabel: i18n.t("common.cancel"),
       });
       return confirmed;
     } catch (e) {

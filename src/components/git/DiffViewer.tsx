@@ -1,4 +1,5 @@
 import type { FileDiff } from "@/types";
+import { useTranslation } from "react-i18next";
 import clsx from "clsx";
 
 interface DiffViewerProps {
@@ -7,16 +8,17 @@ interface DiffViewerProps {
 }
 
 export function DiffViewer({ diffs, className }: DiffViewerProps) {
+  const { t } = useTranslation();
   if (diffs.length === 0) {
     return (
       <div className={clsx("flex items-center justify-center text-text-muted text-sm", className)}>
-        <span>No changes to display</span>
+        <span>{t("diff.noChanges")}</span>
       </div>
     );
   }
 
   return (
-    <div className={clsx("overflow-auto font-mono text-xs", className)}>
+    <div className={clsx("overflow-auto font-mono text-xs select-text", className)}>
       {diffs.map((diff) => (
         <div key={diff.path} className="mb-4">
           <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1.5 bg-bg-elevated border-b border-border">

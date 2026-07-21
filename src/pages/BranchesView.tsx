@@ -10,6 +10,7 @@ import {
   RefreshIcon,
   TrashIcon,
   CheckIcon,
+  SpinnerIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
 
@@ -19,6 +20,7 @@ export function BranchesView() {
     currentPath,
     branches,
     refreshBranches,
+    refreshing,
     createBranch,
     switchBranch,
     deleteBranch,
@@ -84,11 +86,18 @@ export function BranchesView() {
             onClick={() => setShowNewBranch(!showNewBranch)}
             className="btn-ghost"
             title={t("branches.newBranch")}
+            aria-label={t("branches.newBranch")}
           >
             <PlusIcon size={16} />
           </button>
-          <button onClick={refreshBranches} className="btn-ghost" title={t("changes.refresh")}>
-            <RefreshIcon size={16} />
+          <button
+            onClick={() => refreshBranches()}
+            disabled={refreshing}
+            className="btn-ghost"
+            title={t("changes.refresh")}
+            aria-label={t("changes.refresh")}
+          >
+            {refreshing ? <SpinnerIcon size={16} /> : <RefreshIcon size={16} />}
           </button>
         </div>
 
@@ -103,7 +112,11 @@ export function BranchesView() {
               className="input text-sm py-1.5"
               autoFocus
             />
-            <button onClick={handleCreate} className="btn-primary px-2.5 py-1.5">
+            <button
+              onClick={handleCreate}
+              className="btn-primary px-2.5 py-1.5"
+              aria-label={t("branches.newBranch")}
+            >
               <CheckIcon size={14} />
             </button>
           </div>
@@ -118,10 +131,19 @@ export function BranchesView() {
               <div
                 key={branch.name}
                 className={clsx(
-                  "flex items-center gap-2 px-3 py-2 rounded cursor-pointer group",
+                  "flex items-center gap-2 px-3 py-2 rounded cursor-pointer group focus:outline-none",
                   branch.is_current ? "bg-bg-hover" : "hover:bg-bg-hover"
                 )}
                 onClick={() => !branch.is_current && handleSwitch(branch.name)}
+                onKeyDown={(e) => {
+                  if ((e.key === "Enter" || e.key === " ") && !branch.is_current) {
+                    e.preventDefault();
+                    handleSwitch(branch.name);
+                  }
+                }}
+                role="button"
+                tabIndex={0}
+                aria-current={branch.is_current ? "page" : undefined}
               >
                 <GitBranchIcon
                   size={16}
@@ -141,7 +163,8 @@ export function BranchesView() {
                       e.stopPropagation();
                       handleDelete(branch.name);
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger transition-opacity"
+                    className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-muted hover:text-danger transition-opacity"
+                    aria-label={t("branches.deleteAria", { name: branch.name })}
                   >
                     <TrashIcon size={14} />
                   </button>

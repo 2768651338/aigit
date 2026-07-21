@@ -20,12 +20,13 @@ const NAV_ITEMS: {
   id: ViewType;
   labelKey: string;
   icon: React.ComponentType<{ size?: number; className?: string }>;
+  shortcut: string;
 }[] = [
-  { id: "changes", labelKey: "nav.changes", icon: FileEditIcon },
-  { id: "branches", labelKey: "nav.branches", icon: GitBranchIcon },
-  { id: "review", labelKey: "nav.review", icon: ScanSearchIcon },
-  { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon },
-  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon },
+  { id: "changes", labelKey: "nav.changes", icon: FileEditIcon, shortcut: "1" },
+  { id: "branches", labelKey: "nav.branches", icon: GitBranchIcon, shortcut: "2" },
+  { id: "review", labelKey: "nav.review", icon: ScanSearchIcon, shortcut: "3" },
+  { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon, shortcut: "4" },
+  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "5" },
 ];
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {
@@ -42,14 +43,17 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 px-3 py-3 space-y-1">
+      <nav className="flex-1 px-3 py-3 space-y-1" aria-label="Main navigation">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = activeView === item.id;
           return (
             <button
               key={item.id}
+              type="button"
               onClick={() => onViewChange(item.id)}
+              aria-current={isActive ? "page" : undefined}
+              title={`${t(item.labelKey)} (${t("sidebar.shortcutPrefix")}${item.shortcut})`}
               className={clsx(
                 "w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-colors",
                 isActive
@@ -60,7 +64,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               <Icon size={18} />
               <span className="flex-1 text-left">{t(item.labelKey)}</span>
               {item.id === "changes" && changedCount > 0 && (
-                <span className="text-xs px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary">
+                <span
+                  className="text-xs px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary"
+                  aria-label={t("sidebar.changesCount", { count: changedCount })}
+                >
                   {changedCount}
                 </span>
               )}

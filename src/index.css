@@ -24,7 +24,22 @@
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* Default: no text selection for app-shell UI feel. Content regions
+       (chat messages, diffs, review results, logs) opt back in via
+       the `select-text` utility so users can copy meaningful content. */
     user-select: none;
+  }
+
+  /* Keyboard focus indicator — visible only for keyboard navigation,
+     not for mouse clicks. Uses the accent color for strong contrast. */
+  :focus-visible {
+    outline: 2px solid #d4ff3a;
+    outline-offset: 2px;
+    border-radius: 2px;
+  }
+  /* Remove default outline only when our custom focus-visible is shown. */
+  :focus:not(:focus-visible) {
+    outline: none;
   }
 
   /* Custom scrollbar */

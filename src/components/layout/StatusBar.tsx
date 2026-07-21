@@ -43,7 +43,7 @@ export function StatusBar() {
         <div className="flex items-center gap-1.5">
           <GitBranchIcon size={13} className="text-text-secondary" />
           <span className="font-medium text-text-primary">
-            {repoInfo.current_branch ?? "HEAD"}
+            {repoInfo.current_branch ?? t("statusBar.detachedHead")}
           </span>
           {(repoInfo.ahead > 0 || repoInfo.behind > 0) && (
             <span className="flex items-center gap-1 ml-1">

@@ -7,7 +7,34 @@ import {
   SendIcon,
   TrashIcon,
   SpinnerIcon,
+  CopyIcon,
+  CheckIcon,
 } from "@/components/common/Icons";
+
+function CopyButton({ content }: { content: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // ignore clipboard errors
+    }
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      aria-label={t("chat.copy")}
+      className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1 rounded hover:bg-bg-hover"
+    >
+      {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+    </button>
+  );
+}
 
 export function ChatView() {
   const { t } = useTranslation();
@@ -103,7 +130,7 @@ export function ChatView() {
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2.5 ${
+              className={`group max-w-[80%] rounded-lg px-4 py-2.5 ${
                 msg.role === "user"
                   ? "bg-bg-elevated border border-border"
                   : "bg-bg-surface border border-border"
@@ -112,7 +139,12 @@ export function ChatView() {
               {msg.role === "user" ? (
                 <p className="text-sm text-text-primary whitespace-pre-wrap">{msg.content}</p>
               ) : (
-                <MarkdownRenderer content={msg.content} />
+                <>
+                  <MarkdownRenderer content={msg.content} />
+                  <div className="flex justify-end mt-1 -mb-1">
+                    <CopyButton content={msg.content} />
+                  </div>
+                </>
               )}
             </div>
           </div>
@@ -144,6 +176,7 @@ export function ChatView() {
             onClick={handleSend}
             disabled={!input.trim() || loading || !config || !currentPath}
             className="btn-primary shrink-0"
+            aria-label={t("chat.send")}
           >
             {loading ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
           </button>

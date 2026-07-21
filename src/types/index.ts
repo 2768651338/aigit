@@ -139,6 +139,8 @@ export interface RepoTabState {
   /** Transient commit/push operation flags. */
   committing: boolean;
   commitAndPushing: boolean;
+  /** True while a refresh (status/branches/log) is in-flight — guards against concurrent refreshes. */
+  refreshing: boolean;
   /** Error surfaced by the last push/pull operation (cleared on retry). */
   pushError: string | null;
   /** Error surfaced by the last AI generate operation. */

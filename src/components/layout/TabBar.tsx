@@ -60,7 +60,7 @@ export function TabBar() {
   }
 
   return (
-    <div className="flex items-stretch h-10 bg-bg-surface border-b border-border overflow-x-auto">
+    <div className="flex items-stretch h-10 bg-bg-surface border-b border-border overflow-x-auto" role="tablist">
       <div className="flex items-stretch">
         {tabOrder.map((path) => {
           const tab = tabs[path];
@@ -71,8 +71,17 @@ export function TabBar() {
             <div
               key={path}
               onClick={() => setActiveRepo(path)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveRepo(path);
+                }
+              }}
+              role="tab"
+              tabIndex={0}
+              aria-selected={isActive}
               className={clsx(
-                "group flex items-center gap-2 pl-3.5 pr-2 cursor-pointer border-r border-border text-sm transition-colors min-w-0",
+                "group flex items-center gap-2 pl-3.5 pr-2 cursor-pointer border-r border-border text-sm transition-colors min-w-0 focus:outline-none",
                 isActive
                   ? "bg-bg-base text-text-primary"
                   : "text-text-secondary hover:bg-bg-hover hover:text-text-primary"
@@ -89,10 +98,10 @@ export function TabBar() {
                 onClick={(e) => handleClose(path, e)}
                 className={clsx(
                   "shrink-0 p-1 rounded hover:bg-bg-elevated hover:text-danger transition-colors",
-                  isActive ? "text-text-muted" : "text-text-muted opacity-0 group-hover:opacity-100"
+                  isActive ? "text-text-muted" : "text-text-muted opacity-0 group-hover:opacity-100 focus:opacity-100"
                 )}
                 title={t("tabs.close")}
-                aria-label={t("tabs.close")}
+                aria-label={t("tabs.close", { name: label })}
               >
                 <XIcon size={12} />
               </button>

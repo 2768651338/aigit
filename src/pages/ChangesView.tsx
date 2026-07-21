@@ -3,8 +3,12 @@ import { useTranslation } from "react-i18next";
 import { FileStatusList } from "@/components/git/FileStatusList";
 import { DiffViewer } from "@/components/git/DiffViewer";
 import { CommitPanel } from "@/components/git/CommitPanel";
-import { RefreshIcon, AlertCircleIcon } from "@/components/common/Icons";
-import { useEffect } from "react";
+import { RefreshIcon, AlertCircleIcon, SpinnerIcon, FolderIcon } from "@/components/common/Icons";
+import { useEffect, useState } from "react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { gitService } from "@/services/git";
+import { formatError } from "@/utils/error";
+import { useToastStore } from "@/stores/toastStore";
 
 export function ChangesView() {
   const { t } = useTranslation();
@@ -14,6 +18,7 @@ export function ChangesView() {
     workdirDiff,
     stagedDiff,
     refreshStatus,
+    refreshing,
     error,
     clearError,
   } = useRepoStore();
@@ -47,8 +52,13 @@ export function ChangesView() {
       <div className="flex items-center px-5 h-12 border-b border-border">
         <h2 className="text-base font-semibold">{t("changes.title")}</h2>
         <div className="flex-1" />
-        <button onClick={refreshStatus} className="btn-ghost">
-          <RefreshIcon size={16} />
+        <button
+          onClick={() => refreshStatus()}
+          disabled={refreshing}
+          className="btn-ghost"
+          aria-label={t("changes.refresh")}
+        >
+          {refreshing ? <SpinnerIcon size={16} /> : <RefreshIcon size={16} />}
           {t("changes.refresh")}
         </button>
       </div>
@@ -97,18 +107,39 @@ export function ChangesView() {
 
 function NoRepoOpen() {
   const { t } = useTranslation();
+  const openRepo = useRepoStore((s) => s.openRepo);
+  const toast = useToastStore();
+  const [opening, setOpening] = useState(false);
+
+  const handleOpen = async () => {
+    if (opening) return;
+    setOpening(true);
+    try {
+      const selected = await open({ directory: true, multiple: false });
+      if (!selected || typeof selected !== "string") return;
+      const repoPath = await gitService.discoverRepo(selected);
+      await openRepo(repoPath);
+    } catch (e) {
+      console.error("[aigit] Open repo failed:", e);
+      toast.error(formatError(e), t("tabs.openFailed"));
+    } finally {
+      setOpening(false);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
       <div className="w-16 h-16 rounded-2xl bg-bg-surface border border-border flex items-center justify-center mb-4">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-text-muted">
-          <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" strokeLinecap="round" strokeLinejoin="round" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
+        <FolderIcon size={32} className="text-text-muted" />
       </div>
       <h2 className="text-lg font-semibold text-text-primary mb-1">{t("changes.noRepoTitle")}</h2>
-      <p className="text-sm text-text-secondary max-w-sm">
+      <p className="text-sm text-text-secondary max-w-sm mb-5">
         {t("changes.noRepoDesc")}
       </p>
+      <button onClick={handleOpen} disabled={opening} className="btn-primary">
+        {opening ? <SpinnerIcon size={14} /> : <FolderIcon size={14} />}
+        {t("changes.openRepo")}
+      </button>
     </div>
   );
 }

@@ -77,8 +77,16 @@ export function FileStatusList({ staged }: FileStatusListProps) {
         <div
           key={`${file.path}-${file.staged}`}
           onClick={() => selectFile(file.path)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              selectFile(file.path);
+            }
+          }}
+          role="button"
+          tabIndex={0}
           className={clsx(
-            "flex items-center gap-2.5 px-2.5 py-2 rounded cursor-pointer transition-colors group",
+            "flex items-center gap-2.5 px-2.5 py-2 rounded cursor-pointer transition-colors group focus:outline-none",
             selectedFile === file.path
               ? "bg-bg-hover"
               : "hover:bg-bg-hover"
@@ -89,6 +97,7 @@ export function FileStatusList({ staged }: FileStatusListProps) {
               e.stopPropagation();
               handleToggle(file);
             }}
+            aria-label={staged ? t("fileList.unstage", { file: file.path }) : t("fileList.stage", { file: file.path })}
             className="shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-muted hover:text-text-primary"
           >
             {staged ? <MinusIcon size={14} /> : <PlusIcon size={14} />}
@@ -111,7 +120,8 @@ export function FileStatusList({ staged }: FileStatusListProps) {
           {!staged && file.status !== "untracked" && (
             <button
               onClick={(e) => handleDiscard(file, e)}
-              className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+              aria-label={t("fileList.discard")}
+              className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
               title={t("fileList.discard")}
             >
               <UndoIcon size={14} />

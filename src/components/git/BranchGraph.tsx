@@ -4,7 +4,7 @@ import { useRepoStore } from "@/stores/repoStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import type { LogEntry } from "@/types";
-import { GitBranchIcon, AlertCircleIcon, SpinnerIcon } from "@/components/common/Icons";
+import { GitBranchIcon, AlertCircleIcon, SpinnerIcon, XIcon } from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function BranchGraph() {
@@ -163,8 +163,9 @@ export function BranchGraph() {
               }}
               className="btn-ghost text-xs"
               title={t("changes.dismiss")}
+              aria-label={t("changes.dismiss")}
             >
-              ✕
+              <XIcon size={14} />
             </button>
           </div>
 
@@ -189,7 +190,7 @@ export function BranchGraph() {
               </div>
             )}
             {!loading && !error && diffText && (
-              <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed">
+              <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed select-text">
                 {colorizePatch(diffText)}
               </pre>
             )}

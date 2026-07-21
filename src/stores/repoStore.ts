@@ -31,6 +31,7 @@ interface ActiveTabProjection {
   pulling: boolean;
   committing: boolean;
   commitAndPushing: boolean;
+  refreshing: boolean;
   pushError: string | null;
   aiError: string | null;
   aiLoading: boolean;
@@ -64,7 +65,7 @@ interface RepoStoreState extends ActiveTabProjection {
   setPulling: (v: boolean) => void;
 
   // Git operations (operate on the active tab)
-  refreshStatus: () => Promise<void>;
+  refreshStatus: (force?: boolean) => Promise<void>;
   selectFile: (path: string | null) => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
@@ -73,8 +74,8 @@ interface RepoStoreState extends ActiveTabProjection {
   commit: (message: string) => Promise<string>;
   push: (setUpstream?: boolean) => Promise<string>;
   pull: () => Promise<string>;
-  refreshBranches: () => Promise<void>;
-  refreshLog: () => Promise<void>;
+  refreshBranches: (force?: boolean) => Promise<void>;
+  refreshLog: (force?: boolean) => Promise<void>;
   switchBranch: (name: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
@@ -98,6 +99,7 @@ function createEmptyTab(path: string): RepoTabState {
     commitMessage: "",
     committing: false,
     commitAndPushing: false,
+    refreshing: false,
     pushError: null,
     aiError: null,
     aiLoading: false,
@@ -138,6 +140,7 @@ function projectActiveTab(
       pulling: false,
       committing: false,
       commitAndPushing: false,
+      refreshing: false,
       pushError: null,
       aiError: null,
       aiLoading: false,
@@ -159,6 +162,7 @@ function projectActiveTab(
     pulling: tab.pulling,
     committing: tab.committing,
     commitAndPushing: tab.commitAndPushing,
+    refreshing: tab.refreshing,
     pushError: tab.pushError,
     aiError: tab.aiError,
     aiLoading: tab.aiLoading,
@@ -214,9 +218,9 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (state.tabs[path]) {
       get().setActiveRepo(path);
       // Refresh in case it's been a while.
-      await get().refreshStatus();
-      await get().refreshBranches();
-      await get().refreshLog();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
       return;
     }
 
@@ -247,9 +251,9 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
 
       // Refresh the new tab's data. These read `activePath`, which is now
       // `path`, so they'll update the correct tab.
-      await get().refreshStatus();
-      await get().refreshBranches();
-      await get().refreshLog();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
     } catch (e) {
       updateTab(set, get, path, {
         loading: false,
@@ -333,14 +337,18 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (activePath) updateTab(set, get, activePath, { pulling: v });
   },
 
-  refreshStatus: async () => {
-    const { activePath } = get();
+  refreshStatus: async (force?: boolean) => {
+    const { activePath, tabs } = get();
     if (!activePath) return;
+    if (!force && tabs[activePath]?.refreshing) return;
+    updateTab(set, get, activePath, { refreshing: true });
     try {
       const statuses = await gitService.getStatus(activePath);
       updateTab(set, get, activePath, { fileStatuses: statuses });
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
+    } finally {
+      updateTab(set, get, activePath, { refreshing: false });
     }
   },
 
@@ -378,7 +386,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.stageFiles(activePath, files);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
       const tab = get().tabs[activePath];
       if (tab?.selectedFile) {
         await get().selectFile(tab.selectedFile);
@@ -393,7 +401,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.unstageFiles(activePath, files);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
       const tab = get().tabs[activePath];
       if (tab?.selectedFile) {
         await get().selectFile(tab.selectedFile);
@@ -408,7 +416,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.stageAll(activePath);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
     }
@@ -419,7 +427,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.discardFiles(activePath, files);
-      await get().refreshStatus();
+      await get().refreshStatus(true);
       const tab = get().tabs[activePath];
       if (tab?.selectedFile) {
         await get().selectFile(tab.selectedFile);
@@ -434,8 +442,8 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) throw new Error("No repository open");
     try {
       const hash = await gitService.commit(activePath, message);
-      await get().refreshStatus();
-      await get().refreshLog();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
       return hash;
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
@@ -471,9 +479,9 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     try {
       const result = await gitService.pull(activePath);
       try {
-        await get().refreshStatus();
-        await get().refreshBranches();
-        await get().refreshLog();
+        await get().refreshStatus(true);
+        await get().refreshBranches(true);
+        await get().refreshLog(true);
         const info = await gitService.getRepoInfo(activePath);
         updateTab(set, get, activePath, { repoInfo: info });
       } catch {
@@ -488,25 +496,33 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  refreshBranches: async () => {
-    const { activePath } = get();
+  refreshBranches: async (force?: boolean) => {
+    const { activePath, tabs } = get();
     if (!activePath) return;
+    if (!force && tabs[activePath]?.refreshing) return;
+    updateTab(set, get, activePath, { refreshing: true });
     try {
       const branches = await gitService.listBranches(activePath);
       updateTab(set, get, activePath, { branches });
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
+    } finally {
+      updateTab(set, get, activePath, { refreshing: false });
     }
   },
 
-  refreshLog: async () => {
-    const { activePath } = get();
+  refreshLog: async (force?: boolean) => {
+    const { activePath, tabs } = get();
     if (!activePath) return;
+    if (!force && tabs[activePath]?.refreshing) return;
+    updateTab(set, get, activePath, { refreshing: true });
     try {
       const log = await gitService.getLog(activePath, 100);
       updateTab(set, get, activePath, { log });
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
+    } finally {
+      updateTab(set, get, activePath, { refreshing: false });
     }
   },
 
@@ -515,9 +531,9 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.switchBranch(activePath, name);
-      await get().refreshStatus();
-      await get().refreshBranches();
-      await get().refreshLog();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
       const info = await gitService.getRepoInfo(activePath);
       updateTab(set, get, activePath, { repoInfo: info });
     } catch (e) {
@@ -530,7 +546,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.createBranch(activePath, name);
-      await get().refreshBranches();
+      await get().refreshBranches(true);
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
     }
@@ -541,7 +557,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     if (!activePath) return;
     try {
       await gitService.deleteBranch(activePath, name);
-      await get().refreshBranches();
+      await get().refreshBranches(true);
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
     }

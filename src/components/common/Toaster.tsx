@@ -1,4 +1,5 @@
 import { useToastStore, type ToastType } from "@/stores/toastStore";
+import { useTranslation } from "react-i18next";
 import {
   CheckCircleIcon,
   AlertCircleIcon,
@@ -21,6 +22,7 @@ const STYLES: Record<ToastType, string> = {
 export function Toaster() {
   const toasts = useToastStore((s) => s.toasts);
   const dismiss = useToastStore((s) => s.dismiss);
+  const { t } = useTranslation();
 
   return (
     <div className="fixed bottom-12 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
@@ -46,7 +48,7 @@ export function Toaster() {
             <button
               onClick={() => dismiss(toast.id)}
               className="shrink-0 text-text-muted hover:text-text-primary transition-colors"
-              aria-label="dismiss"
+              aria-label={t("common.dismiss")}
             >
               <XIcon size={14} />
             </button>
