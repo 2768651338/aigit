@@ -11,6 +11,10 @@
     "detached": "分离头指针",
     "notSet": "未配置"
   },
+  "tabs": {
+    "close": "关闭标签",
+    "openNew": "打开新仓库"
+  },
   "statusBar": {
     "noRepo": "无仓库",
     "staged": "{{count}} 已暂存",
@@ -90,7 +94,9 @@
     "suggestion2": "总结最近的改动",
     "suggestion3": "有哪些分支？",
     "inputPlaceholder": "询问关于你的仓库的问题...（回车发送，Shift+回车换行）",
-    "configureHint": "在设置中配置 AI 提供商后即可开始对话"
+    "configureHint": "在设置中配置 AI 提供商后即可开始对话",
+    "openRepoHint": "请先在顶部标签栏打开一个仓库",
+    "thinking": "思考中..."
   },
   "settings": {
     "title": "设置",
@@ -109,6 +115,8 @@
     "fontSize": "字体大小：{{value}}px",
     "showDiffInline": "内联显示 diff",
     "recentRepos": "最近仓库",
+    "recentRepoOpen": "点击在新标签中打开",
+    "recentRepoAlreadyOpen": "已打开",
     "prompts": "AI 提示词",
     "promptsHint": "留空则使用内置默认提示词。自定义提示词将作为系统消息发送给 AI。",
     "promptCommit": "提交信息生成提示词",

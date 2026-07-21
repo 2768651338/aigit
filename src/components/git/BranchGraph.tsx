@@ -59,10 +59,10 @@ export function BranchGraph() {
                 key={entry.hash}
                 onClick={() => handleEntryClick(entry)}
                 className={clsx(
-                  "flex items-center gap-2 px-3 py-1.5 cursor-pointer group",
-                  isSelected ? "bg-accent-glow" : "hover:bg-bg-hover/50"
+                  "flex items-center gap-3 px-4 py-2 cursor-pointer group",
+                  isSelected ? "bg-bg-hover" : "hover:bg-bg-hover/50"
                 )}
-                style={{ minHeight: "32px" }}
+                style={{ minHeight: "40px" }}
               >
                 {/* Graph lane */}
                 <div
@@ -91,18 +91,18 @@ export function BranchGraph() {
                 </div>
 
                 {/* Refs */}
-                <div className="flex items-center gap-1 shrink-0">
+                <div className="flex items-center gap-1.5 shrink-0">
                   {localRefs.map((ref) => (
                     <span
                       key={ref}
                       className={clsx(
-                        "badge text-2xs",
+                        "badge text-xs",
                         branches.find((b) => b.name === ref)?.is_current
                           ? "bg-accent text-bg-base"
                           : "bg-bg-elevated text-text-secondary border border-border"
                       )}
                     >
-                      <GitBranchIcon size={10} className="mr-1" />
+                      <GitBranchIcon size={11} className="mr-1" />
                       {ref}
                     </span>
                   ))}
@@ -111,7 +111,7 @@ export function BranchGraph() {
                     .map((ref) => (
                       <span
                         key={ref}
-                        className="badge text-2xs bg-bg-elevated text-text-muted border border-border-subtle"
+                        className="badge text-xs bg-bg-elevated text-text-muted border border-border-subtle"
                       >
                         {ref.replace("origin/", "")}
                       </span>
@@ -119,22 +119,22 @@ export function BranchGraph() {
                 </div>
 
                 {/* Hash */}
-                <span className="font-mono text-2xs text-text-muted shrink-0">
+                <span className="font-mono text-xs text-text-muted shrink-0">
                   {entry.short_hash}
                 </span>
 
                 {/* Message */}
-                <span className="text-xs text-text-primary truncate flex-1">
+                <span className="text-sm text-text-primary truncate flex-1">
                   {entry.message}
                 </span>
 
                 {/* Author */}
-                <span className="text-2xs text-text-muted shrink-0 hidden sm:block">
+                <span className="text-xs text-text-muted shrink-0 hidden sm:block">
                   {entry.author}
                 </span>
 
                 {/* Date */}
-                <span className="text-2xs text-text-muted shrink-0">
+                <span className="text-xs text-text-muted shrink-0">
                   {formatDate(entry.timestamp)}
                 </span>
               </div>
@@ -147,8 +147,8 @@ export function BranchGraph() {
       {selectedEntry && (
         <div className="w-1/2 border-l border-border flex flex-col overflow-hidden">
           {/* Header */}
-          <div className="flex items-center gap-2 px-4 h-10 border-b border-border shrink-0">
-            <span className="font-mono text-2xs text-text-muted">
+          <div className="flex items-center gap-3 px-4 h-12 border-b border-border shrink-0">
+            <span className="font-mono text-xs text-text-muted">
               {selectedEntry.short_hash}
             </span>
             <span className="text-sm font-medium text-text-primary truncate flex-1">
@@ -161,7 +161,7 @@ export function BranchGraph() {
                 setDiffText("");
                 setError(null);
               }}
-              className="btn-ghost text-2xs"
+              className="btn-ghost text-xs"
               title={t("changes.dismiss")}
             >
               ✕
@@ -169,7 +169,7 @@ export function BranchGraph() {
           </div>
 
           {/* Meta */}
-          <div className="px-4 py-2 border-b border-border text-2xs text-text-muted shrink-0">
+          <div className="px-4 py-2.5 border-b border-border text-xs text-text-muted shrink-0">
             {selectedEntry.author} &lt;{selectedEntry.email}&gt; ·{" "}
             {new Date(selectedEntry.timestamp * 1000).toLocaleString()}
           </div>
@@ -177,7 +177,7 @@ export function BranchGraph() {
           {/* Diff content */}
           <div className="flex-1 overflow-auto">
             {error && (
-              <div className="flex items-start gap-2 p-3 m-3 bg-danger/10 text-danger text-xs rounded border border-danger/20">
+              <div className="flex items-start gap-2 p-3.5 m-3 bg-danger/10 text-danger text-sm rounded border border-danger/20">
                 <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
                 <span className="flex-1 break-words whitespace-pre-wrap">{error}</span>
               </div>
@@ -188,7 +188,7 @@ export function BranchGraph() {
               </div>
             )}
             {!loading && !error && diffText && (
-              <pre className="font-mono text-2xs text-text-primary p-3 whitespace-pre-wrap break-all">
+              <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed">
                 {colorizePatch(diffText)}
               </pre>
             )}
@@ -215,7 +215,7 @@ function colorizePatch(patch: string): React.ReactNode[] {
     if (line.startsWith("+++") || line.startsWith("---")) {
       className = "text-text-primary font-semibold";
     } else if (line.startsWith("@@")) {
-      className = "text-accent";
+      className = "text-info";
     } else if (line.startsWith("+") && !line.startsWith("+++")) {
       className = "text-success";
     } else if (line.startsWith("-") && !line.startsWith("---")) {

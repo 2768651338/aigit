@@ -87,12 +87,6 @@ export const CheckIcon = (p: IconProps) => (
   </Icon>
 );
 
-export const SparklesIcon = (p: IconProps) => (
-  <Icon {...p}>
-    <path d="M12 3v3m0 12v3M5.6 5.6l2.1 2.1m8.6 8.6 2.1 2.1M3 12h3m12 0h3M5.6 18.4l2.1-2.1m8.6-8.6 2.1-2.1" />
-  </Icon>
-);
-
 export const SendIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="m22 2-7 20-4-9-9-4Z" />
@@ -184,5 +178,12 @@ export const MailIcon = (p: IconProps) => (
   <Icon {...p}>
     <rect width="20" height="16" x="2" y="4" rx="2" />
     <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+  </Icon>
+);
+
+export const XIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M18 6 6 18" />
+    <path d="m6 6 12 12" />
   </Icon>
 );

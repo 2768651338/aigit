@@ -4,7 +4,6 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import {
   ScanSearchIcon,
-  SparklesIcon,
   AlertCircleIcon,
 } from "@/components/common/Icons";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
@@ -12,8 +11,14 @@ import clsx from "clsx";
 
 export function ReviewView() {
   const { t } = useTranslation();
-  const { currentPath, fileStatuses } = useRepoStore();
-  const { reviewCode, lastResult, loading, error } = useAiStore();
+  const currentPath = useRepoStore((s) => s.currentPath);
+  const fileStatuses = useRepoStore((s) => s.fileStatuses);
+  const reviewCode = useAiStore((s) => s.reviewCode);
+  const loading = useAiStore((s) => s.loading);
+  const error = useAiStore((s) => s.error);
+  const lastResult = useAiStore((s) =>
+    currentPath ? s.lastResultByRepo[currentPath] ?? null : null
+  );
   const { config } = useSettingsStore();
 
   const [reviewScope, setReviewScope] = useState<"all" | "staged">("staged");
@@ -44,17 +49,16 @@ export function ReviewView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center px-4 h-10 border-b border-border">
-        <ScanSearchIcon size={16} className="text-accent mr-2" />
-        <h2 className="text-sm font-semibold">{t("review.title")}</h2>
+      <div className="flex items-center px-5 h-12 border-b border-border">
+        <h2 className="text-base font-semibold">{t("review.title")}</h2>
         <div className="flex-1" />
-        <div className="flex items-center gap-1 bg-bg-elevated rounded p-0.5">
+        <div className="flex items-center gap-1 bg-bg-elevated rounded p-1">
           <button
             onClick={() => setReviewScope("staged")}
             className={clsx(
-              "px-2 py-1 text-2xs rounded transition-colors",
+              "px-3 py-1.5 text-xs rounded transition-colors",
               reviewScope === "staged"
-                ? "bg-accent text-bg-base font-medium"
+                ? "bg-bg-hover text-text-primary font-medium"
                 : "text-text-secondary hover:text-text-primary"
             )}
           >
@@ -63,9 +67,9 @@ export function ReviewView() {
           <button
             onClick={() => setReviewScope("all")}
             className={clsx(
-              "px-2 py-1 text-2xs rounded transition-colors",
+              "px-3 py-1.5 text-xs rounded transition-colors",
               reviewScope === "all"
-                ? "bg-accent text-bg-base font-medium"
+                ? "bg-bg-hover text-text-primary font-medium"
                 : "text-text-secondary hover:text-text-primary"
             )}
           >
@@ -75,20 +79,19 @@ export function ReviewView() {
         <button
           onClick={handleReview}
           disabled={loading}
-          className="btn-primary ml-2"
+          className="btn-primary ml-3"
         >
-          <SparklesIcon size={14} />
           {loading ? t("review.reviewing") : t("review.runReview")}
         </button>
       </div>
 
       {/* File selector */}
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
-        <span className="text-2xs text-text-muted">{t("review.file")}</span>
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-border">
+        <span className="text-xs text-text-muted">{t("review.file")}</span>
         <select
           value={reviewedFile ?? ""}
           onChange={(e) => setReviewedFile(e.target.value || undefined)}
-          className="bg-bg-elevated border border-border rounded px-2 py-1 text-xs text-text-primary focus:outline-none focus:border-accent/50"
+          className="bg-bg-elevated border border-border rounded px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-border-strong"
         >
           <option value="">{t("review.allFiles")}</option>
           {fileStatuses.map((f) => (
@@ -97,30 +100,29 @@ export function ReviewView() {
             </option>
           ))}
         </select>
-        <span className="text-2xs text-text-muted ml-auto">
+        <span className="text-xs text-text-muted ml-auto">
           {t("review.provider", { provider: config?.ai.active_provider ?? "" })}
         </span>
       </div>
 
       {/* Review result */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto p-6">
         {error && (
-          <div className="flex items-center gap-2 p-3 bg-danger/10 text-danger text-sm rounded border border-danger/20 mb-4">
+          <div className="flex items-center gap-2 p-4 bg-danger/10 text-danger text-sm rounded border border-danger/20 mb-4">
             <AlertCircleIcon size={16} />
             {error}
           </div>
         )}
 
         {loading && (
-          <div className="flex flex-col items-center justify-center py-12">
-            <div className="w-8 h-8 border-2 border-accent/30 border-t-accent rounded-full animate-spin mb-3" />
+          <div className="flex flex-col items-center justify-center py-16">
             <p className="text-sm text-text-secondary">{t("review.analyzing")}</p>
           </div>
         )}
 
         {!loading && !lastResult && !error && (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <ScanSearchIcon size={48} className="text-text-muted mb-3" />
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <ScanSearchIcon size={48} className="text-text-muted mb-4" />
             <p className="text-sm text-text-secondary max-w-md">
               {t("review.emptyHint")}
             </p>

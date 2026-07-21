@@ -11,6 +11,10 @@
     "detached": "detached",
     "notSet": "not set"
   },
+  "tabs": {
+    "close": "Close tab",
+    "openNew": "Open new repository"
+  },
   "statusBar": {
     "noRepo": "No repository",
     "staged": "{{count}} staged",
@@ -90,7 +94,9 @@
     "suggestion2": "Summarize recent changes",
     "suggestion3": "What branches exist?",
     "inputPlaceholder": "Ask about your repository... (Enter to send, Shift+Enter for newline)",
-    "configureHint": "Configure an AI provider in Settings to start chatting"
+    "configureHint": "Configure an AI provider in Settings to start chatting",
+    "openRepoHint": "Open a repository from the tab bar first",
+    "thinking": "Thinking..."
   },
   "settings": {
     "title": "Settings",
@@ -109,6 +115,8 @@
     "fontSize": "Font Size: {{value}}px",
     "showDiffInline": "Show diff inline",
     "recentRepos": "Recent Repositories",
+    "recentRepoOpen": "Click to open in a new tab",
+    "recentRepoAlreadyOpen": "Open",
     "prompts": "AI Prompts",
     "promptsHint": "Leave empty to use the built-in default. Custom prompts are sent as the system message to the AI.",
     "promptCommit": "Commit Message Prompt",

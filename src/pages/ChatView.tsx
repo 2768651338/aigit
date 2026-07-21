@@ -5,15 +5,20 @@ import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import {
   SendIcon,
-  MessageSquareIcon,
   TrashIcon,
   AlertCircleIcon,
 } from "@/components/common/Icons";
 
 export function ChatView() {
   const { t } = useTranslation();
-  const { currentPath } = useRepoStore();
-  const { chatMessages, sendChatMessage, loading, error, clearChat } = useAiStore();
+  const currentPath = useRepoStore((s) => s.currentPath);
+  const chatMessages = useAiStore((s) =>
+    currentPath ? s.chatByRepo[currentPath] ?? [] : []
+  );
+  const loading = useAiStore((s) => s.loading);
+  const error = useAiStore((s) => s.error);
+  const sendChatMessage = useAiStore((s) => s.sendChatMessage);
+  const clearChat = useAiStore((s) => s.clearChat);
   const { config } = useSettingsStore();
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -25,7 +30,7 @@ export function ChatView() {
   }, [chatMessages]);
 
   const handleSend = async () => {
-    if (!input.trim() || !config || loading) return;
+    if (!input.trim() || !config || loading || !currentPath) return;
     const msg = input.trim();
     setInput("");
     await sendChatMessage(msg, currentPath, config);
@@ -38,6 +43,10 @@ export function ChatView() {
     }
   };
 
+  const handleClear = () => {
+    if (currentPath) clearChat(currentPath);
+  };
+
   const suggestions = [
     t("chat.suggestion1"),
     t("chat.suggestion2"),
@@ -47,38 +56,40 @@ export function ChatView() {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center px-4 h-10 border-b border-border">
-        <MessageSquareIcon size={16} className="text-accent mr-2" />
-        <h2 className="text-sm font-semibold">{t("chat.title")}</h2>
+      <div className="flex items-center px-5 h-12 border-b border-border">
+        <h2 className="text-base font-semibold">{t("chat.title")}</h2>
         {currentPath && (
-          <span className="text-2xs text-text-muted ml-3">
+          <span className="text-xs text-text-muted ml-3">
             {t("chat.context", { name: currentPath.split(/[\\/]/).pop() })}
           </span>
         )}
         <div className="flex-1" />
         {chatMessages.length > 0 && (
-          <button onClick={clearChat} className="btn-ghost text-2xs">
-            <TrashIcon size={12} />
+          <button onClick={handleClear} className="btn-ghost text-xs">
+            <TrashIcon size={14} />
             {t("chat.clear")}
           </button>
         )}
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-auto px-4 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 overflow-auto px-5 py-5 space-y-5">
         {chatMessages.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-12 text-center">
-            <MessageSquareIcon size={48} className="text-text-muted mb-3" />
-            <p className="text-sm text-text-secondary mb-2">
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <p className="text-sm text-text-secondary mb-3">
               {t("chat.emptyHint")}
             </p>
-            <div className="flex flex-col gap-1 mt-2">
+            <div className="flex flex-col gap-1.5 mt-3">
               {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
-                  onClick={() => config && sendChatMessage(suggestion, currentPath, config)}
-                  disabled={!config}
-                  className="text-xs text-text-secondary hover:text-accent hover:bg-accent-glow px-3 py-1.5 rounded transition-colors"
+                  onClick={() =>
+                    currentPath &&
+                    config &&
+                    sendChatMessage(suggestion, currentPath, config)
+                  }
+                  disabled={!config || !currentPath}
+                  className="text-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover px-4 py-2 rounded transition-colors"
                 >
                   {suggestion}
                 </button>
@@ -93,10 +104,10 @@ export function ChatView() {
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] rounded-lg px-3 py-2 ${
+              className={`max-w-[80%] rounded-lg px-4 py-2.5 ${
                 msg.role === "user"
-                  ? "bg-accent/10 border border-accent/20"
-                  : "bg-bg-elevated border border-border"
+                  ? "bg-bg-elevated border border-border"
+                  : "bg-bg-surface border border-border"
               }`}
             >
               {msg.role === "user" ? (
@@ -110,27 +121,23 @@ export function ChatView() {
 
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-bg-elevated border border-border rounded-lg px-3 py-2">
-              <div className="flex gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" />
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" style={{ animationDelay: "0.2s" }} />
-                <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse-dot" style={{ animationDelay: "0.4s" }} />
-              </div>
+            <div className="bg-bg-surface border border-border rounded-lg px-4 py-2.5">
+              <span className="text-sm text-text-muted">{t("chat.thinking")}</span>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="flex items-center gap-2 p-3 bg-danger/10 text-danger text-xs rounded border border-danger/20">
-            <AlertCircleIcon size={14} />
+          <div className="flex items-center gap-2 p-3.5 bg-danger/10 text-danger text-sm rounded border border-danger/20">
+            <AlertCircleIcon size={16} />
             {error}
           </div>
         )}
       </div>
 
       {/* Input */}
-      <div className="border-t border-border p-3">
-        <div className="flex items-end gap-2 bg-bg-elevated border border-border rounded-lg p-2 focus-within:border-accent/50 transition-colors">
+      <div className="border-t border-border p-4">
+        <div className="flex items-end gap-2 bg-bg-elevated border border-border rounded-lg p-3 focus-within:border-border-strong transition-colors">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -138,19 +145,24 @@ export function ChatView() {
             placeholder={t("chat.inputPlaceholder")}
             className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none max-h-32"
             rows={1}
-            disabled={!config}
+            disabled={!config || !currentPath}
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || loading || !config}
+            disabled={!input.trim() || loading || !config || !currentPath}
             className="btn-primary shrink-0"
           >
             <SendIcon size={14} />
           </button>
         </div>
         {!config && (
-          <p className="text-2xs text-text-muted mt-1.5 px-1">
+          <p className="text-xs text-text-muted mt-2 px-1">
             {t("chat.configureHint")}
+          </p>
+        )}
+        {config && !currentPath && (
+          <p className="text-xs text-text-muted mt-2 px-1">
+            {t("chat.openRepoHint")}
           </p>
         )}
       </div>

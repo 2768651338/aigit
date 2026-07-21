@@ -41,7 +41,7 @@ export function MarkdownRenderer({ content }: { content: string }) {
             );
           }
           return (
-            <code className="bg-bg-elevated px-1 py-0.5 rounded text-xs font-mono text-accent">
+            <code className="bg-bg-elevated px-1 py-0.5 rounded text-xs font-mono text-text-primary">
               {children}
             </code>
           );
@@ -52,7 +52,7 @@ export function MarkdownRenderer({ content }: { content: string }) {
         ),
         em: ({ children }) => <em className="text-text-primary">{children}</em>,
         blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-accent/40 pl-3 my-2 text-text-secondary italic">
+          <blockquote className="border-l-2 border-border-strong pl-3 my-2 text-text-secondary italic">
             {children}
           </blockquote>
         ),

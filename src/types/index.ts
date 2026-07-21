@@ -108,6 +108,42 @@ export interface AppConfig {
   ui: UiConfig;
   prompts: PromptsConfig;
   recent_repos: string[];
+  /** Paths of repos currently open as tabs. */
+  open_repos: string[];
+  /** Path of the currently active tab. `null` when no tab is open. */
+  active_repo: string | null;
+}
+
+/**
+ * State snapshot for a single open repository tab.
+ * `repoStore` keeps a `Map<path, RepoTabState>` so each tab has its own
+ * working set (file statuses, diffs, branches, commit draft, etc.) and
+ * switching tabs does not lose in-progress state.
+ */
+export interface RepoTabState {
+  /** Absolute path of the repository working directory. */
+  path: string;
+  repoInfo: RepoInfo | null;
+  fileStatuses: FileStatus[];
+  selectedFile: string | null;
+  workdirDiff: FileDiff[];
+  stagedDiff: FileDiff[];
+  branches: BranchInfo[];
+  log: LogEntry[];
+  loading: boolean;
+  error: string | null;
+  pushing: boolean;
+  pulling: boolean;
+  /** Commit message draft — preserved when switching tabs. */
+  commitMessage: string;
+  /** Transient commit/push operation flags. */
+  committing: boolean;
+  commitAndPushing: boolean;
+  /** Error surfaced by the last push/pull operation (cleared on retry). */
+  pushError: string | null;
+  /** Error surfaced by the last AI generate operation. */
+  aiError: string | null;
+  aiLoading: boolean;
 }
 
 export type ViewType = "changes" | "branches" | "review" | "chat" | "settings";

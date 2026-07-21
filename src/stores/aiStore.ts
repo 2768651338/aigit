@@ -45,11 +45,22 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   setConfig: (config: AppConfig) => set({ config }),
 }));
 
+/**
+ * AI store with per-repo isolation for chat history and review results.
+ *
+ * `chatByRepo` / `lastResultByRepo` are the source of truth, keyed by
+ * absolute repo path. Consumers select by `currentPath`:
+ *   `const messages = useAiStore(s => path ? (s.chatByRepo[path] ?? []) : []);`
+ *
+ * `loading` and `error` stay global — only one AI operation runs at a time,
+ * and surfacing a single loading/error state in the UI is simpler than
+ * tracking per-repo operation flags.
+ */
 interface AiState {
-  chatMessages: ChatMessage[];
+  chatByRepo: Record<string, ChatMessage[]>;
+  lastResultByRepo: Record<string, string | null>;
   loading: boolean;
   error: string | null;
-  lastResult: string | null;
 
   generateCommitMessage: (
     repoPath: string,
@@ -66,15 +77,16 @@ interface AiState {
     repoPath: string | null,
     config: AppConfig
   ) => Promise<void>;
-  clearChat: () => void;
+  /** Clear chat history for a specific repo. */
+  clearChat: (repoPath: string) => void;
   clearError: () => void;
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
-  chatMessages: [],
+  chatByRepo: {},
+  lastResultByRepo: {},
   loading: false,
   error: null,
-  lastResult: null,
 
   generateCommitMessage: async (repoPath, config) => {
     set({ loading: true, error: null });
@@ -82,7 +94,10 @@ export const useAiStore = create<AiState>((set, get) => ({
       console.log("[aigit] Generating commit message for:", repoPath);
       const result = await aiService.generateCommitMessage(repoPath, config);
       console.log("[aigit] Commit message generated:", result.slice(0, 80));
-      set({ lastResult: result, loading: false });
+      set((s) => ({
+        lastResultByRepo: { ...s.lastResultByRepo, [repoPath]: result },
+        loading: false,
+      }));
       return result;
     } catch (e) {
       console.error("[aigit] Generate commit message failed:", e);
@@ -101,7 +116,10 @@ export const useAiStore = create<AiState>((set, get) => ({
         filePath,
         stagedOnly
       );
-      set({ lastResult: result, loading: false });
+      set((s) => ({
+        lastResultByRepo: { ...s.lastResultByRepo, [repoPath]: result },
+        loading: false,
+      }));
       return result;
     } catch (e) {
       console.error("[aigit] Code review failed:", e);
@@ -111,30 +129,38 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
 
   sendChatMessage: async (content, repoPath, config) => {
-    const userMessage: ChatMessage = {
-      role: "user",
-      content,
-    };
-    const messages = [...get().chatMessages, userMessage];
-    set({ chatMessages: messages, loading: true, error: null });
+    if (!repoPath) return;
+    const userMessage: ChatMessage = { role: "user", content };
+    const prior = get().chatByRepo[repoPath] ?? [];
+    const messages = [...prior, userMessage];
+    set((s) => ({
+      chatByRepo: { ...s.chatByRepo, [repoPath]: messages },
+      loading: true,
+      error: null,
+    }));
 
     try {
       console.log("[aigit] Sending chat message");
-      const response = await aiService.repoChat(messages, config, repoPath ?? undefined);
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: response,
-      };
-      set({
-        chatMessages: [...messages, assistantMessage],
+      const response = await aiService.repoChat(messages, config, repoPath);
+      const assistantMessage: ChatMessage = { role: "assistant", content: response };
+      set((s) => ({
+        chatByRepo: {
+          ...s.chatByRepo,
+          [repoPath]: [...messages, assistantMessage],
+        },
         loading: false,
-      });
+      }));
     } catch (e) {
       console.error("[aigit] Chat failed:", e);
       set({ error: formatError(e), loading: false });
     }
   },
 
-  clearChat: () => set({ chatMessages: [], lastResult: null }),
+  clearChat: (repoPath: string) =>
+    set((s) => ({
+      chatByRepo: { ...s.chatByRepo, [repoPath]: [] },
+      lastResultByRepo: { ...s.lastResultByRepo, [repoPath]: null },
+    })),
+
   clearError: () => set({ error: null }),
 }));

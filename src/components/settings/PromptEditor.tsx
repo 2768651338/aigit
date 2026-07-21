@@ -92,7 +92,7 @@ export function PromptEditor({
           className={clsx(
             "text-2xs px-1.5 py-0.5 rounded",
             isCustomized
-              ? "bg-accent-glow text-accent"
+              ? "bg-bg-hover text-text-primary"
               : "bg-bg-hover text-text-muted"
           )}
         >

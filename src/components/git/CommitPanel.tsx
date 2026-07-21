@@ -1,11 +1,9 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { formatError } from "@/utils/error";
 import { showMessage } from "@/utils/dialog";
 import {
-  SparklesIcon,
   CheckIcon,
   PlusIcon,
   MinusIcon,
@@ -13,14 +11,9 @@ import {
   SendIcon,
   DownloadIcon,
 } from "@/components/common/Icons";
-import clsx from "clsx";
 
 export function CommitPanel() {
   const { t } = useTranslation();
-  const [message, setMessage] = useState("");
-  const [committing, setCommitting] = useState(false);
-  const [commitAndPushing, setCommitAndPushing] = useState(false);
-  const [pushError, setPushError] = useState<string | null>(null);
 
   const {
     currentPath,
@@ -34,8 +27,20 @@ export function CommitPanel() {
     repoInfo,
     pushing,
     pulling,
+    committing,
+    commitAndPushing,
+    pushError,
+    aiError,
+    aiLoading,
+    commitMessage: message,
+    setCommitMessage: setMessage,
+    setCommitting,
+    setCommitAndPushing,
+    setPushError,
+    setAiError,
+    setAiLoading,
   } = useRepoStore();
-  const { generateCommitMessage, loading: aiLoading, error: aiError, clearError: clearAiError } = useAiStore();
+  const { generateCommitMessage } = useAiStore();
   const { config } = useSettingsStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
@@ -53,12 +58,18 @@ export function CommitPanel() {
       console.warn("[aigit] AI Generate clicked but no config loaded");
       return;
     }
-    clearAiError();
+    setAiError(null);
+    setAiLoading(true);
     try {
       const msg = await generateCommitMessage(currentPath, config);
       setMessage(msg);
     } catch (e) {
+      // aiStore sets its own global error; mirror it onto the active tab
+      // so the inline panel can display the message.
       console.error("[aigit] AI Generate failed in panel:", e);
+      setAiError(formatError(e));
+    } finally {
+      setAiLoading(false);
     }
   };
 
@@ -162,29 +173,29 @@ export function CommitPanel() {
   return (
     <div className="flex flex-col h-full">
       {/* Stage controls */}
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
         <button
           onClick={stageAll}
-          className="btn-ghost text-2xs"
+          className="btn-ghost text-xs"
           title={t("commit.stageAll")}
         >
-          <PlusIcon size={12} /> {t("commit.stageAll")}
+          <PlusIcon size={14} /> {t("commit.stageAll")}
         </button>
         <button
           onClick={handleUnstageAll}
-          className="btn-ghost text-2xs"
+          className="btn-ghost text-xs"
           title={t("commit.unstageAll")}
         >
-          <MinusIcon size={12} /> {t("commit.unstageAll")}
+          <MinusIcon size={14} /> {t("commit.unstageAll")}
         </button>
       </div>
 
       {/* AI error display */}
       {aiError && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 text-danger text-2xs border-b border-danger/20">
+        <div className="flex items-start gap-2 px-4 py-2.5 bg-danger/10 text-danger text-xs border-b border-danger/20">
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
           <span className="flex-1 break-words">{aiError}</span>
-          <button onClick={clearAiError} className="shrink-0 hover:underline">
+          <button onClick={() => setAiError(null)} className="shrink-0 hover:underline">
             {t("changes.dismiss")}
           </button>
         </div>
@@ -192,7 +203,7 @@ export function CommitPanel() {
 
       {/* Push/Pull error display (kept inline so users can read full git stderr) */}
       {pushError && (
-        <div className="flex items-start gap-2 px-3 py-2 bg-danger/10 text-danger text-2xs border-b border-danger/20">
+        <div className="flex items-start gap-2 px-4 py-2.5 bg-danger/10 text-danger text-xs border-b border-danger/20">
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
           <span className="flex-1 break-words whitespace-pre-wrap">{pushError}</span>
           <button onClick={() => setPushError(null)} className="shrink-0 hover:underline">
@@ -203,53 +214,49 @@ export function CommitPanel() {
 
       {/* Debug status bar - shows why button might be disabled */}
       {!currentPath && (
-        <div className="px-3 py-1.5 text-2xs text-text-muted bg-bg-elevated border-b border-border">
+        <div className="px-4 py-2 text-xs text-text-muted bg-bg-elevated border-b border-border">
           {t("changes.noRepoTitle")}
         </div>
       )}
       {currentPath && !hasChanges && (
-        <div className="px-3 py-1.5 text-2xs text-text-muted bg-bg-elevated border-b border-border">
+        <div className="px-4 py-2 text-xs text-text-muted bg-bg-elevated border-b border-border">
           {t("fileList.noChanges")}
         </div>
       )}
 
       {/* Commit message */}
-      <div className="flex-1 p-3">
+      <div className="flex-1 p-4">
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleMessageKeyDown}
           placeholder={t("commit.messagePlaceholder") + t("commit.messageShortcutHint")}
-          className="w-full h-full bg-bg-base border border-border rounded p-3 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 resize-none"
+          className="w-full h-full bg-bg-base border border-border rounded p-3.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong resize-none"
           spellCheck={false}
         />
       </div>
 
       {/* Actions */}
-      <div className="flex items-center gap-2 p-3 border-t border-border">
+      <div className="flex items-center gap-2 p-4 border-t border-border">
         <button
           onClick={handleAiGenerate}
           disabled={!currentPath || aiLoading}
-          className={clsx(
-            "btn-secondary",
-            "border-accent/30 text-accent hover:bg-accent-glow"
-          )}
+          className="btn-ghost"
         >
-          <SparklesIcon size={14} />
           {aiLoading ? t("commit.generating") : t("commit.aiGenerate")}
         </button>
         <div className="flex-1" />
         {behind > 0 && (
-          <span className="text-2xs text-danger" title={t("commit.behindHint", { count: behind })}>
+          <span className="text-xs text-danger" title={t("commit.behindHint", { count: behind })}>
             ↓{behind}
           </span>
         )}
         {ahead > 0 && (
-          <span className="text-2xs text-accent" title={t("commit.aheadHint", { count: ahead })}>
+          <span className="text-xs text-accent" title={t("commit.aheadHint", { count: ahead })}>
             ↑{ahead}
           </span>
         )}
-        <span className="text-2xs text-text-muted">
+        <span className="text-xs text-text-muted">
           {t("commit.stagedCount", { count: stagedCount })}
         </span>
         {/* Pull button - visible when there are upstream commits to fetch */}

@@ -8,7 +8,7 @@ export function StatusBar() {
 
   if (!repoInfo) {
     return (
-      <footer className="flex items-center px-4 h-7 bg-bg-surface border-t border-border text-2xs text-text-muted">
+      <footer className="flex items-center px-4 h-8 bg-bg-surface border-t border-border text-xs text-text-muted">
         <span>{t("statusBar.noRepo")}</span>
       </footer>
     );
@@ -18,9 +18,9 @@ export function StatusBar() {
   const unstaged = fileStatuses.filter((f) => !f.staged).length;
 
   return (
-    <footer className="flex items-center gap-4 px-4 h-7 bg-bg-surface border-t border-border text-2xs text-text-secondary">
+    <footer className="flex items-center gap-4 px-4 h-8 bg-bg-surface border-t border-border text-xs text-text-secondary">
       <div className="flex items-center gap-1.5">
-        <GitBranchIcon size={12} className="text-accent" />
+        <GitBranchIcon size={13} className="text-text-secondary" />
         <span className="font-medium text-text-primary">
           {repoInfo.current_branch ?? "HEAD"}
         </span>
@@ -37,12 +37,12 @@ export function StatusBar() {
       </div>
 
       <div className="flex items-center gap-1.5">
-        <CircleDotIcon size={12} />
+        <CircleDotIcon size={13} />
         <span>{t("statusBar.staged", { count: staged })}</span>
       </div>
 
       <div className="flex items-center gap-1.5">
-        <GitCommitIcon size={12} />
+        <GitCommitIcon size={13} />
         <span>{t("statusBar.modified", { count: unstaged })}</span>
       </div>
 

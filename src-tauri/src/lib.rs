@@ -44,6 +44,7 @@ pub fn run() {
             config_cmd::get_config,
             config_cmd::save_config,
             config_cmd::add_recent_repo,
+            config_cmd::set_open_repos,
             git_cmd::pull,
             git_cmd::discard_files,
         ])

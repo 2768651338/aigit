@@ -56,22 +56,22 @@ export function FileStatusList({ staged }: FileStatusListProps) {
 
   if (files.length === 0) {
     return (
-      <div className="text-center text-text-muted text-xs py-4">
+      <div className="text-center text-text-muted text-sm py-6">
         {staged ? t("fileList.noStaged") : t("fileList.noChanges")}
       </div>
     );
   }
 
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       {files.map((file) => (
         <div
           key={`${file.path}-${file.staged}`}
           onClick={() => selectFile(file.path)}
           className={clsx(
-            "flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors group",
+            "flex items-center gap-2.5 px-2.5 py-2 rounded cursor-pointer transition-colors group",
             selectedFile === file.path
-              ? "bg-accent-glow"
+              ? "bg-bg-hover"
               : "hover:bg-bg-hover"
           )}
         >
@@ -80,20 +80,20 @@ export function FileStatusList({ staged }: FileStatusListProps) {
               e.stopPropagation();
               handleToggle(file);
             }}
-            className="shrink-0 w-5 h-5 flex items-center justify-center rounded hover:bg-bg-hover text-text-muted hover:text-text-primary"
+            className="shrink-0 w-6 h-6 flex items-center justify-center rounded hover:bg-bg-elevated text-text-muted hover:text-text-primary"
           >
-            {staged ? <MinusIcon size={12} /> : <PlusIcon size={12} />}
+            {staged ? <MinusIcon size={14} /> : <PlusIcon size={14} />}
           </button>
           <span
             className={clsx(
-              "shrink-0 w-4 text-center font-mono text-xs font-semibold",
+              "shrink-0 w-5 text-center font-mono text-sm font-semibold",
               STATUS_COLORS[file.status]
             )}
             title={file.status}
           >
             {STATUS_LABELS[file.status] ?? "?"}
           </span>
-          <span className="flex-1 truncate text-xs text-text-primary">
+          <span className="flex-1 truncate text-sm text-text-primary">
             {file.path}
           </span>
           {/* Discard button — only for unstaged tracked modifications.
@@ -102,14 +102,14 @@ export function FileStatusList({ staged }: FileStatusListProps) {
           {!staged && file.status !== "untracked" && (
             <button
               onClick={(e) => handleDiscard(file, e)}
-              className="shrink-0 w-5 h-5 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
+              className="shrink-0 w-6 h-6 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger hover:bg-danger/10 transition-all"
               title={t("fileList.discard")}
             >
-              <UndoIcon size={12} />
+              <UndoIcon size={14} />
             </button>
           )}
           {file.old_path && file.old_path !== file.path && (
-            <span className="text-2xs text-text-muted truncate max-w-24">
+            <span className="text-xs text-text-muted truncate max-w-24">
               ← {file.old_path}
             </span>
           )}

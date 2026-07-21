@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "@/stores/aiStore";
+import { useRepoStore } from "@/stores/repoStore";
 import type { AppConfig, AiProviderConfig, PromptsConfig } from "@/types";
-import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import clsx from "clsx";
@@ -10,7 +11,7 @@ import clsx from "clsx";
 const AUTHOR = "田小橙";
 const QQ = "2768651338";
 const EMAIL = "2768651338@qq.com";
-const APP_VERSION = "1.0.1";
+const APP_VERSION = "1.0.2";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
@@ -22,6 +23,8 @@ const PROVIDERS = [
 export function SettingsView() {
   const { t, i18n } = useTranslation();
   const { config, loadConfig, saveConfig, error } = useSettingsStore();
+  const openRepo = useRepoStore((s) => s.openRepo);
+  const openTabs = useRepoStore((s) => s.tabOrder);
   const [local, setLocal] = useState<AppConfig | null>(null);
   const [saved, setSaved] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -87,12 +90,12 @@ export function SettingsView() {
 
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center px-4 h-10 border-b border-border">
-        <h2 className="text-sm font-semibold">{t("settings.title")}</h2>
+      <div className="flex items-center px-5 h-12 border-b border-border">
+        <h2 className="text-base font-semibold">{t("settings.title")}</h2>
         <div className="flex-1" />
         {saved && (
-          <span className="flex items-center gap-1 text-2xs text-success animate-fade-in">
-            <CheckIcon size={12} /> {t("settings.saved")}
+          <span className="flex items-center gap-1 text-xs text-success animate-fade-in">
+            <CheckIcon size={14} /> {t("settings.saved")}
           </span>
         )}
         <button onClick={handleSave} className="btn-primary ml-3">
@@ -100,7 +103,7 @@ export function SettingsView() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-auto p-6 max-w-2xl space-y-8">
+      <div className="flex-1 overflow-auto p-8 max-w-3xl space-y-10">
         {error && (
           <div className="flex items-center gap-2 p-3 bg-danger/10 text-danger text-sm rounded border border-danger/20">
             <AlertCircleIcon size={16} />
@@ -110,18 +113,18 @@ export function SettingsView() {
 
         {/* AI Provider Selection */}
         <section>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
+          <h3 className="text-base font-semibold text-text-primary mb-4">
             {t("settings.aiProvider")}
           </h3>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             {PROVIDERS.map((provider) => (
               <button
                 key={provider.id}
                 onClick={() => update({ active_provider: provider.id })}
                 className={clsx(
-                  "flex items-center justify-between px-3 py-2 rounded border text-sm transition-colors",
+                  "flex items-center justify-between px-4 py-3 rounded border text-sm transition-colors",
                   local.ai.active_provider === provider.id
-                    ? "border-accent bg-accent-glow text-accent"
+                    ? "border-border-strong bg-bg-hover text-text-primary"
                     : "border-border bg-bg-elevated text-text-secondary hover:bg-bg-hover"
                 )}
               >
@@ -176,10 +179,10 @@ export function SettingsView() {
 
         {local.ai.active_provider === "ollama" && (
           <section>
-            <h3 className="text-sm font-semibold text-text-primary mb-3">
+            <h3 className="text-base font-semibold text-text-primary mb-4">
               {t("settings.ollamaConfig")}
             </h3>
-            <div className="space-y-3">
+            <div className="space-y-4">
               <Field label={t("settings.baseUrl")}>
                 <input
                   type="text"
@@ -198,7 +201,7 @@ export function SettingsView() {
                   placeholder="qwen2.5-coder:7b"
                 />
               </Field>
-              <p className="text-2xs text-text-muted">
+              <p className="text-xs text-text-muted">
                 {t("settings.ollamaHint")}{" "}
                 <a
                   href="https://ollama.ai"
@@ -216,10 +219,10 @@ export function SettingsView() {
 
         {/* Generation parameters */}
         <section>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
+          <h3 className="text-base font-semibold text-text-primary mb-4">
             {t("settings.genParams")}
           </h3>
-          <div className="space-y-4">
+          <div className="space-y-5">
             <Field label={t("settings.temperature", { value: local.ai.temperature.toFixed(2) })}>
               <input
                 type="range"
@@ -230,7 +233,7 @@ export function SettingsView() {
                 onChange={(e) => update({ temperature: parseFloat(e.target.value) })}
                 className="w-full accent-accent"
               />
-              <div className="flex justify-between text-2xs text-text-muted mt-1">
+              <div className="flex justify-between text-xs text-text-muted mt-2">
                 <span>{t("settings.precise")}</span>
                 <span>{t("settings.balanced")}</span>
                 <span>{t("settings.creative")}</span>
@@ -252,13 +255,13 @@ export function SettingsView() {
 
         {/* AI Prompts */}
         <section>
-          <h3 className="text-sm font-semibold text-text-primary mb-1">
+          <h3 className="text-base font-semibold text-text-primary mb-2">
             {t("settings.prompts")}
           </h3>
-          <p className="text-2xs text-text-muted mb-3">
+          <p className="text-xs text-text-muted mb-4">
             {t("settings.promptsHint")}
           </p>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <PromptEditor
               labelKey="settings.promptCommit"
               value={local.prompts.commit_message}
@@ -282,10 +285,10 @@ export function SettingsView() {
 
         {/* UI Settings */}
         <section>
-          <h3 className="text-sm font-semibold text-text-primary mb-3">
+          <h3 className="text-base font-semibold text-text-primary mb-4">
             {t("settings.interface")}
           </h3>
-          <div className="space-y-3">
+          <div className="space-y-4">
             {/* Language selector */}
             <Field label={t("settings.language")}>
               <div className="flex gap-2">
@@ -294,15 +297,15 @@ export function SettingsView() {
                     key={lang}
                     onClick={() => handleLanguageChange(lang)}
                     className={clsx(
-                      "px-3 py-1.5 rounded border text-sm transition-colors",
+                      "px-4 py-2 rounded border text-sm transition-colors",
                       local.ui.language === lang
-                        ? "border-accent bg-accent-glow text-accent"
+                        ? "border-border-strong bg-bg-hover text-text-primary"
                         : "border-border bg-bg-elevated text-text-secondary hover:bg-bg-hover"
                     )}
                   >
                     {t(`languages.${lang}`)}
                     {local.ui.language === lang && (
-                      <CheckIcon size={12} className="inline ml-1.5" />
+                      <CheckIcon size={14} className="inline ml-1.5" />
                     )}
                   </button>
                 ))}
@@ -320,12 +323,12 @@ export function SettingsView() {
                 className="w-full accent-accent"
               />
             </Field>
-            <label className="flex items-center gap-2 cursor-pointer">
+            <label className="flex items-center gap-2.5 cursor-pointer">
               <input
                 type="checkbox"
                 checked={local.ui.show_diff_inline}
                 onChange={(e) => updateUi({ show_diff_inline: e.target.checked })}
-                className="accent-accent"
+                className="accent-accent w-4 h-4"
               />
               <span className="text-sm text-text-secondary">
                 {t("settings.showDiffInline")}
@@ -337,41 +340,58 @@ export function SettingsView() {
         {/* Recent repos */}
         {local.recent_repos.length > 0 && (
           <section>
-            <h3 className="text-sm font-semibold text-text-primary mb-3">
+            <h3 className="text-base font-semibold text-text-primary mb-4">
               {t("settings.recentRepos")}
             </h3>
-            <div className="space-y-1">
-              {local.recent_repos.map((repo, idx) => (
-                <div
-                  key={idx}
-                  className="flex items-center justify-between px-3 py-1.5 bg-bg-elevated rounded text-xs text-text-secondary"
-                >
-                  <span className="truncate">{repo}</span>
-                </div>
-              ))}
+            <div className="space-y-2">
+              {local.recent_repos.map((repo, idx) => {
+                const isOpen = openTabs.includes(repo);
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => openRepo(repo)}
+                    disabled={isOpen}
+                    className={clsx(
+                      "w-full flex items-center gap-3 px-4 py-2.5 rounded text-sm transition-colors text-left",
+                      isOpen
+                        ? "bg-bg-elevated text-text-muted cursor-default"
+                        : "bg-bg-elevated text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                    )}
+                    title={isOpen ? t("settings.recentRepoAlreadyOpen") : t("settings.recentRepoOpen")}
+                  >
+                    <FolderIcon size={14} className="shrink-0 text-text-muted" />
+                    <span className="flex-1 truncate">{repo}</span>
+                    {isOpen && (
+                      <span className="text-xs text-text-muted shrink-0">
+                        {t("settings.recentRepoAlreadyOpen")}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </section>
         )}
 
         {/* About / Copyright */}
-        <section className="mt-2 pt-6 border-t border-border">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-text-primary">
+        <section className="mt-2 pt-8 border-t border-border">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-text-primary">
               {t("settings.about")}
             </h3>
-            <span className="text-2xs text-text-muted">
-              {t("settings.version")} <span className="font-mono text-accent">v{APP_VERSION}</span>
+            <span className="text-xs text-text-muted">
+              {t("settings.version")} <span className="font-mono">v{APP_VERSION}</span>
             </span>
           </div>
-          <div className="space-y-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+          <div className="space-y-3 text-sm">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
                 {t("settings.author")}
               </span>
               <span className="text-text-primary font-medium">{AUTHOR}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
                 {t("settings.contact")}
               </span>
               <div className="flex items-center gap-2">
@@ -384,19 +404,19 @@ export function SettingsView() {
                   aria-label={t("settings.copy")}
                 >
                   {copiedField === "qq" ? (
-                    <CheckIcon size={12} className="text-success" />
+                    <CheckIcon size={14} className="text-success" />
                   ) : (
-                    <CopyIcon size={12} />
+                    <CopyIcon size={14} />
                   )}
                 </button>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-2xs text-text-muted uppercase tracking-wider min-w-[64px]">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
                 Email
               </span>
               <div className="flex items-center gap-2">
-                <MailIcon size={12} className="text-text-muted" />
+                <MailIcon size={14} className="text-text-muted" />
                 <a
                   href={`mailto:${EMAIL}`}
                   className="text-accent hover:underline font-mono"
@@ -410,7 +430,7 @@ export function SettingsView() {
                   aria-label={t("settings.copy")}
                 >
                   {copiedField === "email" ? (
-                    <CheckIcon size={12} className="text-success" />
+                    <CheckIcon size={14} className="text-success" />
                   ) : (
                     <CopyIcon size={12} />
                   )}
@@ -418,7 +438,7 @@ export function SettingsView() {
               </div>
             </div>
           </div>
-          <p className="mt-4 text-2xs text-text-muted">
+          <p className="mt-5 text-xs text-text-muted">
             © {new Date().getFullYear()} {AUTHOR}. {t("settings.copyright")}.
           </p>
         </section>
@@ -448,8 +468,8 @@ function ProviderFields({
 }) {
   return (
     <section>
-      <h3 className="text-sm font-semibold text-text-primary mb-3">{title}</h3>
-      <div className="space-y-3">
+      <h3 className="text-base font-semibold text-text-primary mb-4">{title}</h3>
+      <div className="space-y-4">
         <Field label={labels.apiKey}>
           <input
             type="password"
@@ -486,7 +506,7 @@ function ProviderFields({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block text-2xs text-text-muted uppercase tracking-wider mb-1">
+      <label className="block text-xs text-text-muted uppercase tracking-wider mb-2">
         {label}
       </label>
       {children}

@@ -14,6 +14,13 @@ pub struct AppConfig {
     pub prompts: PromptsConfig,
     #[serde(default)]
     pub recent_repos: Vec<String>,
+    /// Paths of repos currently open as tabs in the app.
+    /// Persisted so the user's working set survives restarts.
+    #[serde(default)]
+    pub open_repos: Vec<String>,
+    /// Path of the currently active tab. `None` if no tab is active.
+    #[serde(default)]
+    pub active_repo: Option<String>,
 }
 
 /// User-customizable AI system prompts.
@@ -108,6 +115,8 @@ impl Default for AppConfig {
             ui: UiConfig::default(),
             prompts: PromptsConfig::default(),
             recent_repos: Vec::new(),
+            open_repos: Vec::new(),
+            active_repo: None,
         }
     }
 }
@@ -153,5 +162,12 @@ impl AppConfig {
         if self.recent_repos.len() > 10 {
             self.recent_repos.truncate(10);
         }
+    }
+
+    /// Persist the set of currently open repo tabs and the active one.
+    /// `active_repo` should be `None` when `open_repos` is empty.
+    pub fn set_open_repos(&mut self, open_repos: Vec<String>, active_repo: Option<String>) {
+        self.open_repos = open_repos;
+        self.active_repo = active_repo;
     }
 }

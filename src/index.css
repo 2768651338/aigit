@@ -21,7 +21,7 @@
     background-color: #0a0a0a;
     color: #e5e5e5;
     font-size: 14px;
-    line-height: 1.5;
+    line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     user-select: none;
@@ -55,7 +55,7 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded transition-colors duration-150 select-none;
+    @apply inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-sm font-medium rounded transition-colors duration-150 select-none;
   }
 
   .btn-primary {
@@ -75,7 +75,7 @@
   }
 
   .input {
-    @apply w-full bg-bg-base border border-border rounded px-3 py-2 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent/50 transition-colors;
+    @apply w-full bg-bg-base border border-border rounded px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong transition-colors;
   }
 
   .card {
@@ -83,15 +83,15 @@
   }
 
   .nav-item {
-    @apply flex items-center gap-2.5 px-3 py-2 rounded-md text-sm text-text-secondary cursor-pointer transition-colors duration-100 hover:text-text-primary hover:bg-bg-hover;
+    @apply flex items-center gap-2.5 px-3 py-2.5 rounded-md text-sm text-text-secondary cursor-pointer transition-colors duration-100 hover:text-text-primary hover:bg-bg-hover;
   }
 
   .nav-item-active {
-    @apply nav-item text-accent bg-accent-glow;
+    @apply nav-item text-text-primary bg-bg-hover;
   }
 
   .badge {
-    @apply inline-flex items-center px-1.5 py-0.5 text-2xs font-medium rounded;
+    @apply inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded;
   }
 
   .diff-add {

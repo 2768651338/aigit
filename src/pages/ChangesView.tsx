@@ -34,8 +34,8 @@ export function ChangesView() {
   return (
     <div className="flex h-full flex-col">
       {error && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-danger/10 text-danger text-xs border-b border-danger/20">
-          <AlertCircleIcon size={14} />
+        <div className="flex items-center gap-2 px-4 py-2.5 bg-danger/10 text-danger text-sm border-b border-danger/20">
+          <AlertCircleIcon size={16} />
           <span className="flex-1">{error}</span>
           <button onClick={clearError} className="hover:underline">
             {t("changes.dismiss")}
@@ -44,44 +44,44 @@ export function ChangesView() {
       )}
 
       {/* Toolbar */}
-      <div className="flex items-center px-4 h-10 border-b border-border">
-        <h2 className="text-sm font-semibold">{t("changes.title")}</h2>
+      <div className="flex items-center px-5 h-12 border-b border-border">
+        <h2 className="text-base font-semibold">{t("changes.title")}</h2>
         <div className="flex-1" />
         <button onClick={refreshStatus} className="btn-ghost">
-          <RefreshIcon size={14} />
+          <RefreshIcon size={16} />
           {t("changes.refresh")}
         </button>
       </div>
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: File lists + commit */}
-        <div className="w-80 border-r border-border flex flex-col overflow-hidden">
+        <div className="w-96 border-r border-border flex flex-col overflow-hidden">
           {/* Staged section */}
           <div className="flex-1 overflow-auto">
-            <div className="px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+            <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
               {t("changes.stagedChanges")}
             </div>
-            <div className="px-2 pb-2">
+            <div className="px-3 pb-3">
               <FileStatusList staged={true} />
             </div>
 
-            <div className="px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-text-muted border-t border-border-subtle">
+            <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted border-t border-border-subtle">
               {t("changes.changes")}
             </div>
-            <div className="px-2 pb-2">
+            <div className="px-3 pb-3">
               <FileStatusList staged={false} />
             </div>
           </div>
 
           {/* Commit panel */}
-          <div className="border-t border-border h-64 shrink-0">
+          <div className="border-t border-border h-72 shrink-0">
             <CommitPanel />
           </div>
         </div>
 
         {/* Right: Diff viewer */}
         <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="flex items-center px-4 h-10 border-b border-border">
+          <div className="flex items-center px-5 h-12 border-b border-border">
             <span className="text-sm font-medium text-text-primary">
               {selectedFile ?? t("changes.selectFile")}
             </span>

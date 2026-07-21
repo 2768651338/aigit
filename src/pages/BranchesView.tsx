@@ -52,60 +52,60 @@ export function BranchesView() {
   return (
     <div className="flex h-full">
       {/* Branch list sidebar */}
-      <div className="w-64 border-r border-border flex flex-col overflow-hidden">
-        <div className="flex items-center px-3 py-2 border-b border-border">
-          <span className="text-sm font-semibold flex-1">{t("branches.title")}</span>
+      <div className="w-72 border-r border-border flex flex-col overflow-hidden">
+        <div className="flex items-center px-4 py-3 border-b border-border">
+          <span className="text-base font-semibold flex-1">{t("branches.title")}</span>
           <button
             onClick={() => setShowNewBranch(!showNewBranch)}
             className="btn-ghost"
             title={t("branches.newBranch")}
           >
-            <PlusIcon size={14} />
+            <PlusIcon size={16} />
           </button>
           <button onClick={refreshBranches} className="btn-ghost" title={t("changes.refresh")}>
-            <RefreshIcon size={14} />
+            <RefreshIcon size={16} />
           </button>
         </div>
 
         {showNewBranch && (
-          <div className="flex items-center gap-1 px-2 py-2 border-b border-border">
+          <div className="flex items-center gap-2 px-3 py-3 border-b border-border">
             <input
               type="text"
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               placeholder={t("branches.branchNamePlaceholder")}
-              className="input text-xs py-1"
+              className="input text-sm py-1.5"
               autoFocus
             />
-            <button onClick={handleCreate} className="btn-primary p-1">
-              <CheckIcon size={12} />
+            <button onClick={handleCreate} className="btn-primary px-2.5 py-1.5">
+              <CheckIcon size={14} />
             </button>
           </div>
         )}
 
         <div className="flex-1 overflow-auto">
-          <div className="px-3 py-2 text-2xs font-semibold uppercase tracking-wider text-text-muted">
+          <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
             {t("branches.local")}
           </div>
-          <div className="px-2 space-y-0.5">
+          <div className="px-3 space-y-1">
             {localBranches.map((branch) => (
               <div
                 key={branch.name}
                 className={clsx(
-                  "flex items-center gap-2 px-2 py-1.5 rounded cursor-pointer group",
-                  branch.is_current ? "bg-accent-glow" : "hover:bg-bg-hover"
+                  "flex items-center gap-2 px-3 py-2 rounded cursor-pointer group",
+                  branch.is_current ? "bg-bg-hover" : "hover:bg-bg-hover"
                 )}
                 onClick={() => !branch.is_current && switchBranch(branch.name)}
               >
                 <GitBranchIcon
-                  size={14}
-                  className={branch.is_current ? "text-accent" : "text-text-muted"}
+                  size={16}
+                  className={branch.is_current ? "text-text-primary" : "text-text-muted"}
                 />
                 <span
                   className={clsx(
-                    "flex-1 text-xs truncate",
-                    branch.is_current ? "text-accent font-medium" : "text-text-primary"
+                    "flex-1 text-sm truncate",
+                    branch.is_current ? "text-text-primary font-medium" : "text-text-primary"
                   )}
                 >
                   {branch.name}
@@ -118,7 +118,7 @@ export function BranchesView() {
                     }}
                     className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger transition-opacity"
                   >
-                    <TrashIcon size={12} />
+                    <TrashIcon size={14} />
                   </button>
                 )}
               </div>
@@ -127,17 +127,17 @@ export function BranchesView() {
 
           {remoteBranches.length > 0 && (
             <>
-              <div className="px-3 py-2 mt-2 text-2xs font-semibold uppercase tracking-wider text-text-muted border-t border-border-subtle">
+              <div className="px-4 py-2.5 mt-2 text-xs font-semibold uppercase tracking-wider text-text-muted border-t border-border-subtle">
                 {t("branches.remote")}
               </div>
-              <div className="px-2 space-y-0.5">
+              <div className="px-3 space-y-1">
                 {remoteBranches.map((branch) => (
                   <div
                     key={branch.name}
-                    className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-hover cursor-pointer"
+                    className="flex items-center gap-2 px-3 py-2 rounded hover:bg-bg-hover cursor-pointer"
                   >
-                    <GitBranchIcon size={14} className="text-text-muted" />
-                    <span className="flex-1 text-xs truncate text-text-secondary">
+                    <GitBranchIcon size={16} className="text-text-muted" />
+                    <span className="flex-1 text-sm truncate text-text-secondary">
                       {branch.name}
                     </span>
                   </div>
@@ -150,8 +150,8 @@ export function BranchesView() {
 
       {/* Commit graph */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex items-center px-4 h-10 border-b border-border">
-          <h2 className="text-sm font-semibold">{t("branches.history")}</h2>
+        <div className="flex items-center px-5 h-12 border-b border-border">
+          <h2 className="text-base font-semibold">{t("branches.history")}</h2>
         </div>
         <div className="flex-1 overflow-hidden">
           <BranchGraph />
