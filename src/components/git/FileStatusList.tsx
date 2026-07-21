@@ -1,5 +1,7 @@
 import { useRepoStore } from "@/stores/repoStore";
+import { useToastStore } from "@/stores/toastStore";
 import { useTranslation } from "react-i18next";
+import { formatError } from "@/utils/error";
 import type { FileStatus } from "@/types";
 import { PlusIcon, MinusIcon, UndoIcon } from "@/components/common/Icons";
 import { confirmDialog } from "@/utils/dialog";
@@ -31,6 +33,7 @@ export function FileStatusList({ staged }: FileStatusListProps) {
   const { t } = useTranslation();
   const { fileStatuses, selectedFile, selectFile, stageFiles, unstageFiles, discardFiles } =
     useRepoStore();
+  const toast = useToastStore();
   const files = useMemoFilteredFiles(fileStatuses, staged);
 
   const handleToggle = (file: FileStatus) => {
@@ -51,7 +54,13 @@ export function FileStatusList({ staged }: FileStatusListProps) {
       "warning"
     );
     if (!confirmed) return;
-    await discardFiles([file.path]);
+    try {
+      await discardFiles([file.path]);
+      toast.success(t("fileList.discarded", { file: file.path }));
+    } catch (e) {
+      console.error(e);
+      toast.error(formatError(e), t("fileList.discardFailed"));
+    }
   };
 
   if (files.length === 0) {

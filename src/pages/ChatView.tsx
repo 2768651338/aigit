@@ -6,7 +6,7 @@ import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import {
   SendIcon,
   TrashIcon,
-  AlertCircleIcon,
+  SpinnerIcon,
 } from "@/components/common/Icons";
 
 export function ChatView() {
@@ -16,7 +16,6 @@ export function ChatView() {
     currentPath ? s.chatByRepo[currentPath] ?? [] : []
   );
   const loading = useAiStore((s) => s.loading);
-  const error = useAiStore((s) => s.error);
   const sendChatMessage = useAiStore((s) => s.sendChatMessage);
   const clearChat = useAiStore((s) => s.clearChat);
   const { config } = useSettingsStore();
@@ -121,16 +120,10 @@ export function ChatView() {
 
         {loading && (
           <div className="flex justify-start">
-            <div className="bg-bg-surface border border-border rounded-lg px-4 py-2.5">
+            <div className="flex items-center gap-2 bg-bg-surface border border-border rounded-lg px-4 py-2.5">
+              <SpinnerIcon size={14} className="text-text-muted" />
               <span className="text-sm text-text-muted">{t("chat.thinking")}</span>
             </div>
-          </div>
-        )}
-
-        {error && (
-          <div className="flex items-center gap-2 p-3.5 bg-danger/10 text-danger text-sm rounded border border-danger/20">
-            <AlertCircleIcon size={16} />
-            {error}
           </div>
         )}
       </div>
@@ -152,7 +145,7 @@ export function ChatView() {
             disabled={!input.trim() || loading || !config || !currentPath}
             className="btn-primary shrink-0"
           >
-            <SendIcon size={14} />
+            {loading ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
           </button>
         </div>
         {!config && (
@@ -169,3 +162,4 @@ export function ChatView() {
     </div>
   );
 }
+

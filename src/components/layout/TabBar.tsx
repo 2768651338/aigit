@@ -1,6 +1,8 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
+import { useToastStore } from "@/stores/toastStore";
+import { formatError } from "@/utils/error";
 import { gitService } from "@/services/git";
 import { XIcon, PlusIcon, FolderIcon } from "@/components/common/Icons";
 import clsx from "clsx";
@@ -21,6 +23,7 @@ export function TabBar() {
   const { t } = useTranslation();
   const { tabs, tabOrder, activePath, setActiveRepo, closeRepoTab, openRepo } =
     useRepoStore();
+  const toast = useToastStore();
 
   const handleOpenNew = async () => {
     const selected = await open({ directory: true, multiple: false });
@@ -30,6 +33,7 @@ export function TabBar() {
       await openRepo(repoPath);
     } catch (e) {
       console.error("[aigit] Open repo failed from TabBar:", e);
+      toast.error(formatError(e), t("tabs.openFailed"));
     }
   };
 

@@ -13,12 +13,18 @@
   },
   "tabs": {
     "close": "关闭标签",
-    "openNew": "打开新仓库"
+    "openNew": "打开新仓库",
+    "openFailed": "打开仓库失败"
   },
   "statusBar": {
     "noRepo": "无仓库",
     "staged": "{{count}} 已暂存",
-    "modified": "{{count}} 已修改"
+    "modified": "{{count}} 已修改",
+    "committing": "提交中...",
+    "committingAndPushing": "提交并推送中...",
+    "pushing": "推送中...",
+    "pulling": "拉取中...",
+    "aiWorking": "AI 处理中..."
   },
   "changes": {
     "title": "改动",
@@ -37,16 +43,22 @@
     "messageShortcutHint": "（Ctrl+Enter 提交）",
     "aiGenerate": "AI 生成",
     "generating": "生成中...",
+    "aiGenerated": "已生成提交信息",
+    "aiGenerateFailed": "AI 生成失败",
     "commit": "提交",
     "committing": "提交中...",
+    "commitSuccess": "提交成功",
+    "commitFailed": "提交失败",
     "commitShortcut": "提交（Ctrl+Enter）",
     "stagedCount": "{{count}} 已暂存",
     "commitAndPush": "提交并推送",
     "committingAndPushing": "提交并推送中...",
     "push": "推送",
     "pushing": "推送中...",
+    "pushFailed": "推送失败",
     "pull": "拉取",
     "pulling": "拉取中...",
+    "pullFailed": "拉取失败",
     "aheadHint": "领先远程 {{count}} 个提交",
     "behindHint": "落后远程 {{count}} 个提交",
     "pushSuccessTitle": "推送成功",
@@ -60,7 +72,9 @@
     "noChanges": "无改动",
     "discard": "丢弃修改",
     "discardTitle": "丢弃修改确认",
-    "discardConfirm": "确定要丢弃 {{file}} 的未暂存修改吗？此操作不可恢复。"
+    "discardConfirm": "确定要丢弃 {{file}} 的未暂存修改吗？此操作不可恢复。",
+    "discarded": "已丢弃 {{file}} 的修改",
+    "discardFailed": "丢弃修改失败"
   },
   "branches": {
     "title": "分支",
@@ -70,7 +84,14 @@
     "local": "本地",
     "remote": "远程",
     "history": "历史",
-    "noDiff": "该提交没有可显示的改动"
+    "noDiff": "该提交没有可显示的改动",
+    "loadingDiff": "加载改动中...",
+    "branchCreated": "已创建并切换到分支 {{name}}",
+    "branchCreateFailed": "创建分支失败",
+    "switched": "已切换到分支 {{name}}",
+    "switchFailed": "切换分支失败",
+    "branchDeleted": "已删除分支 {{name}}",
+    "branchDeleteFailed": "删除分支失败"
   },
   "review": {
     "title": "AI 代码审查",
@@ -83,7 +104,9 @@
     "provider": "提供商：{{provider}}",
     "analyzing": "正在分析改动...",
     "emptyHint": "点击\"运行审查\"让 AI 分析代码改动，发现 bug、安全问题和改进建议。",
-    "openRepoHint": "打开仓库以运行 AI 代码审查"
+    "openRepoHint": "打开仓库以运行 AI 代码审查",
+    "reviewDone": "代码审查完成",
+    "reviewFailed": "代码审查失败"
   },
   "chat": {
     "title": "仓库助手",
@@ -96,11 +119,13 @@
     "inputPlaceholder": "询问关于你的仓库的问题...（回车发送，Shift+回车换行）",
     "configureHint": "在设置中配置 AI 提供商后即可开始对话",
     "openRepoHint": "请先在顶部标签栏打开一个仓库",
-    "thinking": "思考中..."
+    "thinking": "思考中...",
+    "errorTitle": "AI 对话出错"
   },
   "settings": {
     "title": "设置",
     "saved": "已保存",
+    "saveFailed": "保存失败",
     "save": "保存",
     "loading": "加载设置中...",
     "aiProvider": "AI 提供商",

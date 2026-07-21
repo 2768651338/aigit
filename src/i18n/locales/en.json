@@ -13,12 +13,18 @@
   },
   "tabs": {
     "close": "Close tab",
-    "openNew": "Open new repository"
+    "openNew": "Open new repository",
+    "openFailed": "Failed to open repository"
   },
   "statusBar": {
     "noRepo": "No repository",
     "staged": "{{count}} staged",
-    "modified": "{{count}} modified"
+    "modified": "{{count}} modified",
+    "committing": "Committing...",
+    "committingAndPushing": "Committing & pushing...",
+    "pushing": "Pushing...",
+    "pulling": "Pulling...",
+    "aiWorking": "AI working..."
   },
   "changes": {
     "title": "Changes",
@@ -37,16 +43,22 @@
     "messageShortcutHint": " (Ctrl+Enter to commit)",
     "aiGenerate": "AI Generate",
     "generating": "Generating...",
+    "aiGenerated": "Commit message generated",
+    "aiGenerateFailed": "AI generation failed",
     "commit": "Commit",
     "committing": "Committing...",
+    "commitSuccess": "Commit succeeded",
+    "commitFailed": "Commit failed",
     "commitShortcut": "Commit (Ctrl+Enter)",
     "stagedCount": "{{count}} staged",
     "commitAndPush": "Commit & Push",
     "committingAndPushing": "Committing & Pushing...",
     "push": "Push",
     "pushing": "Pushing...",
+    "pushFailed": "Push failed",
     "pull": "Pull",
     "pulling": "Pulling...",
+    "pullFailed": "Pull failed",
     "aheadHint": "{{count}} commit(s) ahead of remote",
     "behindHint": "{{count}} commit(s) behind remote",
     "pushSuccessTitle": "Push Succeeded",
@@ -60,7 +72,9 @@
     "noChanges": "No changes",
     "discard": "Discard changes",
     "discardTitle": "Discard changes?",
-    "discardConfirm": "Discard unstaged changes in {{file}}? This cannot be undone."
+    "discardConfirm": "Discard unstaged changes in {{file}}? This cannot be undone.",
+    "discarded": "Discarded changes in {{file}}",
+    "discardFailed": "Failed to discard changes"
   },
   "branches": {
     "title": "Branches",
@@ -70,7 +84,14 @@
     "local": "Local",
     "remote": "Remote",
     "history": "History",
-    "noDiff": "No diff available for this commit"
+    "noDiff": "No diff available for this commit",
+    "loadingDiff": "Loading diff...",
+    "branchCreated": "Created and switched to branch {{name}}",
+    "branchCreateFailed": "Failed to create branch",
+    "switched": "Switched to branch {{name}}",
+    "switchFailed": "Failed to switch branch",
+    "branchDeleted": "Deleted branch {{name}}",
+    "branchDeleteFailed": "Failed to delete branch"
   },
   "review": {
     "title": "AI Code Review",
@@ -83,7 +104,9 @@
     "provider": "Provider: {{provider}}",
     "analyzing": "Analyzing changes...",
     "emptyHint": "Click \"Run Review\" to have the AI analyze your code changes for bugs, security issues, and improvement suggestions.",
-    "openRepoHint": "Open a repository to run AI code review"
+    "openRepoHint": "Open a repository to run AI code review",
+    "reviewDone": "Code review finished",
+    "reviewFailed": "Code review failed"
   },
   "chat": {
     "title": "Repository Assistant",
@@ -96,11 +119,13 @@
     "inputPlaceholder": "Ask about your repository... (Enter to send, Shift+Enter for newline)",
     "configureHint": "Configure an AI provider in Settings to start chatting",
     "openRepoHint": "Open a repository from the tab bar first",
-    "thinking": "Thinking..."
+    "thinking": "Thinking...",
+    "errorTitle": "Chat error"
   },
   "settings": {
     "title": "Settings",
     "saved": "Saved",
+    "saveFailed": "Failed to save",
     "save": "Save",
     "loading": "Loading settings...",
     "aiProvider": "AI Provider",

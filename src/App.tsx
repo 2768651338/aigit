@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TabBar } from "@/components/layout/TabBar";
 import { StatusBar } from "@/components/layout/StatusBar";
+import { Toaster } from "@/components/common/Toaster";
 import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
 import { ReviewView } from "@/pages/ReviewView";
@@ -86,6 +87,7 @@ export default function App() {
         </main>
       </div>
       <StatusBar />
+      <Toaster />
     </div>
   );
 }

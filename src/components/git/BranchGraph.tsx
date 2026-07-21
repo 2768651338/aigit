@@ -4,7 +4,7 @@ import { useRepoStore } from "@/stores/repoStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import type { LogEntry } from "@/types";
-import { GitBranchIcon, AlertCircleIcon } from "@/components/common/Icons";
+import { GitBranchIcon, AlertCircleIcon, SpinnerIcon } from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function BranchGraph() {
@@ -183,8 +183,9 @@ export function BranchGraph() {
               </div>
             )}
             {loading && (
-              <div className="flex items-center justify-center py-12 text-text-muted text-sm">
-                {t("review.analyzing")}
+              <div className="flex items-center justify-center gap-2 py-12 text-text-muted text-sm">
+                <SpinnerIcon size={14} />
+                {t("branches.loadingDiff")}
               </div>
             )}
             {!loading && !error && diffText && (

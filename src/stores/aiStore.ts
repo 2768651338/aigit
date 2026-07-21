@@ -1,8 +1,10 @@
 import { create } from "zustand";
+import i18n from "@/i18n";
 import type { AppConfig, ChatMessage } from "@/types";
 import { aiService } from "@/services/ai";
 import { configService } from "@/services/config";
 import { formatError } from "@/utils/error";
+import { useToastStore } from "@/stores/toastStore";
 
 interface SettingsState {
   config: AppConfig | null;
@@ -52,15 +54,17 @@ export const useSettingsStore = create<SettingsState>((set) => ({
  * absolute repo path. Consumers select by `currentPath`:
  *   `const messages = useAiStore(s => path ? (s.chatByRepo[path] ?? []) : []);`
  *
- * `loading` and `error` stay global — only one AI operation runs at a time,
- * and surfacing a single loading/error state in the UI is simpler than
- * tracking per-repo operation flags.
+ * `loading` stays global — only one AI operation runs at a time, and a single
+ * loading flag in the status bar / buttons is enough to signal "AI is working".
+ *
+ * Errors are surfaced via the global Toaster (see `toastStore`) directly from
+ * the catch blocks below, so we don't keep an `error` field that would leak
+ * across views.
  */
 interface AiState {
   chatByRepo: Record<string, ChatMessage[]>;
   lastResultByRepo: Record<string, string | null>;
   loading: boolean;
-  error: string | null;
 
   generateCommitMessage: (
     repoPath: string,
@@ -79,17 +83,21 @@ interface AiState {
   ) => Promise<void>;
   /** Clear chat history for a specific repo. */
   clearChat: (repoPath: string) => void;
-  clearError: () => void;
+}
+
+/** Push an AI failure into the global Toaster. Keeps catch blocks uniform. */
+function toastAiError(e: unknown, titleKey: string) {
+  const msg = formatError(e);
+  useToastStore.getState().error(msg, i18n.t(titleKey));
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
   chatByRepo: {},
   lastResultByRepo: {},
   loading: false,
-  error: null,
 
   generateCommitMessage: async (repoPath, config) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
       console.log("[aigit] Generating commit message for:", repoPath);
       const result = await aiService.generateCommitMessage(repoPath, config);
@@ -101,13 +109,15 @@ export const useAiStore = create<AiState>((set, get) => ({
       return result;
     } catch (e) {
       console.error("[aigit] Generate commit message failed:", e);
-      set({ error: formatError(e), loading: false });
+      set({ loading: false });
+      // The CommitPanel also surfaces this inline (so the user keeps context
+      // while writing the message). Throw so its own catch can do that.
       throw e;
     }
   },
 
   reviewCode: async (repoPath, config, filePath, stagedOnly) => {
-    set({ loading: true, error: null });
+    set({ loading: true });
     try {
       console.log("[aigit] Reviewing code:", repoPath, filePath, stagedOnly);
       const result = await aiService.reviewCode(
@@ -120,10 +130,12 @@ export const useAiStore = create<AiState>((set, get) => ({
         lastResultByRepo: { ...s.lastResultByRepo, [repoPath]: result },
         loading: false,
       }));
+      useToastStore.getState().success(i18n.t("review.reviewDone"));
       return result;
     } catch (e) {
       console.error("[aigit] Code review failed:", e);
-      set({ error: formatError(e), loading: false });
+      set({ loading: false });
+      toastAiError(e, "review.reviewFailed");
       throw e;
     }
   },
@@ -136,7 +148,6 @@ export const useAiStore = create<AiState>((set, get) => ({
     set((s) => ({
       chatByRepo: { ...s.chatByRepo, [repoPath]: messages },
       loading: true,
-      error: null,
     }));
 
     try {
@@ -152,7 +163,8 @@ export const useAiStore = create<AiState>((set, get) => ({
       }));
     } catch (e) {
       console.error("[aigit] Chat failed:", e);
-      set({ error: formatError(e), loading: false });
+      set({ loading: false });
+      toastAiError(e, "chat.errorTitle");
     }
   },
 
@@ -161,6 +173,4 @@ export const useAiStore = create<AiState>((set, get) => ({
       chatByRepo: { ...s.chatByRepo, [repoPath]: [] },
       lastResultByRepo: { ...s.lastResultByRepo, [repoPath]: null },
     })),
-
-  clearError: () => set({ error: null }),
 }));

@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
+import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
-import { showMessage } from "@/utils/dialog";
 import {
   CheckIcon,
   PlusIcon,
@@ -10,6 +10,7 @@ import {
   AlertCircleIcon,
   SendIcon,
   DownloadIcon,
+  SpinnerIcon,
 } from "@/components/common/Icons";
 
 export function CommitPanel() {
@@ -42,6 +43,7 @@ export function CommitPanel() {
   } = useRepoStore();
   const { generateCommitMessage } = useAiStore();
   const { config } = useSettingsStore();
+  const toast = useToastStore();
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
   const hasChanges = fileStatuses.length > 0;
@@ -63,11 +65,14 @@ export function CommitPanel() {
     try {
       const msg = await generateCommitMessage(currentPath, config);
       setMessage(msg);
+      toast.success(t("commit.aiGenerated"));
     } catch (e) {
       // aiStore sets its own global error; mirror it onto the active tab
       // so the inline panel can display the message.
       console.error("[aigit] AI Generate failed in panel:", e);
-      setAiError(formatError(e));
+      const msg = formatError(e);
+      setAiError(msg);
+      toast.error(msg, t("commit.aiGenerateFailed"));
     } finally {
       setAiLoading(false);
     }
@@ -89,28 +94,13 @@ export function CommitPanel() {
       await commit(message);
       setMessage("");
       await refreshStatus();
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setCommitting(false);
-    }
-  };
-
-  // Runs push and reports the outcome via a native modal dialog.
-  // Returns true on success, false on failure.
-  const runPushWithDialog = async (): Promise<boolean> => {
-    setPushError(null);
-    try {
-      await push(true);
-      const body = branch
-        ? t("commit.pushSuccessBody", { branch })
-        : t("commit.pushSuccessBodyGeneric");
-      await showMessage(t("commit.pushSuccessTitle"), body, "success");
-      return true;
+      toast.success(t("commit.commitSuccess"));
     } catch (e) {
       const msg = formatError(e);
-      setPushError(msg);
-      return false;
+      console.error("[aigit] commit failed:", e);
+      toast.error(msg, t("commit.commitFailed"));
+    } finally {
+      setCommitting(false);
     }
   };
 
@@ -124,30 +114,52 @@ export function CommitPanel() {
       setMessage("");
       // Push after a successful commit. If upstream is not configured,
       // pass set_upstream=true so the branch tracks origin on first push.
-      await runPushWithDialog();
+      try {
+        await push(true);
+        const body = branch
+          ? t("commit.pushSuccessBody", { branch })
+          : t("commit.pushSuccessBodyGeneric");
+        toast.success(body, t("commit.pushSuccessTitle"));
+      } catch (e) {
+        const msg = formatError(e);
+        setPushError(msg);
+        toast.error(msg, t("commit.pushFailed"));
+      }
       await refreshStatus();
     } catch (e) {
-      console.error(e);
+      // commit failed (push was not attempted)
+      const msg = formatError(e);
+      console.error("[aigit] commit&push failed at commit stage:", e);
+      toast.error(msg, t("commit.commitFailed"));
     } finally {
       setCommitAndPushing(false);
     }
   };
 
   const handlePushOnly = async () => {
-    await runPushWithDialog();
+    setPushError(null);
+    try {
+      await push(true);
+      const body = branch
+        ? t("commit.pushSuccessBody", { branch })
+        : t("commit.pushSuccessBodyGeneric");
+      toast.success(body, t("commit.pushSuccessTitle"));
+    } catch (e) {
+      const msg = formatError(e);
+      setPushError(msg);
+      toast.error(msg, t("commit.pushFailed"));
+    }
   };
 
   const handlePull = async () => {
     setPushError(null);
     try {
       await pull();
-      await showMessage(
-        t("commit.pullSuccessTitle"),
-        t("commit.pullSuccessBody"),
-        "success"
-      );
+      toast.success(t("commit.pullSuccessBody"), t("commit.pullSuccessTitle"));
     } catch (e) {
-      setPushError(formatError(e));
+      const msg = formatError(e);
+      setPushError(msg);
+      toast.error(msg, t("commit.pullFailed"));
     }
   };
 
@@ -190,7 +202,7 @@ export function CommitPanel() {
         </button>
       </div>
 
-      {/* AI error display */}
+      {/* AI error display (inline so users keep context while writing the message) */}
       {aiError && (
         <div className="flex items-start gap-2 px-4 py-2.5 bg-danger/10 text-danger text-xs border-b border-danger/20">
           <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
@@ -243,6 +255,7 @@ export function CommitPanel() {
           disabled={!currentPath || aiLoading}
           className="btn-ghost"
         >
+          {aiLoading ? <SpinnerIcon size={14} /> : <PlusIcon size={14} />}
           {aiLoading ? t("commit.generating") : t("commit.aiGenerate")}
         </button>
         <div className="flex-1" />
@@ -267,7 +280,7 @@ export function CommitPanel() {
             className="btn-secondary"
             title={t("commit.pull")}
           >
-            <DownloadIcon size={14} />
+            {pulling ? <SpinnerIcon size={14} /> : <DownloadIcon size={14} />}
             {pulling ? t("commit.pulling") : t("commit.pull")}
           </button>
         )}
@@ -279,7 +292,7 @@ export function CommitPanel() {
             className="btn-secondary"
             title={t("commit.push")}
           >
-            <SendIcon size={14} />
+            {pushing ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
             {pushing ? t("commit.pushing") : t("commit.push")}
           </button>
         )}
@@ -290,7 +303,7 @@ export function CommitPanel() {
           className="btn-secondary"
           title={t("commit.commitAndPush")}
         >
-          <SendIcon size={14} />
+          {commitAndPushing ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
           {commitAndPushing ? t("commit.committingAndPushing") : t("commit.commitAndPush")}
         </button>
         {/* Commit-only button */}
@@ -300,7 +313,7 @@ export function CommitPanel() {
           className="btn-primary"
           title={t("commit.commitShortcut")}
         >
-          <CheckIcon size={14} />
+          {committing ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />}
           {committing ? t("commit.committing") : t("commit.commit")}
         </button>
       </div>

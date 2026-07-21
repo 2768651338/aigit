@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
+import { useToastStore } from "@/stores/toastStore";
+import { formatError } from "@/utils/error";
 import { BranchGraph } from "@/components/git/BranchGraph";
 import {
   GitBranchIcon,
@@ -21,6 +23,7 @@ export function BranchesView() {
     switchBranch,
     deleteBranch,
   } = useRepoStore();
+  const toast = useToastStore();
 
   const [newBranchName, setNewBranchName] = useState("");
   const [showNewBranch, setShowNewBranch] = useState(false);
@@ -44,8 +47,30 @@ export function BranchesView() {
       await switchBranch(newBranchName.trim());
       setNewBranchName("");
       setShowNewBranch(false);
+      toast.success(t("branches.branchCreated", { name: newBranchName.trim() }));
     } catch (e) {
       console.error(e);
+      toast.error(formatError(e), t("branches.branchCreateFailed"));
+    }
+  };
+
+  const handleSwitch = async (name: string) => {
+    try {
+      await switchBranch(name);
+      toast.success(t("branches.switched", { name }));
+    } catch (e) {
+      console.error(e);
+      toast.error(formatError(e), t("branches.switchFailed"));
+    }
+  };
+
+  const handleDelete = async (name: string) => {
+    try {
+      await deleteBranch(name);
+      toast.success(t("branches.branchDeleted", { name }));
+    } catch (e) {
+      console.error(e);
+      toast.error(formatError(e), t("branches.branchDeleteFailed"));
     }
   };
 
@@ -96,7 +121,7 @@ export function BranchesView() {
                   "flex items-center gap-2 px-3 py-2 rounded cursor-pointer group",
                   branch.is_current ? "bg-bg-hover" : "hover:bg-bg-hover"
                 )}
-                onClick={() => !branch.is_current && switchBranch(branch.name)}
+                onClick={() => !branch.is_current && handleSwitch(branch.name)}
               >
                 <GitBranchIcon
                   size={16}
@@ -114,7 +139,7 @@ export function BranchesView() {
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteBranch(branch.name);
+                      handleDelete(branch.name);
                     }}
                     className="opacity-0 group-hover:opacity-100 text-text-muted hover:text-danger transition-opacity"
                   >

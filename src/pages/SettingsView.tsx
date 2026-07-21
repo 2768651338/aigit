@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
+import { useToastStore } from "@/stores/toastStore";
 import type { AppConfig, AiProviderConfig, PromptsConfig } from "@/types";
-import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import clsx from "clsx";
@@ -25,8 +26,9 @@ export function SettingsView() {
   const { config, loadConfig, saveConfig, error } = useSettingsStore();
   const openRepo = useRepoStore((s) => s.openRepo);
   const openTabs = useRepoStore((s) => s.tabOrder);
+  const toast = useToastStore();
   const [local, setLocal] = useState<AppConfig | null>(null);
-  const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
   useEffect(() => {
@@ -40,26 +42,29 @@ export function SettingsView() {
   const update = (partial: Partial<AiProviderConfig>) => {
     if (!local) return;
     setLocal({ ...local, ai: { ...local.ai, ...partial } });
-    setSaved(false);
   };
 
   const updateUi = (partial: Partial<AppConfig["ui"]>) => {
     if (!local) return;
     setLocal({ ...local, ui: { ...local.ui, ...partial } });
-    setSaved(false);
   };
 
   const updatePrompts = (partial: Partial<PromptsConfig>) => {
     if (!local) return;
     setLocal({ ...local, prompts: { ...local.prompts, ...partial } });
-    setSaved(false);
   };
 
   const handleSave = async () => {
-    if (!local) return;
+    if (!local || saving) return;
+    setSaving(true);
+    // Clear any prior error so we can re-evaluate after this attempt.
     await saveConfig(local);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaving(false);
+    if (useSettingsStore.getState().error) {
+      toast.error(useSettingsStore.getState().error as string, t("settings.saveFailed"));
+    } else {
+      toast.success(t("settings.saved"));
+    }
   };
 
   const handleCopy = async (text: string, field: string) => {
@@ -93,13 +98,8 @@ export function SettingsView() {
       <div className="flex items-center px-5 h-12 border-b border-border">
         <h2 className="text-base font-semibold">{t("settings.title")}</h2>
         <div className="flex-1" />
-        {saved && (
-          <span className="flex items-center gap-1 text-xs text-success animate-fade-in">
-            <CheckIcon size={14} /> {t("settings.saved")}
-          </span>
-        )}
-        <button onClick={handleSave} className="btn-primary ml-3">
-          <CheckIcon size={14} /> {t("settings.save")}
+        <button onClick={handleSave} disabled={saving} className="btn-primary ml-3">
+          {saving ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />} {t("settings.save")}
         </button>
       </div>
 

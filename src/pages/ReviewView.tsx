@@ -4,7 +4,7 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import {
   ScanSearchIcon,
-  AlertCircleIcon,
+  SpinnerIcon,
 } from "@/components/common/Icons";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import clsx from "clsx";
@@ -15,7 +15,6 @@ export function ReviewView() {
   const fileStatuses = useRepoStore((s) => s.fileStatuses);
   const reviewCode = useAiStore((s) => s.reviewCode);
   const loading = useAiStore((s) => s.loading);
-  const error = useAiStore((s) => s.error);
   const lastResult = useAiStore((s) =>
     currentPath ? s.lastResultByRepo[currentPath] ?? null : null
   );
@@ -33,8 +32,8 @@ export function ReviewView() {
         reviewedFile,
         reviewScope === "staged"
       );
-    } catch (e) {
-      console.error(e);
+    } catch {
+      // aiStore already surfaced the error via the global Toaster.
     }
   };
 
@@ -81,6 +80,7 @@ export function ReviewView() {
           disabled={loading}
           className="btn-primary ml-3"
         >
+          {loading ? <SpinnerIcon size={14} /> : <ScanSearchIcon size={14} />}
           {loading ? t("review.reviewing") : t("review.runReview")}
         </button>
       </div>
@@ -107,20 +107,14 @@ export function ReviewView() {
 
       {/* Review result */}
       <div className="flex-1 overflow-auto p-6">
-        {error && (
-          <div className="flex items-center gap-2 p-4 bg-danger/10 text-danger text-sm rounded border border-danger/20 mb-4">
-            <AlertCircleIcon size={16} />
-            {error}
-          </div>
-        )}
-
         {loading && (
-          <div className="flex flex-col items-center justify-center py-16">
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <SpinnerIcon size={28} className="text-accent" />
             <p className="text-sm text-text-secondary">{t("review.analyzing")}</p>
           </div>
         )}
 
-        {!loading && !lastResult && !error && (
+        {!loading && !lastResult && (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <ScanSearchIcon size={48} className="text-text-muted mb-4" />
             <p className="text-sm text-text-secondary max-w-md">
