@@ -125,6 +125,22 @@ fn build_ref_map(repo: &Repository) -> AppResult<std::collections::HashMap<Strin
     Ok(map)
 }
 
+/// List all tracked files in the repository index, sorted alphabetically.
+///
+/// Used by the AI chat @file picker so the user can attach any tracked file
+/// as context. We read directly from the index (no working-tree scan), which
+/// matches `git ls-files` semantics.
+pub fn list_files(repo: &Repository) -> AppResult<Vec<String>> {
+    let index = repo.index()?;
+    let mut files: Vec<String> = index
+        .iter()
+        .map(|e| e.path)
+        .filter_map(|p| String::from_utf8(p).ok())
+        .collect();
+    files.sort();
+    Ok(files)
+}
+
 pub fn get_commit_diff(repo: &Repository, hash: &str) -> AppResult<String> {
     let oid = git2::Oid::from_str(hash)?;
     let commit = repo.find_commit(oid)?;

@@ -4,15 +4,27 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
 import { BranchGraph } from "@/components/git/BranchGraph";
+import { MergeRebaseBar } from "@/components/git/MergeRebaseBar";
+import { TagPanel } from "@/components/git/TagPanel";
+import { StashPanel } from "@/components/git/StashPanel";
+import { SubmodulePanel } from "@/components/git/SubmodulePanel";
 import {
   GitBranchIcon,
+  TagIcon,
+  ArchiveIcon,
+  PackageIcon,
   PlusIcon,
   RefreshIcon,
   TrashIcon,
   CheckIcon,
   SpinnerIcon,
+  SearchIcon,
 } from "@/components/common/Icons";
+import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
+import { confirmDialog } from "@/utils/dialog";
 import clsx from "clsx";
+
+type SubTab = "branches" | "tags" | "stashes" | "submodules";
 
 export function BranchesView() {
   const { t } = useTranslation();
@@ -26,9 +38,12 @@ export function BranchesView() {
     deleteBranch,
   } = useRepoStore();
   const toast = useToastStore();
+  const { show: showMenu } = useContextMenu();
 
   const [newBranchName, setNewBranchName] = useState("");
   const [showNewBranch, setShowNewBranch] = useState(false);
+  const [search, setSearch] = useState("");
+  const [subTab, setSubTab] = useState<SubTab>("branches");
 
   if (!currentPath) {
     return (
@@ -40,6 +55,13 @@ export function BranchesView() {
 
   const localBranches = branches.filter((b) => !b.is_remote);
   const remoteBranches = branches.filter((b) => b.is_remote);
+  const q = search.trim().toLowerCase();
+  const filteredLocal = q
+    ? localBranches.filter((b) => b.name.toLowerCase().includes(q))
+    : localBranches;
+  const filteredRemote = q
+    ? remoteBranches.filter((b) => b.name.toLowerCase().includes(q))
+    : remoteBranches;
 
   const handleCreate = async () => {
     if (!newBranchName.trim()) return;
@@ -67,6 +89,12 @@ export function BranchesView() {
   };
 
   const handleDelete = async (name: string) => {
+    const confirmed = await confirmDialog(
+      t("branches.deleteTitle"),
+      t("branches.deleteConfirm", { name }),
+      "warning",
+    );
+    if (!confirmed) return;
     try {
       await deleteBranch(name);
       toast.success(t("branches.branchDeleted", { name }));
@@ -76,10 +104,80 @@ export function BranchesView() {
     }
   };
 
+  const handleBranchContextMenu = (
+    e: React.MouseEvent,
+    branch: { name: string; is_current: boolean },
+  ) => {
+    e.stopPropagation();
+    const items: MenuItem[] = [
+      {
+        label: t("branches.switch"),
+        icon: <GitBranchIcon size={14} />,
+        disabled: branch.is_current,
+        onClick: () => handleSwitch(branch.name),
+      },
+      {
+        label: t("branches.newBranch"),
+        icon: <PlusIcon size={14} />,
+        onClick: () => setShowNewBranch(true),
+      },
+      {
+        label: t("branches.delete"),
+        icon: <TrashIcon size={14} />,
+        disabled: branch.is_current,
+        danger: true,
+        onClick: () => handleDelete(branch.name),
+      },
+      { type: "separator" },
+      {
+        label: t("contextMenu.refreshStatus"),
+        icon: <RefreshIcon size={14} />,
+        onClick: () => refreshBranches(),
+      },
+    ];
+    showMenu(e, items);
+  };
+
+  const subTabs: { id: SubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
+    { id: "branches", label: t("branches.tabBranches"), icon: GitBranchIcon },
+    { id: "tags", label: t("branches.tabTags"), icon: TagIcon },
+    { id: "stashes", label: t("branches.tabStashes"), icon: ArchiveIcon },
+    { id: "submodules", label: t("branches.tabSubmodules"), icon: PackageIcon },
+  ];
+
+  // Delegate the whole panel to the dedicated component for non-branch tabs.
+  if (subTab === "tags") return <TagPanel />;
+  if (subTab === "stashes") return <StashPanel />;
+  if (subTab === "submodules") return <SubmodulePanel />;
+
   return (
     <div className="flex h-full">
       {/* Branch list sidebar */}
       <div className="w-72 border-r border-border flex flex-col overflow-hidden">
+        {/* Sub-tab header */}
+        <div className="flex border-b border-border">
+          {subTabs.map((tab) => {
+            const Icon = tab.icon;
+            const isActive = subTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setSubTab(tab.id)}
+                title={tab.label}
+                className={clsx(
+                  "flex-1 flex items-center justify-center gap-1.5 py-2.5 text-2xs font-medium transition-colors border-b-2",
+                  isActive
+                    ? "text-text-primary border-accent"
+                    : "text-text-muted hover:text-text-secondary border-transparent hover:bg-bg-hover"
+                )}
+              >
+                <Icon size={13} />
+                <span className="hidden xl:inline">{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
         <div className="flex items-center px-4 py-3 border-b border-border">
           <span className="text-base font-semibold flex-1">{t("branches.title")}</span>
           <button
@@ -126,8 +224,23 @@ export function BranchesView() {
           <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
             {t("branches.local")}
           </div>
+          <div className="px-3 pb-2 space-y-1.5">
+            <div className="relative">
+              <SearchIcon
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+              />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder={t("common.search")}
+                className="input text-xs py-1.5 pl-7"
+              />
+            </div>
+          </div>
           <div className="px-3 space-y-1">
-            {localBranches.map((branch) => (
+            {filteredLocal.map((branch) => (
               <div
                 key={branch.name}
                 className={clsx(
@@ -135,6 +248,7 @@ export function BranchesView() {
                   branch.is_current ? "bg-bg-hover" : "hover:bg-bg-hover"
                 )}
                 onClick={() => !branch.is_current && handleSwitch(branch.name)}
+                onContextMenu={(e) => handleBranchContextMenu(e, branch)}
                 onKeyDown={(e) => {
                   if ((e.key === "Enter" || e.key === " ") && !branch.is_current) {
                     e.preventDefault();
@@ -173,13 +287,13 @@ export function BranchesView() {
             ))}
           </div>
 
-          {remoteBranches.length > 0 && (
+          {filteredRemote.length > 0 && (
             <>
               <div className="px-4 py-2.5 mt-2 text-xs font-semibold uppercase tracking-wider text-text-muted border-t border-border-subtle">
                 {t("branches.remote")}
               </div>
               <div className="px-3 space-y-1">
-                {remoteBranches.map((branch) => (
+                {filteredRemote.map((branch) => (
                   <div
                     key={branch.name}
                     className="flex items-center gap-2 px-3 py-2 rounded hover:bg-bg-hover cursor-pointer"
@@ -196,14 +310,10 @@ export function BranchesView() {
         </div>
       </div>
 
-      {/* Commit graph */}
+      {/* Right panel: merge/rebase bar + commit graph */}
       <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex items-center px-5 h-12 border-b border-border">
-          <h2 className="text-base font-semibold">{t("branches.history")}</h2>
-        </div>
-        <div className="flex-1 overflow-hidden">
-          <BranchGraph />
-        </div>
+        <MergeRebaseBar />
+        <BranchGraph />
       </div>
     </div>
   );

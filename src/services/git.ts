@@ -4,7 +4,11 @@ import type {
   FileDiff,
   FileStatus,
   LogEntry,
+  MergeResult,
   RepoInfo,
+  StashInfo,
+  SubmoduleInfo,
+  TagInfo,
 } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
@@ -77,6 +81,24 @@ export const gitService = {
     return invoke<string>("amend_message", { path, message });
   },
 
+  /**
+   * Apply a unified-diff patch to the index (`git apply --cached`).
+   * Used by the "stage selected lines" feature in the diff viewer.
+   */
+  applyPatchToIndex: (path: string, patch: string) => {
+    ensureTauri();
+    return invoke<void>("apply_patch_to_index", { path, patch });
+  },
+
+  /**
+   * Reverse-apply a unified-diff patch to the index (`git apply --cached -R`).
+   * Used by the "unstage selected lines" feature.
+   */
+  applyPatchToIndexReverse: (path: string, patch: string) => {
+    ensureTauri();
+    return invoke<void>("apply_patch_to_index_reverse", { path, patch });
+  },
+
   listBranches: (path: string) => {
     ensureTauri();
     return invoke<BranchInfo[]>("list_branches", { path });
@@ -107,6 +129,12 @@ export const gitService = {
     return invoke<string>("get_commit_diff", { path, hash });
   },
 
+  /** List all tracked files in the repository (for the AI chat @file picker). */
+  listFiles: (path: string) => {
+    ensureTauri();
+    return invoke<string[]>("list_files", { path });
+  },
+
   push: (path: string, setUpstream?: boolean) => {
     ensureTauri();
     return invoke<string>("push", { path, setUpstream });
@@ -120,5 +148,153 @@ export const gitService = {
   discardFiles: (path: string, files: string[]) => {
     ensureTauri();
     return invoke<void>("discard_files", { path, files });
+  },
+
+  // --- Stash ---
+
+  listStashes: (path: string) => {
+    ensureTauri();
+    return invoke<StashInfo[]>("list_stashes", { path });
+  },
+
+  stashSave: (
+    path: string,
+    message?: string,
+    includeUntracked?: boolean,
+    keepIndex?: boolean
+  ) => {
+    ensureTauri();
+    return invoke<string>("stash_save", {
+      path,
+      message,
+      includeUntracked,
+      keepIndex,
+    });
+  },
+
+  stashApply: (path: string, index: number) => {
+    ensureTauri();
+    return invoke<string>("stash_apply", { path, index });
+  },
+
+  stashPop: (path: string, index: number) => {
+    ensureTauri();
+    return invoke<string>("stash_pop", { path, index });
+  },
+
+  stashDrop: (path: string, index: number) => {
+    ensureTauri();
+    return invoke<string>("stash_drop", { path, index });
+  },
+
+  // --- Tags ---
+
+  listTags: (path: string) => {
+    ensureTauri();
+    return invoke<TagInfo[]>("list_tags", { path });
+  },
+
+  createTag: (path: string, name: string, message?: string) => {
+    ensureTauri();
+    return invoke<string>("create_tag", { path, name, message });
+  },
+
+  deleteTag: (path: string, name: string) => {
+    ensureTauri();
+    return invoke<void>("delete_tag", { path, name });
+  },
+
+  // --- Submodules ---
+
+  listSubmodules: (path: string) => {
+    ensureTauri();
+    return invoke<SubmoduleInfo[]>("list_submodules", { path });
+  },
+
+  updateSubmodule: (path: string, name?: string) => {
+    ensureTauri();
+    return invoke<string>("update_submodule", { path, name });
+  },
+
+  addSubmodule: (
+    path: string,
+    url: string,
+    targetPath: string,
+    branch?: string
+  ) => {
+    ensureTauri();
+    return invoke<string>("add_submodule", {
+      path,
+      url,
+      targetPath,
+      branch,
+    });
+  },
+
+  removeSubmodule: (path: string, name: string) => {
+    ensureTauri();
+    return invoke<string>("remove_submodule", { path, name });
+  },
+
+  // --- Merge / Rebase ---
+
+  mergeBranch: (path: string, branch: string, noFf?: boolean) => {
+    ensureTauri();
+    return invoke<MergeResult>("merge_branch", { path, branch, noFf });
+  },
+
+  rebaseBranch: (path: string, branch: string) => {
+    ensureTauri();
+    return invoke<MergeResult>("rebase_branch", { path, branch });
+  },
+
+  abortMerge: (path: string) => {
+    ensureTauri();
+    return invoke<string>("abort_merge", { path });
+  },
+
+  abortRebase: (path: string) => {
+    ensureTauri();
+    return invoke<string>("abort_rebase", { path });
+  },
+
+  continueMerge: (path: string) => {
+    ensureTauri();
+    return invoke<string>("continue_merge", { path });
+  },
+
+  continueRebase: (path: string) => {
+    ensureTauri();
+    return invoke<string>("continue_rebase", { path });
+  },
+
+  skipRebase: (path: string) => {
+    ensureTauri();
+    return invoke<string>("skip_rebase", { path });
+  },
+
+  isMerging: (path: string) => {
+    ensureTauri();
+    return invoke<boolean>("is_merging", { path });
+  },
+
+  isRebasing: (path: string) => {
+    ensureTauri();
+    return invoke<boolean>("is_rebasing", { path });
+  },
+
+  resolveOurs: (path: string, files: string[]) => {
+    ensureTauri();
+    return invoke<string>("resolve_ours", { path, files });
+  },
+
+  resolveTheirs: (path: string, files: string[]) => {
+    ensureTauri();
+    return invoke<string>("resolve_theirs", { path, files });
+  },
+
+  listConflictedFiles: (path: string) => {
+    ensureTauri();
+    return invoke<string[]>("list_conflicted_files", { path });
   },
 };

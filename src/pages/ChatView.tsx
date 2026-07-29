@@ -1,15 +1,23 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
+import { gitService } from "@/services/git";
+import type { ChatAttachment, LogEntry } from "@/types";
 import {
   SendIcon,
   TrashIcon,
   SpinnerIcon,
   CopyIcon,
   CheckIcon,
+  FileEditIcon,
+  GitCommitIcon,
+  XIcon,
+  SearchIcon,
 } from "@/components/common/Icons";
+
+type PickerKind = "file" | "commit" | null;
 
 function CopyButton({ content }: { content: string }) {
   const { t } = useTranslation();
@@ -39,6 +47,7 @@ function CopyButton({ content }: { content: string }) {
 export function ChatView() {
   const { t } = useTranslation();
   const currentPath = useRepoStore((s) => s.currentPath);
+  const log = useRepoStore((s) => s.log);
   const chatMessages = useAiStore((s) =>
     currentPath ? s.chatByRepo[currentPath] ?? [] : []
   );
@@ -46,8 +55,18 @@ export function ChatView() {
   const sendChatMessage = useAiStore((s) => s.sendChatMessage);
   const clearChat = useAiStore((s) => s.clearChat);
   const { config } = useSettingsStore();
+
   const [input, setInput] = useState("");
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Picker state
+  const [picker, setPicker] = useState<PickerKind>(null);
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [files, setFiles] = useState<string[]>([]);
+  const [filesLoading, setFilesLoading] = useState(false);
+  const [filesLoaded, setFilesLoaded] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -55,11 +74,95 @@ export function ChatView() {
     }
   }, [chatMessages]);
 
+  // Reset attachments and picker when switching repos
+  useEffect(() => {
+    setAttachments([]);
+    setPicker(null);
+    setPickerQuery("");
+  }, [currentPath]);
+
+  // Close picker on outside click
+  useEffect(() => {
+    if (!picker) return;
+    const handler = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setPicker(null);
+        setPickerQuery("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [picker]);
+
+  const loadFiles = useCallback(async () => {
+    if (!currentPath || filesLoaded) return;
+    setFilesLoading(true);
+    try {
+      const list = await gitService.listFiles(currentPath);
+      setFiles(list);
+      setFilesLoaded(true);
+    } catch (e) {
+      console.error("[aigit] listFiles failed:", e);
+    } finally {
+      setFilesLoading(false);
+    }
+  }, [currentPath, filesLoaded]);
+
+  const openPicker = useCallback(
+    (kind: PickerKind) => {
+      setPicker((prev) => (prev === kind ? null : kind));
+      setPickerQuery("");
+      if (kind === "file") {
+        loadFiles();
+      }
+    },
+    [loadFiles]
+  );
+
+  const addFileAttachment = (path: string) => {
+    setAttachments((prev) => {
+      if (prev.some((a) => a.kind === "file" && a.path === path)) return prev;
+      return [...prev, { kind: "file", path }];
+    });
+  };
+
+  const addCommitAttachment = (hash: string) => {
+    setAttachments((prev) => {
+      if (prev.some((a) => a.kind === "commit" && a.hash === hash)) return prev;
+      return [...prev, { kind: "commit", hash }];
+    });
+  };
+
+  const removeAttachment = (idx: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== idx));
+  };
+
+  const filteredFiles = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return files.slice(0, 200);
+    return files.filter((f) => f.toLowerCase().includes(q)).slice(0, 200);
+  }, [files, pickerQuery]);
+
+  const filteredCommits = useMemo(() => {
+    const q = pickerQuery.trim().toLowerCase();
+    if (!q) return log.slice(0, 50);
+    return log
+      .filter(
+        (e) =>
+          e.message.toLowerCase().includes(q) ||
+          e.short_hash.toLowerCase().includes(q) ||
+          e.author.toLowerCase().includes(q)
+      )
+      .slice(0, 50);
+  }, [log, pickerQuery]);
+
   const handleSend = async () => {
     if (!input.trim() || !config || loading || !currentPath) return;
     const msg = input.trim();
+    const atts = attachments.length > 0 ? attachments : undefined;
     setInput("");
-    await sendChatMessage(msg, currentPath, config);
+    setAttachments([]);
+    await sendChatMessage(msg, currentPath, config, atts);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -71,6 +174,12 @@ export function ChatView() {
 
   const handleClear = () => {
     if (currentPath) clearChat(currentPath);
+  };
+
+  const handleSuggestion = (suggestion: string) => {
+    if (!currentPath || !config || loading) return;
+    const atts = attachments.length > 0 ? attachments : undefined;
+    sendChatMessage(suggestion, currentPath, config, atts);
   };
 
   const suggestions = [
@@ -109,11 +218,7 @@ export function ChatView() {
               {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
-                  onClick={() =>
-                    currentPath &&
-                    config &&
-                    sendChatMessage(suggestion, currentPath, config)
-                  }
+                  onClick={() => handleSuggestion(suggestion)}
                   disabled={!config || !currentPath}
                   className="text-sm text-text-secondary hover:text-text-primary hover:bg-bg-hover px-4 py-2 rounded transition-colors"
                 >
@@ -162,25 +267,151 @@ export function ChatView() {
 
       {/* Input */}
       <div className="border-t border-border p-4">
-        <div className="flex items-end gap-2 bg-bg-elevated border border-border rounded-lg p-3 focus-within:border-border-strong transition-colors">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={t("chat.inputPlaceholder")}
-            className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none max-h-32"
-            rows={1}
-            disabled={!config || !currentPath}
-          />
-          <button
-            onClick={handleSend}
-            disabled={!input.trim() || loading || !config || !currentPath}
-            className="btn-primary shrink-0"
-            aria-label={t("chat.send")}
-          >
-            {loading ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
-          </button>
+        {/* Attachment chips */}
+        {attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {attachments.map((att, idx) => (
+              <AttachmentChip
+                key={att.kind === "file" ? `f:${att.path}` : `c:${att.hash}`}
+                attachment={att}
+                log={log}
+                onRemove={() => removeAttachment(idx)}
+              />
+            ))}
+          </div>
+        )}
+
+        <div ref={pickerRef} className="relative">
+          {/* Picker popover */}
+          {picker && (
+            <div className="absolute bottom-full left-0 mb-2 w-96 max-w-full bg-bg-elevated border border-border rounded-md shadow-lg z-30 flex flex-col">
+              <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
+                <SearchIcon size={12} className="text-text-muted shrink-0" />
+                <input
+                  type="text"
+                  value={pickerQuery}
+                  onChange={(e) => setPickerQuery(e.target.value)}
+                  placeholder={
+                    picker === "file"
+                      ? t("chatContext.filePickerTitle")
+                      : t("chatContext.commitPickerTitle")
+                  }
+                  className="flex-1 bg-transparent text-xs text-text-primary placeholder:text-text-muted focus:outline-none"
+                  autoFocus
+                />
+                <button
+                  onClick={() => {
+                    setPicker(null);
+                    setPickerQuery("");
+                  }}
+                  className="text-text-muted hover:text-text-primary shrink-0"
+                  aria-label={t("common.cancel")}
+                >
+                  <XIcon size={14} />
+                </button>
+              </div>
+              <div className="max-h-60 overflow-auto">
+                {picker === "file" && filesLoading && (
+                  <div className="flex items-center justify-center gap-2 px-3 py-6 text-xs text-text-muted">
+                    <SpinnerIcon size={12} />
+                    {t("common.loading")}
+                  </div>
+                )}
+                {picker === "file" && !filesLoading && filteredFiles.length === 0 && (
+                  <div className="px-3 py-6 text-xs text-text-muted text-center">
+                    {files.length === 0 ? t("chatContext.parseError") : t("common.noResults")}
+                  </div>
+                )}
+                {picker === "file" &&
+                  !filesLoading &&
+                  filteredFiles.map((f) => (
+                    <button
+                      key={f}
+                      onClick={() => {
+                        addFileAttachment(f);
+                        setPicker(null);
+                        setPickerQuery("");
+                      }}
+                      className="flex items-center gap-2 w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary truncate"
+                      title={f}
+                    >
+                      <FileEditIcon size={12} className="shrink-0 text-text-muted" />
+                      <span className="truncate font-mono">{f}</span>
+                    </button>
+                  ))}
+                {picker === "commit" && filteredCommits.length === 0 && (
+                  <div className="px-3 py-6 text-xs text-text-muted text-center">
+                    {t("common.noResults")}
+                  </div>
+                )}
+                {picker === "commit" &&
+                  filteredCommits.map((entry: LogEntry) => (
+                    <button
+                      key={entry.hash}
+                      onClick={() => {
+                        addCommitAttachment(entry.hash);
+                        setPicker(null);
+                        setPickerQuery("");
+                      }}
+                      className="flex items-start gap-2 w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary"
+                      title={entry.message}
+                    >
+                      <GitCommitIcon size={12} className="shrink-0 text-text-muted mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate">{entry.message}</div>
+                        <div className="text-2xs text-text-muted font-mono">
+                          {entry.short_hash} · {entry.author}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-end gap-2 bg-bg-elevated border border-border rounded-lg p-3 focus-within:border-border-strong transition-colors">
+            {/* Attach buttons */}
+            <div className="flex items-center gap-0.5 shrink-0">
+              <button
+                onClick={() => openPicker("file")}
+                disabled={!config || !currentPath}
+                className={picker === "file" ? "text-accent" : "text-text-muted hover:text-text-primary"}
+                title={t("chatContext.mentionFile")}
+                aria-label={t("chatContext.attachFile")}
+              >
+                <FileEditIcon size={16} />
+              </button>
+              <button
+                onClick={() => openPicker("commit")}
+                disabled={!config || !currentPath}
+                className={picker === "commit" ? "text-accent" : "text-text-muted hover:text-text-primary"}
+                title={t("chatContext.mentionCommit")}
+                aria-label={t("chatContext.attachCommit")}
+              >
+                <GitCommitIcon size={16} />
+              </button>
+            </div>
+
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={t("chat.inputPlaceholder")}
+              className="flex-1 bg-transparent text-sm text-text-primary placeholder:text-text-muted focus:outline-none resize-none max-h-32"
+              rows={1}
+              disabled={!config || !currentPath}
+            />
+            <button
+              onClick={handleSend}
+              disabled={!input.trim() || loading || !config || !currentPath}
+              className="btn-primary shrink-0"
+              aria-label={t("chat.send")}
+            >
+              {loading ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
+            </button>
+          </div>
         </div>
+
         {!config && (
           <p className="text-xs text-text-muted mt-2 px-1">
             {t("chat.configureHint")}
@@ -191,8 +422,54 @@ export function ChatView() {
             {t("chat.openRepoHint")}
           </p>
         )}
+        {config && currentPath && attachments.length === 0 && picker === null && (
+          <p className="text-2xs text-text-muted mt-2 px-1">
+            {t("chatContext.attachmentsHint")}
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
+/** Render a single attachment as a removable chip. */
+function AttachmentChip({
+  attachment,
+  log,
+  onRemove,
+}: {
+  attachment: ChatAttachment;
+  log: LogEntry[];
+  onRemove: () => void;
+}) {
+  const { t } = useTranslation();
+  const label =
+    attachment.kind === "file"
+      ? attachment.path
+      : (() => {
+          const entry = log.find((e) => e.hash === attachment.hash);
+          return entry
+            ? `${entry.short_hash} ${entry.message}`.trim()
+            : attachment.hash.slice(0, 7);
+        })();
+
+  return (
+    <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded bg-bg-surface border border-border text-2xs text-text-secondary max-w-xs">
+      {attachment.kind === "file" ? (
+        <FileEditIcon size={11} className="shrink-0 text-text-muted" />
+      ) : (
+        <GitCommitIcon size={11} className="shrink-0 text-text-muted" />
+      )}
+      <span className="truncate" title={label}>
+        {label}
+      </span>
+      <button
+        onClick={onRemove}
+        className="shrink-0 text-text-muted hover:text-danger p-0.5 rounded"
+        aria-label={t("chatContext.removeAttachment")}
+      >
+        <XIcon size={11} />
+      </button>
+    </span>
+  );
+}

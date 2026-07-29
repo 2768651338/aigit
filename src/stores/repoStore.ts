@@ -4,8 +4,12 @@ import type {
   FileDiff,
   FileStatus,
   LogEntry,
+  MergeResult,
   RepoInfo,
   RepoTabState,
+  StashInfo,
+  SubmoduleInfo,
+  TagInfo,
 } from "@/types";
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
@@ -36,6 +40,13 @@ interface ActiveTabProjection {
   aiError: string | null;
   aiLoading: boolean;
   commitMessage: string;
+  stashes: StashInfo[] | null;
+  tags: TagInfo[] | null;
+  submodules: SubmoduleInfo[] | null;
+  mergeInProgress: boolean;
+  isRebasing: boolean;
+  conflicts: string[];
+  merging: boolean;
 }
 
 interface RepoStoreState extends ActiveTabProjection {
@@ -80,6 +91,48 @@ interface RepoStoreState extends ActiveTabProjection {
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   clearError: () => void;
+
+  // Patch-level staging (stage/unstage selected hunks or lines).
+  applyPatchToIndex: (patch: string) => Promise<void>;
+  applyPatchToIndexReverse: (patch: string) => Promise<void>;
+
+  // Stash
+  refreshStashes: () => Promise<void>;
+  stashSave: (
+    message?: string,
+    includeUntracked?: boolean,
+    keepIndex?: boolean
+  ) => Promise<string>;
+  stashApply: (index: number) => Promise<string>;
+  stashPop: (index: number) => Promise<string>;
+  stashDrop: (index: number) => Promise<string>;
+
+  // Tags
+  refreshTags: () => Promise<void>;
+  createTag: (name: string, message?: string) => Promise<string>;
+  deleteTag: (name: string) => Promise<void>;
+
+  // Submodules
+  refreshSubmodules: () => Promise<void>;
+  updateSubmodule: (name?: string) => Promise<string>;
+  addSubmodule: (
+    url: string,
+    path: string,
+    branch?: string
+  ) => Promise<string>;
+  removeSubmodule: (name: string) => Promise<string>;
+
+  // Merge / Rebase
+  mergeBranch: (branch: string, noFf?: boolean) => Promise<MergeResult>;
+  rebaseBranch: (branch: string) => Promise<MergeResult>;
+  abortMerge: () => Promise<string>;
+  abortRebase: () => Promise<string>;
+  continueMerge: () => Promise<string>;
+  continueRebase: () => Promise<string>;
+  skipRebase: () => Promise<string>;
+  refreshMergeState: () => Promise<void>;
+  resolveOurs: (files: string[]) => Promise<string>;
+  resolveTheirs: (files: string[]) => Promise<string>;
 }
 
 function createEmptyTab(path: string): RepoTabState {
@@ -103,6 +156,13 @@ function createEmptyTab(path: string): RepoTabState {
     pushError: null,
     aiError: null,
     aiLoading: false,
+    stashes: null,
+    tags: null,
+    submodules: null,
+    mergeInProgress: false,
+    isRebasing: false,
+    conflicts: [],
+    merging: false,
   };
 }
 
@@ -113,6 +173,28 @@ function getTab(
 ): RepoTabState | null {
   if (!path) return null;
   return tabs[path] ?? null;
+}
+
+/**
+ * Shallow-compare two file-status arrays. Used by `refreshStatus` to skip
+ * state updates when the 5-second polling returns identical data, which
+ * prevents unnecessary re-renders (UI thrash).
+ */
+function fileStatusesEqual(a: FileStatus[], b: FileStatus[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (
+      x.path !== y.path ||
+      x.status !== y.status ||
+      x.staged !== y.staged ||
+      x.old_path !== y.old_path
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 /**
@@ -145,6 +227,13 @@ function projectActiveTab(
       aiError: null,
       aiLoading: false,
       commitMessage: "",
+      stashes: null,
+      tags: null,
+      submodules: null,
+      mergeInProgress: false,
+      isRebasing: false,
+      conflicts: [],
+      merging: false,
     };
   }
   return {
@@ -167,6 +256,13 @@ function projectActiveTab(
     aiError: tab.aiError,
     aiLoading: tab.aiLoading,
     commitMessage: tab.commitMessage,
+    stashes: tab.stashes,
+    tags: tab.tags,
+    submodules: tab.submodules,
+    mergeInProgress: tab.mergeInProgress,
+    isRebasing: tab.isRebasing,
+    conflicts: tab.conflicts,
+    merging: tab.merging,
   };
 }
 
@@ -254,6 +350,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
       await get().refreshStatus(true);
       await get().refreshBranches(true);
       await get().refreshLog(true);
+      await get().refreshMergeState();
     } catch (e) {
       updateTab(set, get, path, {
         loading: false,
@@ -341,10 +438,24 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     const { activePath, tabs } = get();
     if (!activePath) return;
     if (!force && tabs[activePath]?.refreshing) return;
+    // Skip non-forced refreshes (e.g. the 5-second polling) while a commit or
+    // commit&push is in-flight — these operations call refreshStatus(true)
+    // themselves when done, so a polling refresh mid-commit would just thrash
+    // the UI and race with the operation.
+    if (
+      !force &&
+      (tabs[activePath]?.committing || tabs[activePath]?.commitAndPushing)
+    )
+      return;
     updateTab(set, get, activePath, { refreshing: true });
     try {
       const statuses = await gitService.getStatus(activePath);
-      updateTab(set, get, activePath, { fileStatuses: statuses });
+      // Shallow-compare with current data — skip the state update if nothing
+      // changed so the polling doesn't trigger unnecessary re-renders.
+      const current = get().tabs[activePath]?.fileStatuses ?? [];
+      if (!fileStatusesEqual(current, statuses)) {
+        updateTab(set, get, activePath, { fileStatuses: statuses });
+      }
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
     } finally {
@@ -566,5 +677,382 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
   clearError: () => {
     const { activePath } = get();
     if (activePath) updateTab(set, get, activePath, { error: null });
+  },
+
+  // --- Patch-level staging ---
+
+  applyPatchToIndex: async (patch: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      await gitService.applyPatchToIndex(activePath, patch);
+      await get().refreshStatus(true);
+      const tab = get().tabs[activePath];
+      if (tab?.selectedFile) {
+        await get().selectFile(tab.selectedFile);
+      }
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  applyPatchToIndexReverse: async (patch: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      await gitService.applyPatchToIndexReverse(activePath, patch);
+      await get().refreshStatus(true);
+      const tab = get().tabs[activePath];
+      if (tab?.selectedFile) {
+        await get().selectFile(tab.selectedFile);
+      }
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  // --- Stash ---
+
+  refreshStashes: async () => {
+    const { activePath } = get();
+    if (!activePath) return;
+    try {
+      const stashes = await gitService.listStashes(activePath);
+      updateTab(set, get, activePath, { stashes });
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+    }
+  },
+
+  stashSave: async (message, includeUntracked, keepIndex) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.stashSave(
+        activePath,
+        message,
+        includeUntracked,
+        keepIndex
+      );
+      await get().refreshStashes();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  stashApply: async (index: number) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.stashApply(activePath, index);
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  stashPop: async (index: number) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.stashPop(activePath, index);
+      await get().refreshStashes();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  stashDrop: async (index: number) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.stashDrop(activePath, index);
+      await get().refreshStashes();
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  // --- Tags ---
+
+  refreshTags: async () => {
+    const { activePath } = get();
+    if (!activePath) return;
+    try {
+      const tags = await gitService.listTags(activePath);
+      updateTab(set, get, activePath, { tags });
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+    }
+  },
+
+  createTag: async (name: string, message?: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.createTag(activePath, name, message);
+      await get().refreshTags();
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  deleteTag: async (name: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      await gitService.deleteTag(activePath, name);
+      await get().refreshTags();
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  // --- Submodules ---
+
+  refreshSubmodules: async () => {
+    const { activePath } = get();
+    if (!activePath) return;
+    try {
+      const submodules = await gitService.listSubmodules(activePath);
+      updateTab(set, get, activePath, { submodules });
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+    }
+  },
+
+  updateSubmodule: async (name?: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.updateSubmodule(activePath, name);
+      await get().refreshSubmodules();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  addSubmodule: async (url: string, path: string, branch?: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.addSubmodule(
+        activePath,
+        url,
+        path,
+        branch
+      );
+      await get().refreshSubmodules();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  removeSubmodule: async (name: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.removeSubmodule(activePath, name);
+      await get().refreshSubmodules();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  // --- Merge / Rebase ---
+
+  mergeBranch: async (branch: string, noFf?: boolean) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    updateTab(set, get, activePath, { merging: true, error: null });
+    try {
+      const result = await gitService.mergeBranch(activePath, branch, noFf);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      await get().refreshBranches(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    } finally {
+      updateTab(set, get, activePath, { merging: false });
+    }
+  },
+
+  rebaseBranch: async (branch: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    updateTab(set, get, activePath, { merging: true, error: null });
+    try {
+      const result = await gitService.rebaseBranch(activePath, branch);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      await get().refreshBranches(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    } finally {
+      updateTab(set, get, activePath, { merging: false });
+    }
+  },
+
+  abortMerge: async () => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.abortMerge(activePath);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  abortRebase: async () => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.abortRebase(activePath);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  continueMerge: async () => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.continueMerge(activePath);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  continueRebase: async () => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.continueRebase(activePath);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  skipRebase: async () => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.skipRebase(activePath);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  refreshMergeState: async () => {
+    const { activePath } = get();
+    if (!activePath) return;
+    try {
+      const [merging, rebasing] = await Promise.all([
+        gitService.isMerging(activePath),
+        gitService.isRebasing(activePath),
+      ]);
+      const inProgress = merging || rebasing;
+      let conflicts: string[] = [];
+      if (inProgress) {
+        try {
+          conflicts = await gitService.listConflictedFiles(activePath);
+        } catch {
+          conflicts = [];
+        }
+      }
+      updateTab(set, get, activePath, {
+        mergeInProgress: inProgress,
+        isRebasing: rebasing,
+        conflicts,
+      });
+    } catch (e) {
+      // Merge-state detection is best-effort — don't surface as a hard error.
+      console.warn("[repoStore] refreshMergeState failed:", e);
+    }
+  },
+
+  resolveOurs: async (files: string[]) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.resolveOurs(activePath, files);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  resolveTheirs: async (files: string[]) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.resolveTheirs(activePath, files);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
   },
 }));

@@ -1,10 +1,17 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import type { LogEntry } from "@/types";
-import { GitBranchIcon, AlertCircleIcon, SpinnerIcon, XIcon } from "@/components/common/Icons";
+import {
+  GitBranchIcon,
+  AlertCircleIcon,
+  SpinnerIcon,
+  XIcon,
+  SearchIcon,
+  FilterIcon,
+} from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function BranchGraph() {
@@ -15,8 +22,28 @@ export function BranchGraph() {
   const [diffText, setDiffText] = useState<string>("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [authorFilter, setAuthorFilter] = useState("");
+  const [showAuthorFilter, setShowAuthorFilter] = useState(false);
 
-  const laneMap = computeLanes(log);
+  // Unique authors from the loaded log — used to populate the author dropdown.
+  const authors = useMemo(
+    () => Array.from(new Set(log.map((e) => e.author))).sort(),
+    [log]
+  );
+
+  const q = search.trim().toLowerCase();
+  const filteredLog = log.filter((e) => {
+    if (authorFilter && e.author !== authorFilter) return false;
+    if (!q) return true;
+    return (
+      e.message.toLowerCase().includes(q) ||
+      e.author.toLowerCase().includes(q) ||
+      e.short_hash.toLowerCase().includes(q)
+    );
+  });
+
+  const laneMap = computeLanes(filteredLog);
 
   const handleEntryClick = async (entry: LogEntry) => {
     if (!currentPath) return;
@@ -44,11 +71,57 @@ export function BranchGraph() {
   };
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-5 h-12 border-b border-border shrink-0">
+        <h2 className="text-base font-semibold shrink-0">{t("branches.history")}</h2>
+        <div className="relative flex-1 max-w-sm">
+          <SearchIcon
+            size={12}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+          />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("common.search")}
+            className="input text-xs py-1.5 pl-7 pr-7 w-full"
+          />
+          <button
+            onClick={() => setShowAuthorFilter((v) => !v)}
+            className={clsx(
+              "absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-primary transition-colors",
+              showAuthorFilter && "text-accent"
+            )}
+            title={t("branches.filterAuthor")}
+            aria-label={t("branches.filterAuthor")}
+          >
+            <FilterIcon size={12} />
+          </button>
+        </div>
+        {showAuthorFilter && (
+          <select
+            value={authorFilter}
+            onChange={(e) => setAuthorFilter(e.target.value)}
+            className="input text-xs py-1.5 max-w-40"
+          >
+            <option value="">{t("branches.filterAllAuthors")}</option>
+            {authors.map((a) => (
+              <option key={a} value={a}>
+                {a}
+              </option>
+            ))}
+          </select>
+        )}
+        <span className="text-2xs text-text-muted shrink-0">
+          {filteredLog.length}/{log.length}
+        </span>
+      </div>
+      <div className="flex flex-1 overflow-hidden">
       {/* Commit list */}
       <div className="flex-1 overflow-auto h-full">
         <div className="min-w-full">
-          {log.map((entry, idx) => {
+          {filteredLog.map((entry, idx) => {
             const lanes = laneMap.get(entry.hash) ?? { lane: 0, maxLanes: 1 };
             const isMerge = entry.parents.length > 1;
             const localRefs = entry.refs.filter((r) => !r.includes("/"));
@@ -75,11 +148,11 @@ export function BranchGraph() {
                       left: `${lanes.lane * 20 + 6}px`,
                       width: "8px",
                       height: "8px",
-                      backgroundColor: isMerge ? "#ffa502" : "#d4ff3a",
+                      backgroundColor: isMerge ? "rgb(var(--color-warning))" : "rgb(var(--color-accent))",
                     }}
                   />
                   {/* Vertical line for parent */}
-                  {idx < log.length - 1 && (
+                  {idx < filteredLog.length - 1 && (
                     <div
                       className="absolute top-1/2 w-px bg-border"
                       style={{
@@ -202,6 +275,7 @@ export function BranchGraph() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

@@ -124,3 +124,108 @@ pub fn discard_files(repo: &Repository, paths: &[String]) -> AppResult<()> {
 
     Ok(())
 }
+
+/// Apply a unified-diff patch to the index (a.k.a. `git apply --cached`).
+///
+/// Used by the "stage selected lines" feature in the diff viewer: the
+/// frontend constructs a patch for the user's selected hunk subset and we
+/// apply it directly to the index without touching the working tree.
+///
+/// `patch` is a UTF-8 unified diff. We write it to a temp file because
+/// `git apply` reads from stdin only via `-` (Windows pipes are flaky).
+pub fn apply_patch_to_index(repo: &Repository, patch: &str) -> AppResult<()> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+
+    // Write patch to a temp file inside the workdir (avoids path-permission
+    // issues and ensures relative pathspec resolution matches git's CWD).
+    let tmp = workdir.join(".aigit_patch.tmp");
+    std::fs::write(&tmp, patch).map_err(|e| {
+        AppError::General(format!("写入 patch 临时文件失败：{e}"))
+    })?;
+
+    let args = [
+        "apply".to_string(),
+        "--cached".to_string(),
+        "--whitespace=nowarn".to_string(),
+        ".aigit_patch.tmp".to_string(),
+    ];
+
+    let output = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(workdir)
+        .output();
+
+    // Always clean up the temp file.
+    let _ = std::fs::remove_file(&tmp);
+
+    let output = output.map_err(|e| {
+        AppError::General(format!(
+            "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
+        ))
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let msg = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
+        return Err(AppError::General(format!("应用 patch 到暂存区失败：\n{msg}")));
+    }
+
+    Ok(())
+}
+
+/// Reverse-apply a unified-diff patch to the index (a.k.a. `git apply --cached -R`).
+///
+/// Used by the "unstage selected lines" feature: the frontend constructs a
+/// patch for the user's selected hunk subset of the staged diff and we
+/// reverse-apply it to the index.
+pub fn apply_patch_to_index_reverse(repo: &Repository, patch: &str) -> AppResult<()> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+
+    let tmp = workdir.join(".aigit_patch.tmp");
+    std::fs::write(&tmp, patch).map_err(|e| {
+        AppError::General(format!("写入 patch 临时文件失败：{e}"))
+    })?;
+
+    let args = [
+        "apply".to_string(),
+        "--cached".to_string(),
+        "--reverse".to_string(),
+        "--whitespace=nowarn".to_string(),
+        ".aigit_patch.tmp".to_string(),
+    ];
+
+    let output = std::process::Command::new("git")
+        .args(&args)
+        .current_dir(workdir)
+        .output();
+
+    let _ = std::fs::remove_file(&tmp);
+
+    let output = output.map_err(|e| {
+        AppError::General(format!(
+            "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
+        ))
+    })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+        let msg = if stderr.trim().is_empty() {
+            stdout
+        } else {
+            stderr
+        };
+        return Err(AppError::General(format!("从暂存区反向应用 patch 失败：\n{msg}")));
+    }
+
+    Ok(())
+}

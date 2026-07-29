@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, ChatMessage } from "@/types";
+import type { AppConfig, ChatAttachment, ChatMessage } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
 /**
@@ -36,12 +36,25 @@ export const aiService = {
     });
   },
 
+  /**
+   * Send a chat request with optional context attachments.
+   *
+   * `attachments` lets the user inject `@file:<path>` / `@commit:<hash>`
+   * references — the backend resolves them to actual file content / commit
+   * patches and appends them to the system prompt as repository context.
+   */
   repoChat: (
     messages: ChatMessage[],
     config: AppConfig,
-    repoPath?: string
+    repoPath?: string,
+    attachments?: ChatAttachment[]
   ) => {
     ensureTauri();
-    return invoke<string>("repo_chat", { messages, config, repoPath });
+    return invoke<string>("repo_chat", {
+      messages,
+      config,
+      repoPath,
+      attachments,
+    });
   },
 };

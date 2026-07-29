@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import i18n from "@/i18n";
-import type { AppConfig, ChatMessage } from "@/types";
+import type { AppConfig, ChatAttachment, ChatMessage } from "@/types";
 import { aiService } from "@/services/ai";
 import { configService } from "@/services/config";
 import { formatError } from "@/utils/error";
@@ -79,7 +79,8 @@ interface AiState {
   sendChatMessage: (
     content: string,
     repoPath: string | null,
-    config: AppConfig
+    config: AppConfig,
+    attachments?: ChatAttachment[]
   ) => Promise<void>;
   /** Clear chat history for a specific repo. */
   clearChat: (repoPath: string) => void;
@@ -140,7 +141,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     }
   },
 
-  sendChatMessage: async (content, repoPath, config) => {
+  sendChatMessage: async (content, repoPath, config, attachments) => {
     if (!repoPath) return;
     const userMessage: ChatMessage = { role: "user", content };
     const prior = get().chatByRepo[repoPath] ?? [];
@@ -152,7 +153,12 @@ export const useAiStore = create<AiState>((set, get) => ({
 
     try {
       console.log("[aigit] Sending chat message");
-      const response = await aiService.repoChat(messages, config, repoPath);
+      const response = await aiService.repoChat(
+        messages,
+        config,
+        repoPath,
+        attachments
+      );
       const assistantMessage: ChatMessage = { role: "assistant", content: response };
       set((s) => ({
         chatByRepo: {

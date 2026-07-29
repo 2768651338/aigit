@@ -6,6 +6,12 @@ import { TabBar } from "@/components/layout/TabBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import {
+  ContextMenuProvider,
+  useContextMenu,
+  type MenuItem,
+} from "@/components/common/ContextMenu";
+import { RefreshIcon, CopyIcon } from "@/components/common/Icons";
 import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
 import { ReviewView } from "@/pages/ReviewView";
@@ -14,13 +20,23 @@ import { SettingsView } from "@/pages/SettingsView";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { gitService } from "@/services/git";
+import { applyTheme, type ThemeMode } from "@/utils/theme";
 import type { ViewType } from "@/types";
 
 export default function App() {
-  const { i18n } = useTranslation();
+  return (
+    <ContextMenuProvider>
+      <AppShell />
+    </ContextMenuProvider>
+  );
+}
+
+function AppShell() {
+  const { i18n, t } = useTranslation();
   const [activeView, setActiveView] = useState<ViewType>("changes");
   const { config, loadConfig } = useSettingsStore();
-  const { openRepo, setActiveRepo } = useRepoStore();
+  const { openRepo, setActiveRepo, currentPath, refreshStatus } = useRepoStore();
+  const { show: showMenu } = useContextMenu();
   // Guard against re-opening tabs on every config change.
   const hasRestoredRef = useRef(false);
 
@@ -34,6 +50,12 @@ export default function App() {
       document.documentElement.style.fontSize = `${config.ui.font_size}px`;
     }
   }, [config]);
+
+  // Apply theme from config (light / dark / system). For "system" the
+  // utility registers a media-query listener so the theme tracks OS changes.
+  useEffect(() => {
+    applyTheme((config?.ui?.theme as ThemeMode) ?? "dark");
+  }, [config?.ui?.theme]);
 
   // Apply language from config
   useEffect(() => {
@@ -101,9 +123,52 @@ export default function App() {
     })();
   }, [config, openRepo, setActiveRepo]);
 
+  // 全局回退右键菜单：在非特殊区域右键时显示「刷新仓库状态 / 复制选中内容」。
+  // 文件列表、分支列表等子组件会调用 e.stopPropagation() 阻止冒泡到此处，
+  // 从而显示各自的上下文菜单。
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    const tag = target?.tagName;
+    // 输入框内交给原生菜单（复制 / 粘贴 / 拼写检查）
+    if (
+      tag === "INPUT" ||
+      tag === "TEXTAREA" ||
+      tag === "SELECT" ||
+      target?.isContentEditable === true
+    ) {
+      return;
+    }
+
+    const items: MenuItem[] = [];
+    if (currentPath) {
+      items.push({
+        label: t("contextMenu.refreshStatus"),
+        icon: <RefreshIcon size={14} />,
+        onClick: () => refreshStatus(),
+      });
+    }
+    // 文本选中时提供「复制」
+    const selection = window.getSelection?.();
+    const text = selection?.toString().trim();
+    if (text) {
+      items.push({
+        label: t("contextMenu.copy"),
+        icon: <CopyIcon size={14} />,
+        onClick: () => {
+          navigator.clipboard?.writeText(text).catch(() => {});
+        },
+      });
+    }
+    if (items.length === 0) return;
+    showMenu(e, items);
+  };
+
   return (
     <ErrorBoundary>
-      <div className="flex flex-col h-screen bg-bg-base text-text-primary">
+      <div
+        className="flex flex-col h-screen bg-bg-base text-text-primary"
+        onContextMenu={handleContextMenu}
+      >
         <div className="flex flex-1 overflow-hidden">
           <Sidebar activeView={activeView} onViewChange={setActiveView} />
           <main className="flex-1 flex flex-col overflow-hidden">

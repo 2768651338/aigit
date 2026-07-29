@@ -1,9 +1,13 @@
 pub mod branch;
 pub mod commit;
 pub mod diff;
+pub mod merge;
 pub mod remote;
 pub mod repo;
 pub mod status;
+pub mod stash;
+pub mod submodule;
+pub mod tag;
 
 use serde::{Deserialize, Serialize};
 
@@ -80,4 +84,68 @@ pub struct RepoInfo {
     pub ahead: usize,
     pub behind: usize,
     pub head_hash: Option<String>,
+}
+
+/// Snapshot of a single stash entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StashInfo {
+    /// Stash index in the reflog (0 = most recent).
+    pub index: usize,
+    /// Stash commit hash.
+    pub hash: String,
+    /// Short hash (first 7 chars).
+    pub short_hash: String,
+    /// Stash message as supplied to `git stash save`.
+    pub message: String,
+    /// Stash commit timestamp (Unix seconds).
+    pub date: i64,
+}
+
+/// Lightweight or annotated tag descriptor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagInfo {
+    pub name: String,
+    /// Target commit hash.
+    pub target_hash: String,
+    pub short_hash: String,
+    /// Target commit summary.
+    pub target_message: String,
+    /// Target commit timestamp (Unix seconds).
+    pub target_date: i64,
+    /// `true` for annotated tags, `false` for lightweight.
+    pub is_annotated: bool,
+    /// Annotated tag message (empty for lightweight).
+    pub annotation: String,
+    /// Tagger name (annotated only).
+    pub tagger: Option<String>,
+}
+
+/// Submodule descriptor returned by `list_submodules`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SubmoduleInfo {
+    /// Logical name (typically the submodule's path in `.gitmodules`).
+    pub name: String,
+    /// Path inside the superproject working tree.
+    pub path: String,
+    /// HEAD commit OID recorded in the submodule's repository.
+    pub head_oid: String,
+    /// Short hash.
+    pub short_hash: String,
+    /// URL from `.gitmodules` (empty if not initialized).
+    pub url: String,
+    /// Status string: "unchanged" / "modified" / "uninitialized" / "deleted".
+    pub status: String,
+}
+
+/// Result of a merge or rebase operation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MergeResult {
+    /// `true` if the operation completed without conflicts.
+    pub success: bool,
+    /// Human-readable summary from git.
+    pub message: String,
+    /// `true` if conflicts remain and the operation is paused.
+    pub has_conflicts: bool,
+    /// List of conflicting file paths (empty when no conflicts).
+    pub conflicts: Vec<String>,
 }

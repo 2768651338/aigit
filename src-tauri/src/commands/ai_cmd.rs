@@ -3,6 +3,8 @@ use crate::config::AppConfig;
 use crate::error::{AppError, AppResult};
 use crate::git;
 
+use serde::{Deserialize, Serialize};
+
 /// Built-in default system prompts. Exposed publicly so the config command
 /// can return them to the frontend for "reset to default" functionality.
 pub const DEFAULT_COMMIT_MSG_SYSTEM: &str = r#"你是一位资深软件工程师，擅长撰写清晰、简洁的 Git 提交信息，遵循 Conventional Commits 规范。
@@ -83,6 +85,25 @@ fn repo_chat_prompt(config: &AppConfig) -> &str {
     }
 }
 
+/// A user-attached context reference in a chat message.
+///
+/// The frontend parses `@file:<path>` and `@commit:<hash>` mentions out of
+/// the user's input and passes them here so the backend can resolve and
+/// inject the corresponding content (file at a ref, or commit patch) into
+/// the system prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ChatAttachment {
+    /// A file at a given ref (defaults to HEAD when `ref_name` is None).
+    File {
+        path: String,
+        #[serde(default)]
+        ref_name: Option<String>,
+    },
+    /// A commit's metadata + patch.
+    Commit { hash: String },
+}
+
 #[tauri::command]
 pub async fn generate_commit_message(
     repo_path: String,
@@ -154,6 +175,7 @@ pub async fn review_code(
 pub async fn repo_chat(
     messages: Vec<ChatMessage>,
     repo_path: Option<String>,
+    attachments: Option<Vec<ChatAttachment>>,
     config: AppConfig,
 ) -> AppResult<String> {
     let provider = ai::get_provider(&config.ai.active_provider)?;
@@ -175,6 +197,44 @@ pub async fn repo_chat(
                         "  {} {} ({})\n",
                         &entry.short_hash, entry.message, entry.author
                     ));
+                }
+            }
+
+            // Resolve user-supplied attachments (@file / @commit mentions)
+            // into actual content blocks appended to the context.
+            if let Some(atts) = &attachments {
+                for att in atts {
+                    match att {
+                        ChatAttachment::File { path: file_path, ref_name } => {
+                            match resolve_file_content(&repo, file_path, ref_name.as_deref()) {
+                                Ok(content) => {
+                                    context.push_str(&format!(
+                                        "\n--- File: {file_path} @ {} ---\n{content}\n",
+                                        ref_name.as_deref().unwrap_or("HEAD")
+                                    ));
+                                }
+                                Err(e) => {
+                                    context.push_str(&format!(
+                                        "\n--- File: {file_path} (读取失败: {e}) ---\n"
+                                    ));
+                                }
+                            }
+                        }
+                        ChatAttachment::Commit { hash } => {
+                            match git::branch::get_commit_diff(&repo, hash) {
+                                Ok(patch) => {
+                                    context.push_str(&format!(
+                                        "\n--- Commit {hash} patch ---\n```diff\n{patch}\n```\n"
+                                    ));
+                                }
+                                Err(e) => {
+                                    context.push_str(&format!(
+                                        "\n--- Commit {hash} (读取失败: {e}) ---\n"
+                                    ));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -201,11 +261,49 @@ pub fn get_default_prompts() -> AppResult<DefaultPrompts> {
     })
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DefaultPrompts {
     pub commit_message: String,
     pub code_review: String,
     pub repo_chat: String,
+}
+
+/// Read a file's content at a given ref using `git show <ref>:<path>`.
+///
+/// We use the system `git` CLI rather than libgit2's blob API because the
+/// CLI handles encoding/line-ending normalization transparently and matches
+/// what `git show` produces in the terminal — which is what users expect
+/// when they say "show me this file at HEAD".
+fn resolve_file_content(
+    repo: &git2::Repository,
+    file_path: &str,
+    ref_name: Option<&str>,
+) -> AppResult<String> {
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+
+    let reference = ref_name.unwrap_or("HEAD");
+    let spec = format!("{reference}:{file_path}");
+
+    let output = std::process::Command::new("git")
+        .args(["show".to_string(), spec])
+        .current_dir(workdir)
+        .output()
+        .map_err(|e| {
+            AppError::General(format!(
+                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
+            ))
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(AppError::General(format!(
+            "读取文件 {file_path} @ {reference} 失败：{stderr}"
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn format_diffs(diffs: &[git::FileDiff]) -> String {

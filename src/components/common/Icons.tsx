@@ -219,3 +219,103 @@ export const InfoIcon = (p: IconProps) => (
     <line x1="12" y1="8" x2="12.01" y2="8" />
   </Icon>
 );
+
+export const HistoryIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3 3v5h5" />
+    <path d="M3.05 13A9 9 0 1 0 6 5.3L3 8" />
+    <path d="M12 7v5l4 2" />
+  </Icon>
+);
+
+export const GithubIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22" />
+  </Icon>
+);
+
+// --- v1.0.3 additions ---
+
+/** Stash / archive drawer icon. */
+export const ArchiveIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect width="20" height="5" x="2" y="3" rx="1" />
+    <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+    <path d="M10 12h4" />
+  </Icon>
+);
+
+/** Tag icon. */
+export const TagIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+    <circle cx="7.5" cy="7.5" r=".5" fill="currentColor" />
+  </Icon>
+);
+
+/** Package / nested-module icon (for submodules). */
+export const PackageIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m7.5 4.27 9 5.15" />
+    <path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+    <path d="m3.3 7 8.7 5 8.7-5" />
+    <path d="M12 22V12" />
+  </Icon>
+);
+
+/** Git-merge icon. */
+export const GitMergeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="18" cy="18" r="3" />
+    <circle cx="6" cy="6" r="3" />
+    <path d="M6 21V9a9 9 0 0 0 9 9" />
+  </Icon>
+);
+
+/** Git-pull-request / rebase icon. */
+export const GitPullRequestIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="6" cy="6" r="3" />
+    <circle cx="18" cy="18" r="3" />
+    <path d="M13 6h3a2 2 0 0 1 2 2v7" />
+    <line x1="6" y1="9" x2="6" y2="21" />
+  </Icon>
+);
+
+/** Search icon (for history search). */
+export const SearchIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="11" cy="11" r="8" />
+    <path d="m21 21-4.3-4.3" />
+  </Icon>
+);
+
+/** At-sign icon (for chat @ mentions). */
+export const AtSignIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="12" cy="12" r="4" />
+    <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" />
+  </Icon>
+);
+
+/** Play icon (continue an in-progress operation). */
+export const PlayIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </Icon>
+);
+
+/** Skip-forward icon (rebase --skip). */
+export const SkipForwardIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="5 4 15 12 5 20 5 4" />
+    <line x1="19" y1="5" x2="19" y2="19" />
+  </Icon>
+);
+
+/** Filter icon (for log filtering). */
+export const FilterIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+  </Icon>
+);

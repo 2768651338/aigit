@@ -4,21 +4,30 @@ import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { AppConfig, AiProviderConfig, PromptsConfig } from "@/types";
-import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon, GithubIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
+import { applyTheme, type ThemeMode } from "@/utils/theme";
 import clsx from "clsx";
+import { open as openExternal } from "@tauri-apps/plugin-shell";
 
 const AUTHOR = "田小橙";
 const QQ = "2768651338";
 const EMAIL = "2768651338@qq.com";
-const APP_VERSION = "1.0.2";
+const GITHUB_REPO = "https://github.com/2768651338/aigit";
+const APP_VERSION = "1.0.3";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
   { id: "claude", label: "Claude (Anthropic)", needsKey: true },
   { id: "deepseek", label: "DeepSeek", needsKey: true },
   { id: "ollama", label: "Ollama (Local)", needsKey: false },
+];
+
+const THEMES: { id: ThemeMode; labelKey: string }[] = [
+  { id: "light", labelKey: "settings.themeLight" },
+  { id: "dark", labelKey: "settings.themeDark" },
+  { id: "system", labelKey: "settings.themeSystem" },
 ];
 
 export function SettingsView() {
@@ -77,12 +86,27 @@ export function SettingsView() {
     }
   };
 
+  const handleOpenUrl = async (url: string) => {
+    try {
+      await openExternal(url);
+    } catch (e) {
+      console.warn("[aigit] Tauri shell open failed, fallback to window.open:", e);
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  };
+
   // Live-apply language change before save for immediate feedback
   const handleLanguageChange = (lang: string) => {
     updateUi({ language: lang });
     if (i18n.language !== lang) {
       i18n.changeLanguage(lang);
     }
+  };
+
+  // Live-apply theme change before save for immediate feedback
+  const handleThemeChange = (theme: string) => {
+    updateUi({ theme });
+    applyTheme(theme as ThemeMode);
   };
 
   if (!local) {
@@ -289,6 +313,29 @@ export function SettingsView() {
             {t("settings.interface")}
           </h3>
           <div className="space-y-4">
+            {/* Theme selector */}
+            <Field label={t("settings.theme")}>
+              <div className="flex gap-2">
+                {THEMES.map((th) => (
+                  <button
+                    key={th.id}
+                    onClick={() => handleThemeChange(th.id)}
+                    className={clsx(
+                      "px-4 py-2 rounded border text-sm transition-colors",
+                      local.ui.theme === th.id
+                        ? "border-border-strong bg-bg-hover text-text-primary"
+                        : "border-border bg-bg-elevated text-text-secondary hover:bg-bg-hover"
+                    )}
+                  >
+                    {t(th.labelKey)}
+                    {local.ui.theme === th.id && (
+                      <CheckIcon size={14} className="inline ml-1.5" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </Field>
+
             {/* Language selector */}
             <Field label={t("settings.language")}>
               <div className="flex gap-2">
@@ -435,6 +482,24 @@ export function SettingsView() {
                     <CopyIcon size={12} />
                   )}
                 </button>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
+                {t("settings.openSource")}
+              </span>
+              <div className="flex items-center gap-2">
+                <GithubIcon size={14} className="text-text-muted" />
+                <a
+                  href={GITHUB_REPO}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    handleOpenUrl(GITHUB_REPO);
+                  }}
+                  className="text-accent hover:underline font-mono"
+                >
+                  {GITHUB_REPO}
+                </a>
               </div>
             </div>
           </div>

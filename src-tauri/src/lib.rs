@@ -15,7 +15,7 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            // Git commands
+            // Git commands — repo / status / diff / commit
             git_cmd::discover_repo,
             git_cmd::init_repo,
             git_cmd::clone_repo,
@@ -28,13 +28,48 @@ pub fn run() {
             git_cmd::unstage_files,
             git_cmd::commit,
             git_cmd::amend_message,
+            git_cmd::apply_patch_to_index,
+            git_cmd::apply_patch_to_index_reverse,
+            // Git commands — branches / log
             git_cmd::list_branches,
             git_cmd::create_branch,
             git_cmd::switch_branch,
             git_cmd::delete_branch,
             git_cmd::get_log,
             git_cmd::get_commit_diff,
+            git_cmd::list_files,
+            // Git commands — remote
             git_cmd::push,
+            git_cmd::pull,
+            git_cmd::discard_files,
+            // Git commands — stash
+            git_cmd::list_stashes,
+            git_cmd::stash_save,
+            git_cmd::stash_apply,
+            git_cmd::stash_pop,
+            git_cmd::stash_drop,
+            // Git commands — tags
+            git_cmd::list_tags,
+            git_cmd::create_tag,
+            git_cmd::delete_tag,
+            // Git commands — submodules
+            git_cmd::list_submodules,
+            git_cmd::update_submodule,
+            git_cmd::add_submodule,
+            git_cmd::remove_submodule,
+            // Git commands — merge / rebase
+            git_cmd::merge_branch,
+            git_cmd::rebase_branch,
+            git_cmd::abort_merge,
+            git_cmd::abort_rebase,
+            git_cmd::continue_merge,
+            git_cmd::continue_rebase,
+            git_cmd::skip_rebase,
+            git_cmd::is_merging,
+            git_cmd::is_rebasing,
+            git_cmd::resolve_ours,
+            git_cmd::resolve_theirs,
+            git_cmd::list_conflicted_files,
             // AI commands
             ai_cmd::generate_commit_message,
             ai_cmd::review_code,
@@ -45,8 +80,6 @@ pub fn run() {
             config_cmd::save_config,
             config_cmd::add_recent_repo,
             config_cmd::set_open_repos,
-            git_cmd::pull,
-            git_cmd::discard_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running aigit application");

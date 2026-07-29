@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
@@ -11,7 +12,35 @@ import {
   SendIcon,
   DownloadIcon,
   SpinnerIcon,
+  HistoryIcon,
+  ChevronDownIcon,
 } from "@/components/common/Icons";
+
+/** localStorage key prefix for per-repo commit message history. */
+const HISTORY_KEY = "aigit:commitHistory:";
+const HISTORY_MAX = 20;
+
+/** Conventional Commits prefixes shown as quick-insert chips. */
+const COMMIT_PREFIXES = ["feat", "fix", "docs", "style", "refactor", "perf", "test", "chore"] as const;
+
+function loadHistory(repoPath: string): string[] {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY + repoPath);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === "string").slice(0, HISTORY_MAX) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveHistory(repoPath: string, messages: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY + repoPath, JSON.stringify(messages.slice(0, HISTORY_MAX)));
+  } catch {
+    // best-effort — ignore quota errors
+  }
+}
 
 export function CommitPanel() {
   const { t } = useTranslation();
@@ -44,6 +73,20 @@ export function CommitPanel() {
   const { generateCommitMessage } = useAiStore();
   const { config } = useSettingsStore();
   const toast = useToastStore();
+
+  const [showHistory, setShowHistory] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load history when the active repo changes.
+  useEffect(() => {
+    if (currentPath) {
+      setHistory(loadHistory(currentPath));
+    } else {
+      setHistory([]);
+    }
+    setShowHistory(false);
+  }, [currentPath]);
 
   const stagedCount = fileStatuses.filter((f) => f.staged).length;
   const hasChanges = fileStatuses.length > 0;
@@ -92,8 +135,15 @@ export function CommitPanel() {
     try {
       await ensureStaged();
       await commit(message);
+      // Persist this message into per-repo history (deduped, most-recent first).
+      if (currentPath) {
+        const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
+        setHistory(next);
+        saveHistory(currentPath, next);
+      }
       setMessage("");
-      await refreshStatus();
+      // commit() already calls refreshStatus(true) + refreshLog(true) internally,
+      // so no redundant refresh here.
       toast.success(t("commit.commitSuccess"));
     } catch (e) {
       const msg = formatError(e);
@@ -111,6 +161,12 @@ export function CommitPanel() {
     try {
       await ensureStaged();
       await commit(message);
+      // Persist this message into per-repo history (deduped, most-recent first).
+      if (currentPath) {
+        const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
+        setHistory(next);
+        saveHistory(currentPath, next);
+      }
       setMessage("");
       // Push after a successful commit. If upstream is not configured,
       // pass set_upstream=true so the branch tracks origin on first push.
@@ -168,6 +224,25 @@ export function CommitPanel() {
     if (stagedFiles.length > 0) {
       unstageFiles(stagedFiles);
     }
+  };
+
+  // Insert a Conventional Commits prefix at the start of the message,
+  // unless the message already starts with a prefix.
+  const handlePrefixInsert = (prefix: string) => {
+    const tag = `${prefix}: `;
+    if (message.startsWith(tag)) return;
+    // Strip any existing prefix before adding the new one.
+    const stripped = COMMIT_PREFIXES.some((p) => message.startsWith(`${p}: `))
+      ? message.replace(/^(feat|fix|docs|style|refactor|perf|test|chore):\s*/, "")
+      : message;
+    setMessage(tag + stripped);
+    textareaRef.current?.focus();
+  };
+
+  const handlePickHistory = (msg: string) => {
+    setMessage(msg);
+    setShowHistory(false);
+    textareaRef.current?.focus();
   };
 
   // Ctrl/Cmd+Enter inside the commit message textarea triggers commit.
@@ -237,13 +312,61 @@ export function CommitPanel() {
       )}
 
       {/* Commit message */}
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-4 flex flex-col gap-2 min-h-0">
+        {/* Conventional Commits prefix chips + history toggle */}
+        <div className="flex items-center gap-1 flex-wrap">
+          {COMMIT_PREFIXES.map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => handlePrefixInsert(p)}
+              className="text-2xs px-1.5 py-0.5 rounded bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:border-border-strong transition-colors font-mono"
+              title={`${p}:`}
+            >
+              {p}
+            </button>
+          ))}
+          <div className="flex-1" />
+          {history.length > 0 && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowHistory((v) => !v)}
+                className="btn-ghost text-2xs"
+                title={t("commit.history")}
+                aria-label={t("commit.history")}
+              >
+                <HistoryIcon size={13} />
+                <ChevronDownIcon size={12} />
+              </button>
+              {showHistory && (
+                <div className="absolute right-0 bottom-full mb-1 w-80 max-h-60 overflow-auto bg-bg-elevated border border-border rounded-md shadow-lg z-20">
+                  <div className="px-3 py-1.5 text-2xs text-text-muted border-b border-border">
+                    {t("commit.history")}
+                  </div>
+                  {history.map((msg, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => handlePickHistory(msg)}
+                      className="block w-full text-left px-3 py-1.5 text-xs text-text-secondary hover:bg-bg-hover hover:text-text-primary truncate"
+                      title={msg}
+                    >
+                      {msg.split("\n")[0]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <textarea
+          ref={textareaRef}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleMessageKeyDown}
           placeholder={t("commit.messagePlaceholder") + t("commit.messageShortcutHint")}
-          className="w-full h-full bg-bg-base border border-border rounded p-3.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong resize-none"
+          className="flex-1 w-full bg-bg-base border border-border rounded p-3.5 text-sm font-mono text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong resize-none"
           spellCheck={false}
         />
       </div>
