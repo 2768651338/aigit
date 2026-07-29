@@ -1,5 +1,6 @@
 import { useRepoStore } from "@/stores/repoStore";
 import { useTranslation } from "react-i18next";
+import clsx from "clsx";
 import { FileStatusList } from "@/components/git/FileStatusList";
 import { DiffViewer } from "@/components/git/DiffViewer";
 import { CommitPanel } from "@/components/git/CommitPanel";
@@ -65,7 +66,12 @@ export function ChangesView() {
 
       <div className="flex flex-1 overflow-hidden">
         {/* Left: File lists + commit */}
-        <div className="w-96 border-r border-border flex flex-col overflow-hidden">
+        <div
+          className={clsx(
+            "flex flex-col overflow-hidden",
+            selectedFile ? "w-96 border-r border-border" : "flex-1"
+          )}
+        >
           {/* Staged section */}
           <div className="flex-1 overflow-auto">
             <div className="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
@@ -89,17 +95,19 @@ export function ChangesView() {
           </div>
         </div>
 
-        {/* Right: Diff viewer */}
-        <div className="flex-1 overflow-hidden flex flex-col">
-          <div className="flex items-center px-5 h-12 border-b border-border">
-            <span className="text-sm font-medium text-text-primary">
-              {selectedFile ?? t("changes.selectFile")}
-            </span>
+        {/* Right: Diff viewer — only when a file is selected */}
+        {selectedFile && (
+          <div className="flex-1 overflow-hidden flex flex-col">
+            <div className="flex items-center px-5 h-12 border-b border-border">
+              <span className="text-sm font-medium text-text-primary truncate">
+                {selectedFile}
+              </span>
+            </div>
+            <div className="flex-1 overflow-auto">
+              <DiffViewer diffs={showDiff} className="h-full" />
+            </div>
           </div>
-          <div className="flex-1 overflow-auto">
-            <DiffViewer diffs={showDiff} className="h-full" />
-          </div>
-        </div>
+        )}
       </div>
     </div>
   );
