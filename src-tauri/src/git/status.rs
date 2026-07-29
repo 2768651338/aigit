@@ -7,6 +7,7 @@ use super::FileStatus;
 pub fn get_status(repo: &Repository) -> AppResult<Vec<FileStatus>> {
     let mut opts = StatusOptions::new();
     opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
         .include_ignored(false)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true);

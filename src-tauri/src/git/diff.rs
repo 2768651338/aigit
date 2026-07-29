@@ -1,4 +1,6 @@
-use git2::{Diff, DiffOptions, Repository};
+use std::collections::HashSet;
+
+use git2::{Diff, DiffOptions, Repository, Status, StatusOptions};
 
 use crate::error::AppResult;
 
@@ -16,7 +18,92 @@ pub fn get_workdir_diff(repo: &Repository, path: Option<&str>) -> AppResult<Vec<
         Some(&mut opts),
     )?;
 
-    parse_diff(&diff)
+    let mut files = parse_diff(&diff)?;
+    // libgit2 的 `diff_tree_to_workdir_with_index` 不会可靠地包含未跟踪文件
+    // （`include_untracked` 对该 API 基本不生效），手动补充，确保 AI 分析
+    // 能覆盖工作区里的新建文件。
+    append_untracked_files(repo, path, &mut files)?;
+    Ok(files)
+}
+
+/// 读取工作区中的未跟踪文件并构造"全文新增"形式的 diff，追加到 `files`。
+fn append_untracked_files(
+    repo: &Repository,
+    pathspec: Option<&str>,
+    files: &mut Vec<FileDiff>,
+) -> AppResult<()> {
+    let workdir = match repo.workdir() {
+        Some(w) => w,
+        None => return Ok(()),
+    };
+
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+
+    let statuses = repo.statuses(Some(&mut opts))?;
+    let existing: HashSet<String> = files.iter().map(|f| f.path.clone()).collect();
+
+    for entry in statuses.iter() {
+        let s = entry.status();
+        if !(s.is_wt_new() || s == Status::WT_NEW) {
+            continue;
+        }
+        let file_path = match entry.path() {
+            Some(p) if !p.is_empty() => p,
+            _ => continue,
+        };
+        if existing.contains(file_path) {
+            continue;
+        }
+        if let Some(p) = pathspec {
+            if !pathspec_matches(file_path, p) {
+                continue;
+            }
+        }
+        let full_path = workdir.join(file_path);
+        // 跳过目录、符号链接等非普通文件；二进制文件读取为 UTF-8 失败时也跳过。
+        if !full_path.is_file() {
+            continue;
+        }
+        let content = match std::fs::read_to_string(&full_path) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let lines: Vec<&str> = content.lines().collect();
+        let count = lines.len() as u32;
+        let hunk_lines: Vec<DiffLine> = lines
+            .iter()
+            .enumerate()
+            .map(|(i, line)| DiffLine {
+                content: line.to_string(),
+                line_type: "add".to_string(),
+                old_line_no: None,
+                new_line_no: Some((i + 1) as u32),
+            })
+            .collect();
+        files.push(FileDiff {
+            path: file_path.to_string(),
+            old_path: None,
+            hunks: vec![DiffHunk {
+                header: format!("@@ -0,0 +1,{} @@", count),
+                lines: hunk_lines,
+            }],
+            additions: count,
+            deletions: 0,
+        });
+    }
+    Ok(())
+}
+
+/// 简单的 pathspec 匹配：支持完全匹配和目录前缀匹配。
+fn pathspec_matches(file_path: &str, pattern: &str) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    let pat = pattern.trim_end_matches('/');
+    file_path == pat || file_path.starts_with(&format!("{pat}/"))
 }
 
 pub fn get_staged_diff(repo: &Repository, path: Option<&str>) -> AppResult<Vec<FileDiff>> {
