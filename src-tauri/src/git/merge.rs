@@ -178,7 +178,7 @@ pub fn list_conflicted_files(repo: &Repository) -> AppResult<Vec<String>> {
 
 // --- helpers ---
 
-fn run_git_simple(repo: &Repository, args: &[&str], err_prefix: &str) -> AppResult<String> {
+pub(crate) fn run_git_simple(repo: &Repository, args: &[&str], err_prefix: &str) -> AppResult<String> {
     let workdir = repo
         .workdir()
         .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
@@ -193,7 +193,7 @@ fn run_git_simple_raw(repo: &Repository, args: &[String], err_prefix: &str) -> A
     run_git_with_workdir(workdir, &str_args, err_prefix)
 }
 
-fn run_git_with_workdir(
+pub(crate) fn run_git_with_workdir(
     workdir: &Path,
     args: &[&str],
     err_prefix: &str,
@@ -235,7 +235,7 @@ fn run_git_with_workdir(
 /// `git merge` and `git rebase` print conflict markers to stderr like:
 ///   CONFLICT (content): Merge conflict in <file>
 /// We scan for these lines to extract conflicted file paths.
-fn parse_merge_output(output: &std::process::Output, kind: &str) -> AppResult<MergeResult> {
+pub(crate) fn parse_merge_output(output: &std::process::Output, kind: &str) -> AppResult<MergeResult> {
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 

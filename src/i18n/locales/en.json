@@ -83,7 +83,8 @@
     "pushSuccessBodyGeneric": "Push complete.",
     "pullSuccessTitle": "Pull Succeeded",
     "pullSuccessBody": "Latest commits fetched and merged into the current branch.",
-    "history": "History"
+    "history": "History",
+    "dragToResize": "Drag to resize (double-click to reset)"
   },
   "fileList": {
     "noStaged": "No staged changes",
@@ -162,7 +163,28 @@
     "resolveTheirs": "Use theirs",
     "resolved": "Marked as resolved",
     "mergeInProgress": "Merge in progress",
-    "rebaseInProgress": "Rebase in progress"
+    "rebaseInProgress": "Rebase in progress",
+    "copyHash": "Copy commit hash",
+    "copiedHash": "Copied {{hash}}",
+    "copyHashFailed": "Copy failed",
+    "checkoutCommit": "Check out this commit",
+    "checkoutTitle": "Check out commit?",
+    "checkoutConfirm": "This will detach HEAD and update the working tree to this commit. Check out {{hash}}?",
+    "checkoutSuccess": "Checked out commit {{hash}}",
+    "checkoutFailed": "Failed to check out commit",
+    "revertCommit": "Revert this commit",
+    "revertSuccess": "Reverted commit {{hash}}",
+    "revertFailed": "Failed to revert commit",
+    "revertConflicts": "Revert aborted due to conflicts",
+    "cherryPickCommit": "Cherry-pick this commit",
+    "cherryPickSuccess": "Cherry-picked commit {{hash}}",
+    "cherryPickFailed": "Failed to cherry-pick commit",
+    "cherryPickConflicts": "Cherry-pick aborted due to conflicts",
+    "resetToCommit": "Hard reset to this commit",
+    "resetTitle": "Hard reset?",
+    "resetConfirm": "A hard reset moves the current branch here, discarding all later commits and uncommitted changes. This cannot be undone (committed work is recoverable via the reflog). Hard reset to {{hash}}?",
+    "resetSuccess": "Reset to commit {{hash}}",
+    "resetFailed": "Failed to reset"
   },
   "tags": {
     "title": "Tags",

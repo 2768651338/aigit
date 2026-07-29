@@ -75,6 +75,14 @@ interface RepoStoreState extends ActiveTabProjection {
   setPushing: (v: boolean) => void;
   setPulling: (v: boolean) => void;
 
+  // Path-targeted setters (write to an explicit tab instead of the active one).
+  // Used by async flows whose `await` may straddle a tab switch (e.g. AI
+  // commit-message generation): the result must land on the originating repo,
+  // not whichever repo happens to be active when the promise resolves.
+  setCommitMessageFor: (path: string, message: string) => void;
+  setAiErrorFor: (path: string, error: string | null) => void;
+  setAiLoadingFor: (path: string, loading: boolean) => void;
+
   // Git operations (operate on the active tab)
   refreshStatus: (force?: boolean) => Promise<void>;
   selectFile: (path: string | null) => Promise<void>;
@@ -133,6 +141,12 @@ interface RepoStoreState extends ActiveTabProjection {
   refreshMergeState: () => Promise<void>;
   resolveOurs: (files: string[]) => Promise<string>;
   resolveTheirs: (files: string[]) => Promise<string>;
+
+  // History (commit-level operations on a single commit)
+  checkoutCommit: (hash: string) => Promise<void>;
+  revertCommit: (hash: string) => Promise<MergeResult>;
+  cherryPickCommit: (hash: string) => Promise<MergeResult>;
+  resetToCommit: (hash: string, mode: string) => Promise<void>;
 }
 
 function createEmptyTab(path: string): RepoTabState {
@@ -432,6 +446,24 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
   setPulling: (v: boolean) => {
     const { activePath } = get();
     if (activePath) updateTab(set, get, activePath, { pulling: v });
+  },
+
+  // --- Path-targeted setters ---
+  // Route a partial update to an explicit tab path rather than the active
+  // tab. `updateTab` already supports non-active paths: it updates `tabs[path]`
+  // and only re-projects the flat active-tab fields when `path === activePath`,
+  // so writing to a background tab is safe and shows up once the user returns
+  // to it.
+  setCommitMessageFor: (path, message) => {
+    updateTab(set, get, path, { commitMessage: message });
+  },
+
+  setAiErrorFor: (path, error) => {
+    updateTab(set, get, path, { aiError: error });
+  },
+
+  setAiLoadingFor: (path, loading) => {
+    updateTab(set, get, path, { aiLoading: loading });
   },
 
   refreshStatus: async (force?: boolean) => {
@@ -1050,6 +1082,78 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
       await get().refreshMergeState();
       await get().refreshStatus(true);
       return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  // --- History (commit-level operations) ---
+
+  checkoutCommit: async (hash: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      await gitService.checkoutCommit(activePath, hash);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  revertCommit: async (hash: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.revertCommit(activePath, hash);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  cherryPickCommit: async (hash: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const result = await gitService.cherryPickCommit(activePath, hash);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  resetToCommit: async (hash: string, mode: string) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      await gitService.resetToCommit(activePath, hash, mode);
+      await get().refreshMergeState();
+      await get().refreshStatus(true);
+      await get().refreshBranches(true);
+      await get().refreshLog(true);
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
       throw e;

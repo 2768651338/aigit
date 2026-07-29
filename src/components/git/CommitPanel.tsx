@@ -68,7 +68,9 @@ export function CommitPanel() {
     setCommitAndPushing,
     setPushError,
     setAiError,
-    setAiLoading,
+    setCommitMessageFor,
+    setAiErrorFor,
+    setAiLoadingFor,
   } = useRepoStore();
   const { generateCommitMessage } = useAiStore();
   const { config } = useSettingsStore();
@@ -103,21 +105,26 @@ export function CommitPanel() {
       console.warn("[aigit] AI Generate clicked but no config loaded");
       return;
     }
-    setAiError(null);
-    setAiLoading(true);
+    // Snapshot the originating repo so that if the user switches tabs while the
+    // generation is in flight, the result (and the loading/error state) still
+    // land on this repo rather than whichever repo is now active. This mirrors
+    // the per-repo isolation already used by code review and repo chat.
+    const targetPath = currentPath;
+    setAiErrorFor(targetPath, null);
+    setAiLoadingFor(targetPath, true);
     try {
-      const msg = await generateCommitMessage(currentPath, config);
-      setMessage(msg);
+      const msg = await generateCommitMessage(targetPath, config);
+      setCommitMessageFor(targetPath, msg);
       toast.success(t("commit.aiGenerated"));
     } catch (e) {
-      // aiStore sets its own global error; mirror it onto the active tab
-      // so the inline panel can display the message.
+      // aiStore sets its own global error; mirror it onto the originating tab
+      // so the inline panel can display the message when the user returns to it.
       console.error("[aigit] AI Generate failed in panel:", e);
       const msg = formatError(e);
-      setAiError(msg);
+      setAiErrorFor(targetPath, msg);
       toast.error(msg, t("commit.aiGenerateFailed"));
     } finally {
-      setAiLoading(false);
+      setAiLoadingFor(targetPath, false);
     }
   };
 

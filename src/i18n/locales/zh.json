@@ -83,7 +83,8 @@
     "pushSuccessBodyGeneric": "推送完成。",
     "pullSuccessTitle": "拉取成功",
     "pullSuccessBody": "已从远程仓库获取最新提交并合并到当前分支。",
-    "history": "历史记录"
+    "history": "历史记录",
+    "dragToResize": "拖动调整大小（双击重置）"
   },
   "fileList": {
     "noStaged": "无已暂存的改动",
@@ -162,7 +163,28 @@
     "resolveTheirs": "采用 theirs",
     "resolved": "已标记为解决",
     "mergeInProgress": "合并进行中",
-    "rebaseInProgress": "变基进行中"
+    "rebaseInProgress": "变基进行中",
+    "copyHash": "复制提交哈希",
+    "copiedHash": "已复制 {{hash}}",
+    "copyHashFailed": "复制失败",
+    "checkoutCommit": "迁出此提交",
+    "checkoutTitle": "迁出提交确认",
+    "checkoutConfirm": "将进入分离头指针（detached HEAD）状态，并把工作区更新到该提交。确定要迁出 {{hash}} 吗？",
+    "checkoutSuccess": "已迁出到提交 {{hash}}",
+    "checkoutFailed": "迁出提交失败",
+    "revertCommit": "还原此提交",
+    "revertSuccess": "已还原提交 {{hash}}",
+    "revertFailed": "还原提交失败",
+    "revertConflicts": "还原因存在冲突未能完成，已自动取消",
+    "cherryPickCommit": "拣选此提交",
+    "cherryPickSuccess": "已拣选提交 {{hash}}",
+    "cherryPickFailed": "拣选提交失败",
+    "cherryPickConflicts": "拣选因存在冲突未能完成，已自动取消",
+    "resetToCommit": "硬重置到此提交",
+    "resetTitle": "硬重置确认",
+    "resetConfirm": "硬重置将把当前分支移动到此提交，并丢弃其后所有提交以及未提交的改动。此操作不可恢复（已提交内容可通过 reflog 找回）。确定要硬重置到 {{hash}} 吗？",
+    "resetSuccess": "已重置到提交 {{hash}}",
+    "resetFailed": "重置失败"
   },
   "tags": {
     "title": "标签",

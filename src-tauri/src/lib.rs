@@ -70,6 +70,11 @@ pub fn run() {
             git_cmd::resolve_ours,
             git_cmd::resolve_theirs,
             git_cmd::list_conflicted_files,
+            // Git commands — history (commit-level operations)
+            git_cmd::checkout_commit,
+            git_cmd::revert_commit,
+            git_cmd::cherry_pick_commit,
+            git_cmd::reset_to_commit,
             // AI commands
             ai_cmd::generate_commit_message,
             ai_cmd::review_code,

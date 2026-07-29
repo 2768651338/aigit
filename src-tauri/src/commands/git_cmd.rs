@@ -308,3 +308,29 @@ pub fn list_conflicted_files(path: String) -> AppResult<Vec<String>> {
     let repo = git::repo::open_repo(&path)?;
     git::merge::list_conflicted_files(&repo)
 }
+
+// --- History (commit-level operations) ---
+
+#[tauri::command]
+pub fn checkout_commit(path: String, hash: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::checkout_commit(&repo, &hash)
+}
+
+#[tauri::command]
+pub fn revert_commit(path: String, hash: String) -> AppResult<git::MergeResult> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::revert_commit(&repo, &hash)
+}
+
+#[tauri::command]
+pub fn cherry_pick_commit(path: String, hash: String) -> AppResult<git::MergeResult> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::cherry_pick_commit(&repo, &hash)
+}
+
+#[tauri::command]
+pub fn reset_to_commit(path: String, hash: String, mode: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::reset_to_commit(&repo, &hash, &mode)
+}

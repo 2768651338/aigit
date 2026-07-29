@@ -297,4 +297,43 @@ export const gitService = {
     ensureTauri();
     return invoke<string[]>("list_conflicted_files", { path });
   },
+
+  // --- History (commit-level operations) ---
+
+  /**
+   * Detach HEAD to `hash` and update the working tree (`git checkout <hash>`).
+   * Leaves the repo in a detached-HEAD state.
+   */
+  checkoutCommit: (path: string, hash: string) => {
+    ensureTauri();
+    return invoke<string>("checkout_commit", { path, hash });
+  },
+
+  /**
+   * Revert `hash` with a new commit (`git revert <hash> --no-edit`).
+   * On conflict the operation is aborted and the conflicting paths are
+   * returned in `result.conflicts`.
+   */
+  revertCommit: (path: string, hash: string) => {
+    ensureTauri();
+    return invoke<MergeResult>("revert_commit", { path, hash });
+  },
+
+  /**
+   * Apply `hash` onto the current branch (`git cherry-pick <hash>`).
+   * Same conflict semantics as `revertCommit`.
+   */
+  cherryPickCommit: (path: string, hash: string) => {
+    ensureTauri();
+    return invoke<MergeResult>("cherry_pick_commit", { path, hash });
+  },
+
+  /**
+   * Reset the current branch to `hash` (`git reset --<mode> <hash>`).
+   * `mode` is "soft" | "mixed" | "hard".
+   */
+  resetToCommit: (path: string, hash: string, mode: string) => {
+    ensureTauri();
+    return invoke<string>("reset_to_commit", { path, hash, mode });
+  },
 };

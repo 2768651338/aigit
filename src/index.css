@@ -34,8 +34,11 @@
     --color-text-primary: 26 26 26;
     --color-text-secondary: 90 90 90;
     --color-text-muted: 130 130 130;
-    --color-accent: 212 255 58;
-    --color-accent-dim: 168 204 46;
+    /* Darkened for sufficient contrast on light backgrounds.
+       The dark-theme accent (#d4ff3a lime) has ~1.15:1 contrast on white
+       and is unreadable as text; lime-700 (#4d7c0f) gives ~4.78:1. */
+    --color-accent: 77 124 15;
+    --color-accent-dim: 54 83 20;
     --color-danger: 224 51 66;
     --color-warning: 184 124 2;
     --color-success: 30 167 89;

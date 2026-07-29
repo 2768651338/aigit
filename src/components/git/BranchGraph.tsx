@@ -1,22 +1,40 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
+import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
+import { confirmDialog } from "@/utils/dialog";
+import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import type { LogEntry } from "@/types";
 import {
   GitBranchIcon,
+  GitCommitIcon,
   AlertCircleIcon,
   SpinnerIcon,
   XIcon,
   SearchIcon,
   FilterIcon,
+  CopyIcon,
+  UndoIcon,
+  RotateCcwIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
 
 export function BranchGraph() {
   const { t } = useTranslation();
-  const { log, branches, currentPath } = useRepoStore();
+  const {
+    log,
+    branches,
+    currentPath,
+    checkoutCommit,
+    revertCommit,
+    cherryPickCommit,
+    resetToCommit,
+    mergeInProgress,
+  } = useRepoStore();
+  const toast = useToastStore();
+  const { show: showMenu } = useContextMenu();
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
   const [diffText, setDiffText] = useState<string>("");
@@ -67,6 +85,139 @@ export function BranchGraph() {
       setError(formatError(e));
     } finally {
       setLoading(false);
+    }
+  };
+
+  // --- Commit history context menu ---
+  // Right-clicking a commit offers commit-level operations: copy hash,
+  // checkout (detached HEAD), revert, cherry-pick, and hard reset. Mutating
+  // ops are disabled while a merge/rebase is in progress.
+
+  const clearSelection = () => {
+    setSelectedHash(null);
+    setSelectedEntry(null);
+    setDiffText("");
+    setError(null);
+  };
+
+  const handleCommitContextMenu = (e: React.MouseEvent, entry: LogEntry) => {
+    e.stopPropagation();
+    const busy = mergeInProgress;
+    const items: MenuItem[] = [
+      {
+        label: t("branches.copyHash"),
+        icon: <CopyIcon size={14} />,
+        onClick: () => handleCopyHash(entry),
+      },
+      { type: "separator" },
+      {
+        label: t("branches.checkoutCommit"),
+        icon: <GitBranchIcon size={14} />,
+        danger: true,
+        disabled: busy,
+        onClick: () => handleCheckoutCommit(entry),
+      },
+      {
+        label: t("branches.revertCommit"),
+        icon: <UndoIcon size={14} />,
+        disabled: busy,
+        onClick: () => handleRevertCommit(entry),
+      },
+      {
+        label: t("branches.cherryPickCommit"),
+        icon: <GitCommitIcon size={14} />,
+        disabled: busy,
+        onClick: () => handleCherryPickCommit(entry),
+      },
+      { type: "separator" },
+      {
+        label: t("branches.resetToCommit"),
+        icon: <RotateCcwIcon size={14} />,
+        danger: true,
+        disabled: busy,
+        onClick: () => handleResetToCommit(entry),
+      },
+    ];
+    showMenu(e, items);
+  };
+
+  const handleCopyHash = async (entry: LogEntry) => {
+    try {
+      await navigator.clipboard.writeText(entry.hash);
+      toast.success(t("branches.copiedHash", { hash: entry.short_hash }));
+    } catch {
+      toast.error(t("branches.copyHashFailed"));
+    }
+  };
+
+  const handleCheckoutCommit = async (entry: LogEntry) => {
+    const confirmed = await confirmDialog(
+      t("branches.checkoutTitle"),
+      t("branches.checkoutConfirm", { hash: entry.short_hash }),
+      "warning",
+    );
+    if (!confirmed) return;
+    try {
+      await checkoutCommit(entry.hash);
+      clearSelection();
+      toast.success(t("branches.checkoutSuccess", { hash: entry.short_hash }));
+    } catch (e) {
+      toast.error(formatError(e), t("branches.checkoutFailed"));
+    }
+  };
+
+  const handleRevertCommit = async (entry: LogEntry) => {
+    try {
+      const result = await revertCommit(entry.hash);
+      if (result.has_conflicts) {
+        toast.error(
+          result.conflicts.join("\n") || t("branches.revertConflicts"),
+          t("branches.revertConflicts"),
+        );
+      } else if (!result.success) {
+        toast.error(result.message || t("branches.revertFailed"), t("branches.revertFailed"));
+      } else {
+        toast.success(t("branches.revertSuccess", { hash: entry.short_hash }));
+      }
+    } catch (e) {
+      toast.error(formatError(e), t("branches.revertFailed"));
+    }
+  };
+
+  const handleCherryPickCommit = async (entry: LogEntry) => {
+    try {
+      const result = await cherryPickCommit(entry.hash);
+      if (result.has_conflicts) {
+        toast.error(
+          result.conflicts.join("\n") || t("branches.cherryPickConflicts"),
+          t("branches.cherryPickConflicts"),
+        );
+      } else if (!result.success) {
+        toast.error(
+          result.message || t("branches.cherryPickFailed"),
+          t("branches.cherryPickFailed"),
+        );
+      } else {
+        toast.success(t("branches.cherryPickSuccess", { hash: entry.short_hash }));
+      }
+    } catch (e) {
+      toast.error(formatError(e), t("branches.cherryPickFailed"));
+    }
+  };
+
+  const handleResetToCommit = async (entry: LogEntry) => {
+    const confirmed = await confirmDialog(
+      t("branches.resetTitle"),
+      t("branches.resetConfirm", { hash: entry.short_hash }),
+      "warning",
+    );
+    if (!confirmed) return;
+    try {
+      await resetToCommit(entry.hash, "hard");
+      clearSelection();
+      toast.success(t("branches.resetSuccess", { hash: entry.short_hash }));
+    } catch (e) {
+      toast.error(formatError(e), t("branches.resetFailed"));
     }
   };
 
@@ -131,6 +282,7 @@ export function BranchGraph() {
               <div
                 key={entry.hash}
                 onClick={() => handleEntryClick(entry)}
+                onContextMenu={(e) => handleCommitContextMenu(e, entry)}
                 className={clsx(
                   "flex items-center gap-3 px-4 py-2 cursor-pointer group",
                   isSelected ? "bg-bg-hover" : "hover:bg-bg-hover/50"
