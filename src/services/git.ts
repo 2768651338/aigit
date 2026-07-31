@@ -8,6 +8,7 @@ import type {
   RepoInfo,
   StashInfo,
   SubmoduleInfo,
+  RepositoryInsights,
   TagInfo,
 } from "@/types";
 import { isTauriEnv } from "@/utils/env";
@@ -122,6 +123,11 @@ export const gitService = {
   getLog: (path: string, limit?: number) => {
     ensureTauri();
     return invoke<LogEntry[]>("get_log", { path, limit });
+  },
+
+  getRepositoryInsights: (path: string) => {
+    ensureTauri();
+    return invoke<RepositoryInsights>("get_repository_insights", { path });
   },
 
   getCommitDiff: (path: string, hash: string) => {

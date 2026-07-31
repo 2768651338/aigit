@@ -2,6 +2,12 @@
 @tailwind components;
 @tailwind utilities;
 
+.insight-level-0 { background-color: rgb(var(--color-bg-hover)); }
+.insight-level-1 { background-color: rgb(var(--color-accent) / 0.25); }
+.insight-level-2 { background-color: rgb(var(--color-accent) / 0.45); }
+.insight-level-3 { background-color: rgb(var(--color-accent) / 0.7); }
+.insight-level-4 { background-color: rgb(var(--color-accent)); }
+
 @layer base {
   /* Dark theme (default). Light theme overrides via `.theme-light`. */
   :root {

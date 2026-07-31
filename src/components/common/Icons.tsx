@@ -306,12 +306,21 @@ export const PlayIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const PauseIcon = (p: IconProps) => (
+  <Icon {...p}><line x1="8" y1="5" x2="8" y2="19" /><line x1="16" y1="5" x2="16" y2="19" /></Icon>
+);
+
 /** Skip-forward icon (rebase --skip). */
 export const SkipForwardIcon = (p: IconProps) => (
   <Icon {...p}>
     <polygon points="5 4 15 12 5 20 5 4" />
     <line x1="19" y1="5" x2="19" y2="19" />
   </Icon>
+);
+
+/** Insights chart icon. */
+export const BarChartIcon = (p: IconProps) => (
+  <Icon {...p}><line x1="4" y1="20" x2="4" y2="10" /><line x1="10" y1="20" x2="10" y2="4" /><line x1="16" y1="20" x2="16" y2="13" /><line x1="22" y1="20" x2="22" y2="7" /></Icon>
 );
 
 /** Filter icon (for log filtering). */

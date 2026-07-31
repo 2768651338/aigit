@@ -4,6 +4,7 @@
     "branches": "分支",
     "review": "AI 审查",
     "chat": "AI 对话",
+    "insights": "洞察",
     "settings": "设置"
   },
   "common": {
@@ -13,6 +14,20 @@
     "search": "搜索",
     "loading": "加载中...",
     "noResults": "无匹配结果"
+  },
+  "insights": {
+    "title": "仓库洞察",
+    "openRepo": "请先打开一个仓库",
+    "loading": "正在加载洞察...",
+    "error": "加载洞察失败",
+    "retry": "重试",
+    "empty": "暂无 Git 提交记录",
+    "refresh": "刷新洞察",
+    "mergeIdentity": "合并身份",
+    "commits": "提交数",
+    "contributors": "贡献者",
+    "branches": "分支",
+    "tags": "标签"
   },
   "contextMenu": {
     "refreshStatus": "刷新仓库状态",

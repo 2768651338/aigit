@@ -15,7 +15,7 @@ const AUTHOR = "田小橙";
 const QQ = "2768651338";
 const EMAIL = "2768651338@qq.com";
 const GITHUB_REPO = "https://github.com/2768651338/aigit";
-const APP_VERSION = "1.0.3";
+const APP_VERSION = "1.0.4";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },

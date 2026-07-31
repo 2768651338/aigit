@@ -16,6 +16,7 @@ import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
 import { ReviewView } from "@/pages/ReviewView";
 import { ChatView } from "@/pages/ChatView";
+import { InsightsView } from "@/pages/InsightsView";
 import { SettingsView } from "@/pages/SettingsView";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
@@ -77,8 +78,8 @@ function AppShell() {
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key >= "1" && e.key <= "5") {
-        const views: ViewType[] = ["changes", "branches", "review", "chat", "settings"];
+      if (e.key >= "1" && e.key <= "6") {
+        const views: ViewType[] = ["changes", "branches", "review", "chat", "insights", "settings"];
         const idx = Number(e.key) - 1;
         if (idx < views.length) {
           e.preventDefault();
@@ -179,6 +180,7 @@ function AppShell() {
                 {activeView === "branches" && <BranchesView />}
                 {activeView === "review" && <ReviewView />}
                 {activeView === "chat" && <ChatView />}
+                {activeView === "insights" && <InsightsView />}
                 {activeView === "settings" && <SettingsView />}
               </ErrorBoundary>
             </div>

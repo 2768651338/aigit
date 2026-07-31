@@ -466,8 +466,8 @@ cargo build --manifest-path src-tauri/Cargo.toml --release
 | 产物 | 路径 | 大小 | 说明 |
 |---|---|---|---|
 | 独立 exe | `src-tauri/target/release/aigit.exe` | ~16 MB | 无需安装，双击运行 |
-| MSI 安装包 | `src-tauri/target/release/bundle/msi/aigit_1.0.3_x64_en-US.msi` | ~6 MB | Windows Installer，支持组策略部署 |
-| NSIS 安装包 | `src-tauri/target/release/bundle/nsis/aigit_1.0.3_x64-setup.exe` | ~4 MB | 轻量安装包 |
+| MSI 安装包 | `src-tauri/target/release/bundle/msi/aigit_1.0.4_x64_en-US.msi` | ~6 MB | Windows Installer，支持组策略部署 |
+| NSIS 安装包 | `src-tauri/target/release/bundle/nsis/aigit_1.0.4_x64-setup.exe` | ~4 MB | 轻量安装包 |
 | 前端打包 | `dist/assets/index-*.js` + `index-*.css` | ~433 KB（gzip 131 KB） | 嵌入 exe |
 
 ### 编译统计

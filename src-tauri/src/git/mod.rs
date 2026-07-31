@@ -2,6 +2,7 @@ pub mod branch;
 pub mod commit;
 pub mod diff;
 pub mod history;
+pub mod insights;
 pub mod merge;
 pub mod remote;
 pub mod repo;

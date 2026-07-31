@@ -20,6 +20,7 @@ pub fn run() {
             git_cmd::init_repo,
             git_cmd::clone_repo,
             git_cmd::get_repo_info,
+            git_cmd::get_repository_insights,
             git_cmd::get_status,
             git_cmd::get_workdir_diff,
             git_cmd::get_staged_diff,

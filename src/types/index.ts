@@ -222,7 +222,52 @@ export interface RepoTabState {
   merging: boolean;
 }
 
-export type ViewType = "changes" | "branches" | "review" | "chat" | "settings";
+/** Compact repository-wide statistics returned by the insights command. */
+export interface RepositoryInsights {
+  repository_name: string;
+  start_date: string | null;
+  end_date: string | null;
+  total_commits: number;
+  contributor_count: number;
+  branch_count: number;
+  tag_count: number;
+  daily_contributions: DailyContribution[];
+  contributors: ContributorInsights[];
+  timeline: TimelineBucket[];
+  milestones: InsightMilestone[];
+  recent_commits: InsightCommitSummary[];
+}
+
+export interface DailyContribution { date: string; count: number; }
+export interface ContributorInsights {
+  name: string;
+  email: string;
+  commit_count: number;
+  active_days: number;
+  first_date: string;
+  last_date: string;
+  activity: number[];
+}
+export interface TimelineBucket {
+  period: string;
+  cumulative_commits: number;
+  cumulative_contributors: number;
+  commits: number;
+  contributors: number;
+}
+export interface InsightMilestone { name: string; hash: string; date: string; message: string; }
+export interface InsightCommitSummary { hash: string; author: string; date: string; message: string; }
+export interface AuthorAliasRule { email: string; display_name: string; }
+export interface InsightExportOptions {
+  format: "svg" | "png" | "gif" | "markdown" | "text";
+  fileName?: string;
+  width?: number;
+  height?: number;
+  scale?: number;
+  frameRate?: number;
+}
+
+export type ViewType = "changes" | "branches" | "review" | "chat" | "insights" | "settings";
 
 export type FileStatusType =
   | "modified"

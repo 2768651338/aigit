@@ -2,6 +2,14 @@ use crate::error::AppResult;
 use crate::git;
 
 #[tauri::command]
+pub async fn get_repository_insights(path: String) -> crate::error::AppResult<git::insights::RepositoryInsights> {
+    tokio::task::spawn_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::insights::collect_insights(&repo)
+    }).await.map_err(|e| crate::error::AppError::General(format!("Insights task failed: {e}")))?
+}
+
+#[tauri::command]
 pub fn discover_repo(path: String) -> AppResult<String> {
     git::repo::discover_repo(&path)
 }

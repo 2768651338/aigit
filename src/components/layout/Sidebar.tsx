@@ -8,6 +8,7 @@ import {
   GitBranchIcon,
   MessageSquareIcon,
   ScanSearchIcon,
+  BarChartIcon,
   SettingsIcon,
   FolderIcon,
   ChevronRightIcon,
@@ -31,7 +32,8 @@ const NAV_ITEMS: {
   { id: "branches", labelKey: "nav.branches", icon: GitBranchIcon, shortcut: "2" },
   { id: "review", labelKey: "nav.review", icon: ScanSearchIcon, shortcut: "3" },
   { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon, shortcut: "4" },
-  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "5" },
+  { id: "insights", labelKey: "nav.insights", icon: BarChartIcon, shortcut: "5" },
+  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "6" },
 ];
 
 /** Extract a human-readable repo name from an absolute path. */

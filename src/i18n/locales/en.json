@@ -4,6 +4,7 @@
     "branches": "Branches",
     "review": "AI Review",
     "chat": "AI Chat",
+    "insights": "Insights",
     "settings": "Settings"
   },
   "common": {
@@ -13,6 +14,20 @@
     "search": "Search",
     "loading": "Loading...",
     "noResults": "No results found"
+  },
+  "insights": {
+    "title": "Repository Insights",
+    "openRepo": "Open a repository first",
+    "loading": "Loading insights...",
+    "error": "Failed to load insights",
+    "retry": "Retry",
+    "empty": "No Git commits yet",
+    "refresh": "Refresh insights",
+    "mergeIdentity": "Merge identities",
+    "commits": "Commits",
+    "contributors": "Contributors",
+    "branches": "Branches",
+    "tags": "Tags"
   },
   "contextMenu": {
     "refreshStatus": "Refresh repository status",
