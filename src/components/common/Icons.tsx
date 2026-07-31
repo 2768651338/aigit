@@ -199,6 +199,7 @@ export const SpinnerIcon = ({ size = 14, ...props }: IconProps) => (
     strokeWidth="2.5"
     strokeLinecap="round"
     className="animate-spin"
+    aria-hidden="true"
     {...props}
   >
     <path d="M21 12a9 9 0 1 1-6.219-8.56" />

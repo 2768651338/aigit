@@ -153,6 +153,7 @@ export function TagPanel() {
         <button
           onClick={() => refreshTags()}
           disabled={refreshing}
+          aria-busy={refreshing}
           className="btn-ghost"
           title={t("changes.refresh")}
           aria-label={t("changes.refresh")}
@@ -190,6 +191,7 @@ export function TagPanel() {
             <button
               onClick={handleCreate}
               disabled={!name.trim() || saving}
+              aria-busy={saving}
               className="btn-primary text-xs"
             >
               {saving ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />}

@@ -122,7 +122,7 @@ export function SettingsView() {
       <div className="flex items-center px-5 h-12 border-b border-border">
         <h2 className="text-base font-semibold">{t("settings.title")}</h2>
         <div className="flex-1" />
-        <button onClick={handleSave} disabled={saving} className="btn-primary ml-3">
+        <button onClick={handleSave} disabled={saving} aria-busy={saving} className="btn-primary ml-3">
           {saving ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />} {t("settings.save")}
         </button>
       </div>

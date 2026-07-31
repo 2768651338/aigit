@@ -78,6 +78,7 @@ export function ReviewView() {
         <button
           onClick={handleReview}
           disabled={loading}
+          aria-busy={loading}
           className="btn-primary ml-3"
         >
           {loading ? <SpinnerIcon size={14} /> : <ScanSearchIcon size={14} />}

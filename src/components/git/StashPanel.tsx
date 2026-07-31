@@ -176,6 +176,7 @@ export function StashPanel() {
         <button
           onClick={() => refreshStashes()}
           disabled={refreshing}
+          aria-busy={refreshing}
           className="btn-ghost"
           title={t("changes.refresh")}
           aria-label={t("changes.refresh")}
@@ -227,6 +228,7 @@ export function StashPanel() {
             <button
               onClick={handleSave}
               disabled={saving}
+              aria-busy={saving}
               className="btn-primary text-xs"
             >
               {saving ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />}

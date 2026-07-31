@@ -32,7 +32,7 @@ export function Toaster() {
           <div
             key={toast.id}
             className={`pointer-events-auto flex items-start gap-2.5 px-3.5 py-3 bg-bg-elevated border rounded-md shadow-lg animate-toast-in ${STYLES[toast.type]}`}
-            role="status"
+            role={toast.type === "error" ? "alert" : "status"}
           >
             <Icon size={16} className="shrink-0 mt-0.5" />
             <div className="flex-1 min-w-0">

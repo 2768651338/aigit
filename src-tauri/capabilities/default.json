@@ -12,6 +12,9 @@
     "fs:allow-mkdir",
     "fs:allow-read-dir",
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    "dialog:allow-confirm",
+    "dialog:allow-message",
+    "dialog:allow-ask"
   ]
 }

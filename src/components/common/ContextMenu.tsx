@@ -157,7 +157,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
                   }}
                   className={clsx(
                     "flex items-center gap-2.5 w-full px-3 py-1.5 text-left text-sm transition-colors",
-                    "focus:outline-none",
+                    "focus:outline-none focus:bg-bg-hover",
                     item.disabled
                       ? "text-text-muted cursor-not-allowed"
                       : item.danger

@@ -383,6 +383,7 @@ export function CommitPanel() {
         <button
           onClick={handleAiGenerate}
           disabled={!currentPath || aiLoading}
+          aria-busy={aiLoading}
           className="btn-ghost"
         >
           {aiLoading ? <SpinnerIcon size={14} /> : <PlusIcon size={14} />}
@@ -407,6 +408,7 @@ export function CommitPanel() {
           <button
             onClick={handlePull}
             disabled={busy}
+            aria-busy={pulling}
             className="btn-secondary"
             title={t("commit.pull")}
           >
@@ -419,6 +421,7 @@ export function CommitPanel() {
           <button
             onClick={handlePushOnly}
             disabled={busy}
+            aria-busy={pushing}
             className="btn-secondary"
             title={t("commit.push")}
           >
@@ -430,6 +433,7 @@ export function CommitPanel() {
         <button
           onClick={handleCommitAndPush}
           disabled={!message.trim() || busy || !hasChanges}
+          aria-busy={commitAndPushing}
           className="btn-secondary"
           title={t("commit.commitAndPush")}
         >
@@ -440,6 +444,7 @@ export function CommitPanel() {
         <button
           onClick={handleCommit}
           disabled={!message.trim() || busy || !hasChanges}
+          aria-busy={committing}
           className="btn-primary"
           title={t("commit.commitShortcut")}
         >

@@ -156,6 +156,7 @@ export function ChangesView() {
         <button
           onClick={() => refreshStatus()}
           disabled={refreshing}
+          aria-busy={refreshing}
           className="btn-ghost"
           aria-label={t("changes.refresh")}
         >
@@ -261,7 +262,7 @@ function NoRepoOpen() {
       <p className="text-sm text-text-secondary max-w-sm mb-5">
         {t("changes.noRepoDesc")}
       </p>
-      <button onClick={handleOpen} disabled={opening} className="btn-primary">
+      <button onClick={handleOpen} disabled={opening} aria-busy={opening} className="btn-primary">
         {opening ? <SpinnerIcon size={14} /> : <FolderIcon size={14} />}
         {t("changes.openRepo")}
       </button>

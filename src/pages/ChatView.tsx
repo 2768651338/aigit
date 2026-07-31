@@ -37,7 +37,7 @@ function CopyButton({ content }: { content: string }) {
     <button
       onClick={handleCopy}
       aria-label={t("chat.copy")}
-      className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1 rounded hover:bg-bg-hover"
+      className="opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity text-text-muted hover:text-text-primary p-1 rounded hover:bg-bg-hover"
     >
       {copied ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
     </button>
@@ -404,6 +404,7 @@ export function ChatView() {
             <button
               onClick={handleSend}
               disabled={!input.trim() || loading || !config || !currentPath}
+              aria-busy={loading}
               className="btn-primary shrink-0"
               aria-label={t("chat.send")}
             >

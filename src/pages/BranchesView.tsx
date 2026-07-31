@@ -191,6 +191,7 @@ export function BranchesView() {
           <button
             onClick={() => refreshBranches()}
             disabled={refreshing}
+            aria-busy={refreshing}
             className="btn-ghost"
             title={t("changes.refresh")}
             aria-label={t("changes.refresh")}
