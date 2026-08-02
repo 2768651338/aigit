@@ -69,7 +69,7 @@ pub fn list_tags(repo: &Repository) -> AppResult<Vec<TagInfo>> {
     }
 
     // Sort by name (case-insensitive).
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    entries.sort_by_key(|entry| entry.name.to_lowercase());
     Ok(entries)
 }
 

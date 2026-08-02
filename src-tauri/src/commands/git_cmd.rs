@@ -1,12 +1,93 @@
-use crate::error::AppResult;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use chrono::NaiveDate;
+
+use crate::error::{AppError, AppResult};
 use crate::git;
 
+#[derive(Default)]
+pub struct GitTaskRegistry {
+    tasks: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl GitTaskRegistry {
+    fn start(&self, task_id: &str) -> AppResult<Arc<AtomicBool>> {
+        if task_id.trim().is_empty() {
+            return Err(AppError::General("Git task id 不能为空".into()));
+        }
+        let mut tasks = self
+            .tasks
+            .lock()
+            .map_err(|_| AppError::General("Git task registry 不可用".into()))?;
+        if tasks.contains_key(task_id) {
+            return Err(AppError::General("同名 Git task 已在运行".into()));
+        }
+        let flag = Arc::new(AtomicBool::new(false));
+        tasks.insert(task_id.to_string(), flag.clone());
+        Ok(flag)
+    }
+
+    fn finish(&self, task_id: &str) {
+        if let Ok(mut tasks) = self.tasks.lock() {
+            tasks.remove(task_id);
+        }
+    }
+
+    fn cancel(&self, task_id: &str) -> AppResult<bool> {
+        let tasks = self
+            .tasks
+            .lock()
+            .map_err(|_| AppError::General("Git task registry 不可用".into()))?;
+        if let Some(flag) = tasks.get(task_id) {
+            flag.store(true, Ordering::Relaxed);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+}
+
+fn run_remote_task<T>(
+    registry: &GitTaskRegistry,
+    task_id: &str,
+    action: impl FnOnce(Arc<AtomicBool>) -> AppResult<T>,
+) -> AppResult<T> {
+    let cancellation = registry.start(task_id)?;
+    let result = action(cancellation);
+    registry.finish(task_id);
+    result
+}
+
+fn parse_insights_date(value: Option<String>, field: &str) -> AppResult<Option<NaiveDate>> {
+    value
+        .map(|date| {
+            NaiveDate::parse_from_str(&date, "%Y-%m-%d")
+                .map_err(|_| AppError::General(format!("Invalid {field}; expected YYYY-MM-DD")))
+        })
+        .transpose()
+}
+
 #[tauri::command]
-pub async fn get_repository_insights(path: String) -> crate::error::AppResult<git::insights::RepositoryInsights> {
+pub async fn get_repository_insights(
+    path: String,
+    start_date: Option<String>,
+    end_date: Option<String>,
+) -> crate::error::AppResult<git::insights::RepositoryInsights> {
+    let start_date = parse_insights_date(start_date, "start date")?;
+    let end_date = parse_insights_date(end_date, "end date")?;
+    if matches!((start_date, end_date), (Some(start), Some(end)) if start > end) {
+        return Err(AppError::General(
+            "Start date must not be after end date".into(),
+        ));
+    }
     tokio::task::spawn_blocking(move || {
         let repo = git::repo::open_repo(&path)?;
-        git::insights::collect_insights(&repo)
-    }).await.map_err(|e| crate::error::AppError::General(format!("Insights task failed: {e}")))?
+        git::insights::collect_insights(&repo, start_date, end_date)
+    })
+    .await
+    .map_err(|e| crate::error::AppError::General(format!("Insights task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -73,9 +154,25 @@ pub fn commit(path: String, message: String) -> AppResult<String> {
 }
 
 #[tauri::command]
-pub fn amend_message(path: String, message: String) -> AppResult<String> {
+pub fn amend(
+    path: String,
+    message: String,
+    include_staged: Option<bool>,
+    confirm_pushed: Option<bool>,
+) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
-    git::commit::amend_message(&repo, &message)
+    git::commit::amend(
+        &repo,
+        &message,
+        include_staged.unwrap_or(false),
+        confirm_pushed.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+pub fn is_head_pushed(path: String) -> AppResult<bool> {
+    let repo = git::repo::open_repo(&path)?;
+    git::commit::head_is_pushed(&repo)
 }
 
 #[tauri::command]
@@ -88,6 +185,42 @@ pub fn apply_patch_to_index(path: String, patch: String) -> AppResult<()> {
 pub fn apply_patch_to_index_reverse(path: String, patch: String) -> AppResult<()> {
     let repo = git::repo::open_repo(&path)?;
     git::commit::apply_patch_to_index_reverse(&repo, &patch)
+}
+
+#[tauri::command]
+pub fn create_smart_commit_draft(path: String) -> AppResult<git::smart_commit::CommitPlanDraft> {
+    let repo = git::repo::open_repo(&path)?;
+    git::smart_commit::create_draft(&repo)
+}
+
+#[tauri::command]
+pub fn validate_smart_commit_plan(
+    path: String,
+    plan: git::smart_commit::CommitPlan,
+) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::smart_commit::validate_snapshot(&repo, &plan.snapshot)
+}
+
+#[tauri::command]
+pub fn stage_smart_commit_group(
+    path: String,
+    plan: git::smart_commit::CommitPlan,
+    group_id: String,
+) -> AppResult<git::smart_commit::StageGroupResult> {
+    let repo = git::repo::open_repo(&path)?;
+    git::smart_commit::stage_group(&repo, &plan, &group_id)
+}
+
+#[tauri::command]
+pub fn commit_smart_commit_group(
+    path: String,
+    plan: git::smart_commit::CommitPlan,
+    group_id: String,
+    staged_tree: String,
+) -> AppResult<git::smart_commit::CommitGroupResult> {
+    let repo = git::repo::open_repo(&path)?;
+    git::smart_commit::commit_group(&repo, plan, &group_id, &staged_tree)
 }
 
 #[tauri::command]
@@ -133,15 +266,174 @@ pub fn list_files(path: String) -> AppResult<Vec<String>> {
 }
 
 #[tauri::command]
-pub fn push(path: String, set_upstream: Option<bool>) -> AppResult<String> {
+pub fn list_remotes(path: String) -> AppResult<Vec<git::RemoteInfo>> {
     let repo = git::repo::open_repo(&path)?;
-    git::remote::push_current_branch(&repo, set_upstream.unwrap_or(false))
+    git::remote::list_remotes(&repo)
+}
+
+#[tauri::command]
+pub fn add_remote(path: String, name: String, url: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::add_remote(&repo, &name, &url)
+}
+
+#[tauri::command]
+pub fn edit_remote(path: String, old_name: String, new_name: String, url: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::edit_remote(&repo, &old_name, &new_name, &url)
+}
+
+#[tauri::command]
+pub fn remove_remote(path: String, name: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::remove_remote(&repo, &name)
+}
+
+#[tauri::command]
+pub fn rename_remote(path: String, old_name: String, new_name: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::rename_remote(&repo, &old_name, &new_name)
+}
+
+#[tauri::command]
+pub fn set_remote_url(
+    path: String,
+    name: String,
+    url: String,
+    push: Option<bool>,
+) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::set_remote_url(&repo, &name, &url, push.unwrap_or(false))
+}
+
+#[tauri::command]
+pub fn get_tracking_info(path: String) -> AppResult<git::TrackingInfo> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::tracking_info(&repo)
+}
+
+#[tauri::command]
+pub fn set_upstream(
+    path: String,
+    remote: String,
+    remote_branch: String,
+) -> AppResult<git::TrackingInfo> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::set_upstream(&repo, &remote, &remote_branch)
+}
+
+#[tauri::command]
+pub fn fetch(
+    path: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+    tags: Option<bool>,
+) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::fetch(
+        &repo,
+        remote.as_deref(),
+        prune.unwrap_or(false),
+        tags.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+pub fn push(
+    path: String,
+    remote: Option<String>,
+    remote_branch: Option<String>,
+) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::push_current_branch(&repo, remote.as_deref(), remote_branch.as_deref())
 }
 
 #[tauri::command]
 pub fn pull(path: String) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
     git::remote::pull_current_branch(&repo)
+}
+
+#[tauri::command]
+pub fn fetch_task(
+    path: String,
+    remote: Option<String>,
+    prune: Option<bool>,
+    tags: Option<bool>,
+    task_id: String,
+    registry: tauri::State<'_, GitTaskRegistry>,
+) -> AppResult<String> {
+    run_remote_task(&registry, &task_id, move |cancellation| {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::fetch_cancellable(
+            &repo,
+            remote.as_deref(),
+            prune.unwrap_or(false),
+            tags.unwrap_or(false),
+            Some(cancellation),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn push_task(
+    path: String,
+    remote: Option<String>,
+    remote_branch: Option<String>,
+    task_id: String,
+    registry: tauri::State<'_, GitTaskRegistry>,
+) -> AppResult<String> {
+    run_remote_task(&registry, &task_id, move |cancellation| {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::push_current_branch_cancellable(
+            &repo,
+            remote.as_deref(),
+            remote_branch.as_deref(),
+            Some(cancellation),
+        )
+    })
+}
+
+#[tauri::command]
+pub fn pull_task(
+    path: String,
+    task_id: String,
+    registry: tauri::State<'_, GitTaskRegistry>,
+) -> AppResult<String> {
+    run_remote_task(&registry, &task_id, move |cancellation| {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::pull_current_branch_cancellable(&repo, Some(cancellation))
+    })
+}
+
+#[tauri::command]
+pub fn cancel_git_task(
+    task_id: String,
+    registry: tauri::State<'_, GitTaskRegistry>,
+) -> AppResult<bool> {
+    registry.cancel(&task_id)
+}
+
+#[tauri::command]
+pub fn create_tracking_branch(
+    path: String,
+    remote_branch: String,
+    local_name: Option<String>,
+) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::create_tracking_branch(&repo, &remote_branch, local_name.as_deref())
+}
+
+#[tauri::command]
+pub fn push_tag(path: String, remote: String, tag: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::push_tag(&repo, &remote, &tag)
+}
+
+#[tauri::command]
+pub fn delete_remote_tag(path: String, remote: String, tag: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::remote::delete_remote_tag(&repo, &remote, &tag)
 }
 
 #[tauri::command]
@@ -246,7 +538,11 @@ pub fn remove_submodule(path: String, name: String) -> AppResult<String> {
 // --- Merge / Rebase ---
 
 #[tauri::command]
-pub fn merge_branch(path: String, branch: String, no_ff: Option<bool>) -> AppResult<git::MergeResult> {
+pub fn merge_branch(
+    path: String,
+    branch: String,
+    no_ff: Option<bool>,
+) -> AppResult<git::MergeResult> {
     let repo = git::repo::open_repo(&path)?;
     git::merge::merge_branch(&repo, &branch, no_ff.unwrap_or(false))
 }
@@ -315,6 +611,42 @@ pub fn resolve_theirs(path: String, files: Vec<String>) -> AppResult<String> {
 pub fn list_conflicted_files(path: String) -> AppResult<Vec<String>> {
     let repo = git::repo::open_repo(&path)?;
     git::merge::list_conflicted_files(&repo)
+}
+
+#[tauri::command]
+pub fn get_operation_state(path: String) -> AppResult<git::conflict::GitOperationState> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::operation_state(&repo)
+}
+
+#[tauri::command]
+pub fn list_conflict_details(path: String) -> AppResult<Vec<git::conflict::ConflictFile>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::list_conflict_details(&repo)
+}
+
+#[tauri::command]
+pub fn save_conflict_resolution(path: String, file_path: String, content: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::save_resolution(&repo, &file_path, &content)
+}
+
+#[tauri::command]
+pub fn continue_operation(path: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::continue_operation(&repo)
+}
+
+#[tauri::command]
+pub fn skip_operation(path: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::skip_operation(&repo)
+}
+
+#[tauri::command]
+pub fn abort_operation(path: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::conflict::abort_operation(&repo)
 }
 
 // --- History (commit-level operations) ---

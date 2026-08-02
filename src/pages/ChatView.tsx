@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
-import { useAiStore, useSettingsStore } from "@/stores/aiStore";
+import { useAiStore, useSettingsStore, estimateTokens, isSensitivePath, LARGE_CONTEXT_TOKENS } from "@/stores/aiStore";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { gitService } from "@/services/git";
 import type { ChatAttachment, LogEntry } from "@/types";
@@ -48,12 +48,17 @@ export function ChatView() {
   const { t } = useTranslation();
   const currentPath = useRepoStore((s) => s.currentPath);
   const log = useRepoStore((s) => s.log);
-  const chatMessages = useAiStore((s) =>
-    currentPath ? s.chatByRepo[currentPath] ?? [] : []
-  );
-  const loading = useAiStore((s) => s.loading);
+  const sessions = useAiStore((s) => currentPath ? s.sessionsByRepo[currentPath] ?? [] : []);
+  const activeSessionId = useAiStore((s) => currentPath ? s.activeSessionByRepo[currentPath] ?? null : null);
+  const chatMessages = sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
+  const loading = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000chat`]) : false);
   const sendChatMessage = useAiStore((s) => s.sendChatMessage);
-  const clearChat = useAiStore((s) => s.clearChat);
+  const cancelTask = useAiStore((s) => s.cancelTask);
+  const loadSessions = useAiStore((s) => s.loadSessions);
+  const createSession = useAiStore((s) => s.createSession);
+  const selectSession = useAiStore((s) => s.selectSession);
+  const renameSession = useAiStore((s) => s.renameSession);
+  const deleteSession = useAiStore((s) => s.deleteSession);
   const { config } = useSettingsStore();
 
   const [input, setInput] = useState("");
@@ -63,10 +68,16 @@ export function ChatView() {
   // Picker state
   const [picker, setPicker] = useState<PickerKind>(null);
   const [pickerQuery, setPickerQuery] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
-  const [filesLoading, setFilesLoading] = useState(false);
-  const [filesLoaded, setFilesLoaded] = useState(false);
+  const [filesByRepo, setFilesByRepo] = useState<Record<string, string[]>>({});
+  const [filesLoadingFor, setFilesLoadingFor] = useState<string | null>(null);
+  const fileRequestRef = useRef(0);
+  const files = currentPath ? filesByRepo[currentPath] ?? [] : [];
+  const filesLoading = currentPath !== null && filesLoadingFor === currentPath;
   const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (currentPath) void loadSessions(currentPath);
+  }, [currentPath, loadSessions]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -74,8 +85,10 @@ export function ChatView() {
     }
   }, [chatMessages]);
 
-  // Reset attachments and picker when switching repos
+  // Reset transient context when switching repos and invalidate stale file requests.
   useEffect(() => {
+    fileRequestRef.current += 1;
+    setFilesLoadingFor(null);
     setAttachments([]);
     setPicker(null);
     setPickerQuery("");
@@ -95,18 +108,24 @@ export function ChatView() {
   }, [picker]);
 
   const loadFiles = useCallback(async () => {
-    if (!currentPath || filesLoaded) return;
-    setFilesLoading(true);
+    if (!currentPath || Object.prototype.hasOwnProperty.call(filesByRepo, currentPath)) return;
+    const repoPath = currentPath;
+    const requestId = ++fileRequestRef.current;
+    setFilesLoadingFor(repoPath);
     try {
-      const list = await gitService.listFiles(currentPath);
-      setFiles(list);
-      setFilesLoaded(true);
+      const list = await gitService.listFiles(repoPath);
+      if (fileRequestRef.current !== requestId) return;
+      setFilesByRepo((prev) => ({ ...prev, [repoPath]: list }));
     } catch (e) {
-      console.error("[aigit] listFiles failed:", e);
+      if (fileRequestRef.current === requestId) {
+        console.error("[aigit] listFiles failed:", e);
+      }
     } finally {
-      setFilesLoading(false);
+      if (fileRequestRef.current === requestId) {
+        setFilesLoadingFor(null);
+      }
     }
-  }, [currentPath, filesLoaded]);
+  }, [currentPath, filesByRepo]);
 
   const openPicker = useCallback(
     (kind: PickerKind) => {
@@ -120,9 +139,11 @@ export function ChatView() {
   );
 
   const addFileAttachment = (path: string) => {
+    const sensitive = isSensitivePath(path);
+    if (sensitive && !window.confirm(t("chat.sensitiveConfirm", { path }))) return;
     setAttachments((prev) => {
       if (prev.some((a) => a.kind === "file" && a.path === path)) return prev;
-      return [...prev, { kind: "file", path }];
+      return [...prev, { kind: "file", path, confirmed: sensitive }];
     });
   };
 
@@ -159,10 +180,12 @@ export function ChatView() {
   const handleSend = async () => {
     if (!input.trim() || !config || loading || !currentPath) return;
     const msg = input.trim();
+    const estimated = estimateTokens(msg) + chatMessages.reduce((sum, item) => sum + estimateTokens(item.content), 0);
+    if (estimated >= LARGE_CONTEXT_TOKENS && !window.confirm(t("chat.largeContextConfirm", { count: estimated.toLocaleString() }))) return;
     const atts = attachments.length > 0 ? attachments : undefined;
     setInput("");
     setAttachments([]);
-    await sendChatMessage(msg, currentPath, config, atts);
+    await sendChatMessage(msg, currentPath, atts);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -173,13 +196,13 @@ export function ChatView() {
   };
 
   const handleClear = () => {
-    if (currentPath) clearChat(currentPath);
+    if (currentPath && activeSessionId) void deleteSession(currentPath, activeSessionId);
   };
 
   const handleSuggestion = (suggestion: string) => {
     if (!currentPath || !config || loading) return;
     const atts = attachments.length > 0 ? attachments : undefined;
-    sendChatMessage(suggestion, currentPath, config, atts);
+    sendChatMessage(suggestion, currentPath, atts);
   };
 
   const suggestions = [
@@ -190,6 +213,20 @@ export function ChatView() {
 
   return (
     <div className="flex flex-col h-full">
+      <div className="flex h-full">
+        <aside className="w-56 shrink-0 border-r border-border bg-bg-surface flex flex-col">
+          <div className="p-2 border-b border-border">
+            <button className="btn-secondary w-full text-xs" disabled={!currentPath} onClick={() => currentPath && createSession(currentPath)}>{t("chat.newSession")}</button>
+          </div>
+          <div className="flex-1 overflow-auto p-2 space-y-1">
+            {sessions.map((session) => <div key={session.id} className={`group flex items-center rounded ${session.id === activeSessionId ? "bg-bg-hover" : "hover:bg-bg-hover"}`}>
+              <button className="flex-1 min-w-0 text-left px-2 py-2 text-xs truncate" onClick={() => currentPath && selectSession(currentPath, session.id)} title={session.title}>{session.title}</button>
+              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted" aria-label={t("chat.rename")} onClick={() => { const title = window.prompt(t("chat.renamePrompt"), session.title); if (title && currentPath) void renameSession(currentPath, session.id, title); }}>✎</button>
+              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted hover:text-danger" aria-label={t("chat.delete")} onClick={() => currentPath && window.confirm(t("chat.deleteConfirm")) && void deleteSession(currentPath, session.id)}><XIcon size={12} /></button>
+            </div>)}
+          </div>
+        </aside>
+        <div className="flex flex-col flex-1 min-w-0">
       {/* Header */}
       <div className="flex items-center px-5 h-12 border-b border-border">
         <h2 className="text-base font-semibold">{t("chat.title")}</h2>
@@ -402,13 +439,14 @@ export function ChatView() {
               disabled={!config || !currentPath}
             />
             <button
-              onClick={handleSend}
-              disabled={!input.trim() || loading || !config || !currentPath}
+              onClick={() => loading && currentPath ? void cancelTask(currentPath, "chat") : void handleSend()}
+              disabled={loading ? !currentPath : !input.trim() || !config || !currentPath}
               aria-busy={loading}
-              className="btn-primary shrink-0"
-              aria-label={t("chat.send")}
+              className={loading ? "btn-secondary shrink-0" : "btn-primary shrink-0"}
+              aria-label={loading ? t("chat.stop") : t("chat.send")}
             >
-              {loading ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
+              {loading ? <XIcon size={14} /> : <SendIcon size={14} />}
+              {loading && t("chat.stop")}
             </button>
           </div>
         </div>
@@ -428,6 +466,8 @@ export function ChatView() {
             {t("chatContext.attachmentsHint")}
           </p>
         )}
+      </div>
+        </div>
       </div>
     </div>
   );

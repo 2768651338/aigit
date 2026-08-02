@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo } from "react";
 import type { FileDiff } from "@/types";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
@@ -26,6 +26,60 @@ interface DiffViewerProps {
    *  Defaults to "view" for backward compatibility.
    */
   mode?: DiffMode;
+}
+
+export function buildHunkPatch(
+  diff: FileDiff,
+  hunkIdx: number,
+  lineKeys?: Set<string>,
+): string {
+  const hunk = diff.hunks[hunkIdx];
+  const lines: string[] = [];
+  let oldCount = 0;
+  let newCount = 0;
+
+  for (let i = 0; i < hunk.lines.length; i++) {
+    const line = hunk.lines[i];
+    const key = `${diff.path}::${hunkIdx}:${i}`;
+    const isSelected = !lineKeys || lineKeys.has(key);
+
+    if (line.line_type === "context") {
+      lines.push(` ${line.content}`);
+      oldCount++;
+      newCount++;
+    } else if (line.line_type === "add") {
+      if (isSelected) {
+        lines.push(`+${line.content}`);
+        newCount++;
+      }
+    } else if (line.line_type === "delete") {
+      if (isSelected) {
+        lines.push(`-${line.content}`);
+        oldCount++;
+      } else {
+        lines.push(` ${line.content}`);
+        oldCount++;
+        newCount++;
+      }
+    } else if (line.line_type === "no_newline") {
+      lines.push(`\\${line.content}`);
+    }
+  }
+
+  const headerMatch = hunk.header.match(
+    /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/,
+  );
+  const oldStart = headerMatch ? parseInt(headerMatch[1], 10) : 1;
+  const newStart = headerMatch ? parseInt(headerMatch[3], 10) : 1;
+  const oldPath = diff.old_path ?? diff.path;
+
+  return [
+    `diff --git a/${oldPath} b/${diff.path}`,
+    `--- a/${oldPath}`,
+    `+++ b/${diff.path}`,
+    `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
+    ...lines,
+  ].join("\n") + "\n";
 }
 
 /**
@@ -86,61 +140,7 @@ export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps)
 
   const clearSelection = () => setSelected(new Set());
 
-  // Build a unified-diff patch for a single hunk, optionally filtered to a
-  // subset of lines. See file-level doc comment for the line-classification
-  // logic (unselected deletes become context, unselected adds are dropped).
-  const buildHunkPatch = useCallback(
-    (diff: FileDiff, hunkIdx: number, lineKeys?: Set<string>): string => {
-      const hunk = diff.hunks[hunkIdx];
-      const lines: string[] = [];
-      let oldCount = 0;
-      let newCount = 0;
-
-      for (let i = 0; i < hunk.lines.length; i++) {
-        const line = hunk.lines[i];
-        const key = `${diff.path}::${hunkIdx}:${i}`;
-        const isSelected = !lineKeys || lineKeys.has(key);
-
-        if (line.line_type === "context") {
-          lines.push(` ${line.content}`);
-          oldCount++;
-          newCount++;
-        } else if (line.line_type === "add") {
-          if (isSelected) {
-            lines.push(`+${line.content}`);
-            newCount++;
-          }
-          // unselected add: drop entirely (not in old, not in new)
-        } else if (line.line_type === "delete") {
-          if (isSelected) {
-            lines.push(`-${line.content}`);
-            oldCount++;
-          } else {
-            // unselected delete: present in both old and new → context
-            lines.push(` ${line.content}`);
-            oldCount++;
-            newCount++;
-          }
-        }
-      }
-
-      // Parse old/new start from the original hunk header.
-      const headerMatch = hunk.header.match(
-        /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/,
-      );
-      const oldStart = headerMatch ? parseInt(headerMatch[1], 10) : 1;
-      const newStart = headerMatch ? parseInt(headerMatch[3], 10) : 1;
-
-      return [
-        `diff --git a/${diff.path} b/${diff.path}`,
-        `--- a/${diff.path}`,
-        `+++ b/${diff.path}`,
-        `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
-        ...lines,
-      ].join("\n");
-    },
-    [],
-  );
+  // `buildHunkPatch` is exported above so patch edge cases can be unit tested.
 
   const handleStageHunk = async (diff: FileDiff, hunkIdx: number) => {
     const patch = buildHunkPatch(diff, hunkIdx);
@@ -299,6 +299,7 @@ export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps)
                             disabled={applying}
                             className="opacity-0 group-hover:opacity-100 focus:opacity-100 btn-ghost text-2xs px-1.5 py-0.5 transition-opacity"
                             title={hunkLabel}
+                            aria-label={hunkLabel}
                           >
                             {mode === "staged" ? <MinusIcon size={11} /> : <PlusIcon size={11} />}
                             {hunkLabel}
@@ -315,6 +316,7 @@ export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps)
                         return (
                           <div
                             key={li}
+                            data-diff-line={line.new_line_no ?? line.old_line_no ?? undefined}
                             className={clsx(
                               "flex items-start px-3 py-0.5 hover:bg-bg-hover/30 group",
                               line.line_type === "add" && "diff-add",
@@ -348,6 +350,8 @@ export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps)
                                 ? "+"
                                 : line.line_type === "delete"
                                 ? "-"
+                                : line.line_type === "no_newline"
+                                ? "\\"
                                 : " "}
                             </span>
                             <span className="whitespace-pre-wrap break-all">{line.content}</span>

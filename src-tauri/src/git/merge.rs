@@ -1,92 +1,62 @@
-use std::path::Path;
-use std::process::Command;
-
 use git2::Repository;
 
-use crate::error::{AppError, AppResult};
+use crate::error::AppResult;
 
+use super::cli::{self, GitOutput, LOCAL_TIMEOUT};
 use super::MergeResult;
 
 /// Merge `branch` into the current branch using the system `git` CLI.
-///
-/// We use the CLI (not libgit2's `MergeOptions`) because libgit2's merge API
-/// only performs the merge in-memory and leaves the caller to commit, resolve
-/// conflicts, and update the index — a fragile dance on Windows. The system
-/// `git merge` does all of this correctly and consistently with what users
-/// expect from the CLI.
-///
-/// `no_ff` controls `--no-ff` (force a merge commit even when a fast-forward
-/// is possible). Returns a [`MergeResult`] describing the outcome.
 pub fn merge_branch(repo: &Repository, branch: &str, no_ff: bool) -> AppResult<MergeResult> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+    cli::validate_non_option(branch, "分支名")?;
+    let workdir = cli::workdir(repo)?;
 
     let mut args = vec!["merge".to_string()];
     if no_ff {
         args.push("--no-ff".to_string());
     }
-    // Emit a machine-readable conflict block we can parse.
     args.push("--no-edit".to_string());
+    args.push("--".to_string());
     args.push(branch.to_string());
 
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
-        })?;
-
-    parse_merge_output(&output, "merge")
+    let output = cli::run(workdir, args, LOCAL_TIMEOUT)?;
+    operation_result(workdir, output, "merge")
 }
 
 /// Rebase the current branch onto `branch` using the system `git` CLI.
 pub fn rebase_branch(repo: &Repository, branch: &str) -> AppResult<MergeResult> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
-
-    let args = vec!["rebase".to_string(), branch.to_string()];
-
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
-        })?;
-
-    parse_merge_output(&output, "rebase")
+    cli::validate_non_option(branch, "分支名")?;
+    let workdir = cli::workdir(repo)?;
+    let output = cli::run(workdir, ["rebase", "--", branch], LOCAL_TIMEOUT)?;
+    operation_result(workdir, output, "rebase")
 }
 
 /// Abort an in-progress merge (`git merge --abort`).
 pub fn abort_merge(repo: &Repository) -> AppResult<String> {
-    run_git_simple(repo, &["merge", "--abort"], "取消 merge 失败")
+    run_git_simple(repo, ["merge", "--abort"], "取消 merge 失败")
 }
 
 /// Abort an in-progress rebase (`git rebase --abort`).
 pub fn abort_rebase(repo: &Repository) -> AppResult<String> {
-    run_git_simple(repo, &["rebase", "--abort"], "取消 rebase 失败")
+    run_git_simple(repo, ["rebase", "--abort"], "取消 rebase 失败")
 }
 
 /// Continue an in-progress merge after conflicts have been resolved.
 pub fn continue_merge(repo: &Repository) -> AppResult<String> {
-    run_git_simple(repo, &["merge", "--continue", "--no-edit"], "继续 merge 失败")
+    run_git_simple(
+        repo,
+        ["merge", "--continue", "--no-edit"],
+        "继续 merge 失败",
+    )
 }
 
 /// Continue an in-progress rebase after conflicts have been resolved.
 pub fn continue_rebase(repo: &Repository) -> AppResult<String> {
-    run_git_simple(repo, &["rebase", "--continue"], "继续 rebase 失败")
+    run_git_simple(repo, ["rebase", "--continue"], "继续 rebase 失败")
 }
 
 /// Skip the current commit during an in-progress rebase.
 pub fn skip_rebase(repo: &Repository) -> AppResult<String> {
-    run_git_simple(repo, &["rebase", "--skip"], "跳过 rebase 提交失败")
+    run_git_simple(repo, ["rebase", "--skip"], "跳过 rebase 提交失败")
 }
 
 /// Returns `true` if a merge is in progress (i.e. `MERGE_HEAD` exists).
@@ -94,185 +64,69 @@ pub fn is_merging(repo: &Repository) -> bool {
     repo.path().join("MERGE_HEAD").exists()
 }
 
-/// Returns `true` if a rebase is in progress (any of the rebase state dirs
-/// exists under `.git`).
+/// Returns `true` if a rebase is in progress.
 pub fn is_rebasing(repo: &Repository) -> bool {
     let gitdir = repo.path();
     gitdir.join("rebase-merge").exists() || gitdir.join("rebase-apply").exists()
 }
 
-/// Resolve conflicts to "ours" strategy for the given paths (or all when
-/// `paths` is empty). Useful for quick conflict resolution in bulk.
+/// Resolve conflicts to "ours" strategy for the given paths (or all when empty).
 pub fn resolve_ours(repo: &Repository, paths: &[String]) -> AppResult<String> {
-    let mut args = vec!["checkout".to_string(), "--ours".to_string(), "--".to_string()];
-    if paths.is_empty() {
-        args.push(".".to_string());
-    } else {
-        for p in paths {
-            args.push(p.clone());
-        }
-    }
-    run_git_simple_raw(repo, &args, "采用 ours 解决冲突失败")?;
-    // After checkout, stage the resolved paths.
-    let mut add_args = vec!["add".to_string()];
-    if paths.is_empty() {
-        add_args.push(".".to_string());
-    } else {
-        for p in paths {
-            add_args.push(p.clone());
-        }
-    }
-    run_git_simple_raw(repo, &add_args, "暂存解决后的文件失败")?;
+    resolve_with_strategy(repo, paths, "--ours", "采用 ours 解决冲突失败")?;
     Ok("已采用 ours 解决冲突并暂存".to_string())
 }
 
-/// Resolve conflicts to "theirs" strategy for the given paths (or all when
-/// `paths` is empty).
+/// Resolve conflicts to "theirs" strategy for the given paths (or all when empty).
 pub fn resolve_theirs(repo: &Repository, paths: &[String]) -> AppResult<String> {
-    let mut args = vec!["checkout".to_string(), "--theirs".to_string(), "--".to_string()];
-    if paths.is_empty() {
-        args.push(".".to_string());
-    } else {
-        for p in paths {
-            args.push(p.clone());
-        }
-    }
-    run_git_simple_raw(repo, &args, "采用 theirs 解决冲突失败")?;
-    let mut add_args = vec!["add".to_string()];
-    if paths.is_empty() {
-        add_args.push(".".to_string());
-    } else {
-        for p in paths {
-            add_args.push(p.clone());
-        }
-    }
-    run_git_simple_raw(repo, &add_args, "暂存解决后的文件失败")?;
+    resolve_with_strategy(repo, paths, "--theirs", "采用 theirs 解决冲突失败")?;
     Ok("已采用 theirs 解决冲突并暂存".to_string())
 }
 
-/// List files with unresolved conflicts (`git diff --name-only --diff-filter=U`).
+/// List files with unresolved index entries using a NUL-delimited structured command.
 pub fn list_conflicted_files(repo: &Repository) -> AppResult<Vec<String>> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
-
-    let args = ["diff".to_string(), "--name-only".to_string(), "--diff-filter=U".to_string()];
-    let output = Command::new("git")
-        .args(&args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let files: Vec<String> = stdout
-        .lines()
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect();
-    Ok(files)
+    list_conflicted_files_in(cli::workdir(repo)?)
 }
 
-// --- helpers ---
-
-pub(crate) fn run_git_simple(repo: &Repository, args: &[&str], err_prefix: &str) -> AppResult<String> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
-    run_git_with_workdir(workdir, args, err_prefix)
+pub(crate) fn run_git_simple<I, S>(
+    repo: &Repository,
+    args: I,
+    error_prefix: &str,
+) -> AppResult<String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<std::ffi::OsString>,
+{
+    cli::run_checked(cli::workdir(repo)?, args, LOCAL_TIMEOUT, error_prefix)
 }
 
-fn run_git_simple_raw(repo: &Repository, args: &[String], err_prefix: &str) -> AppResult<String> {
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
-    let str_args: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    run_git_with_workdir(workdir, &str_args, err_prefix)
-}
-
-pub(crate) fn run_git_with_workdir(
-    workdir: &Path,
-    args: &[&str],
-    err_prefix: &str,
-) -> AppResult<String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        let msg = if stderr.trim().is_empty() {
-            stdout.clone()
-        } else {
-            stderr.clone()
-        };
-        return Err(AppError::General(format!("{err_prefix}：\n{msg}")));
-    }
-
-    let combined = if stdout.trim().is_empty() {
-        stderr
-    } else if stderr.trim().is_empty() {
-        stdout
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-    Ok(combined.trim().to_string())
-}
-
-/// Parse the output of a merge/rebase command into a structured result.
-///
-/// `git merge` and `git rebase` print conflict markers to stderr like:
-///   CONFLICT (content): Merge conflict in <file>
-/// We scan for these lines to extract conflicted file paths.
-pub(crate) fn parse_merge_output(output: &std::process::Output, kind: &str) -> AppResult<MergeResult> {
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    let combined = if stdout.trim().is_empty() {
-        stderr.clone()
-    } else if stderr.trim().is_empty() {
-        stdout.clone()
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-
-    // Extract conflicted file paths from `CONFLICT ... conflict in <file>` lines.
-    let mut conflicts = Vec::new();
-    for line in combined.lines() {
-        let l = line.trim();
-        if l.starts_with("CONFLICT") {
-            if let Some(idx) = l.rfind(" in ") {
-                let file = l[idx + 4..].trim().to_string();
-                if !file.is_empty() {
-                    conflicts.push(file);
-                }
-            }
-        }
-    }
-
+pub(crate) fn operation_result(
+    workdir: &std::path::Path,
+    output: GitOutput,
+    kind: &str,
+) -> AppResult<MergeResult> {
+    let conflicts = list_conflicted_files_in(workdir)?;
     let has_conflicts = !conflicts.is_empty();
-    let success = output.status.success() && !has_conflicts;
+    let success = output.success() && !has_conflicts;
+    let combined = output.combined_lossy();
 
     let message = if has_conflicts {
-        format!(
-            "{kind} 过程中出现冲突，请手动解决后继续：\n{}",
-            combined.trim()
-        )
+        if combined.is_empty() {
+            format!("{kind} 过程中出现冲突，请手动解决后继续")
+        } else {
+            format!("{kind} 过程中出现冲突，请手动解决后继续：\n{combined}")
+        }
     } else if success {
-        combined.trim().to_string()
+        combined
     } else {
-        format!("{kind} 失败：\n{}", combined.trim())
+        let code = output
+            .status_code()
+            .map(|code| code.to_string())
+            .unwrap_or_else(|| "被信号终止".to_string());
+        if combined.is_empty() {
+            format!("{kind} 失败（git 状态码：{code}）")
+        } else {
+            format!("{kind} 失败（git 状态码：{code}）：\n{combined}")
+        }
     };
 
     Ok(MergeResult {
@@ -281,4 +135,99 @@ pub(crate) fn parse_merge_output(output: &std::process::Output, kind: &str) -> A
         has_conflicts,
         conflicts,
     })
+}
+
+fn resolve_with_strategy(
+    repo: &Repository,
+    paths: &[String],
+    strategy: &str,
+    error_prefix: &str,
+) -> AppResult<()> {
+    let workdir = cli::workdir(repo)?;
+    let selected = validated_paths(paths)?;
+    let details = super::conflict::list_conflict_details(repo)?;
+
+    for path in selected {
+        let stage_exists = details
+            .iter()
+            .find(|entry| entry.path == path)
+            .map(|entry| {
+                if strategy == "--ours" {
+                    entry.ours.is_some()
+                } else {
+                    entry.theirs.is_some()
+                }
+            })
+            .unwrap_or(true);
+        if stage_exists {
+            cli::run_checked(
+                workdir,
+                ["checkout", strategy, "--", path.as_str()],
+                LOCAL_TIMEOUT,
+                error_prefix,
+            )?;
+            cli::run_checked(
+                workdir,
+                ["add", "--", path.as_str()],
+                LOCAL_TIMEOUT,
+                "暂存解决后的文件失败",
+            )?;
+        } else {
+            cli::run_checked(
+                workdir,
+                ["rm", "-f", "--", path.as_str()],
+                LOCAL_TIMEOUT,
+                "按所选一侧删除冲突路径失败",
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn validated_paths(paths: &[String]) -> AppResult<Vec<String>> {
+    if paths.is_empty() {
+        return Ok(vec![".".to_string()]);
+    }
+    for path in paths {
+        cli::validate_pathspec(path, "冲突文件路径")?;
+    }
+    Ok(paths.to_vec())
+}
+
+fn list_conflicted_files_in(workdir: &std::path::Path) -> AppResult<Vec<String>> {
+    let output = cli::run(
+        workdir,
+        ["diff", "--name-only", "--diff-filter=U", "-z"],
+        LOCAL_TIMEOUT,
+    )?;
+    if !output.success() {
+        return Err(cli::command_failed("读取冲突文件失败", &output));
+    }
+
+    Ok(output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| String::from_utf8_lossy(path).into_owned())
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_conflict_selection_targets_worktree() {
+        assert_eq!(validated_paths(&[]).unwrap(), vec!["."]);
+    }
+
+    #[test]
+    fn conflict_paths_may_start_with_dash_because_pathspec_separator_is_used() {
+        assert!(validated_paths(&["-odd-name.txt".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn conflict_paths_reject_empty_values() {
+        assert!(validated_paths(&["".to_string()]).is_err());
+    }
 }

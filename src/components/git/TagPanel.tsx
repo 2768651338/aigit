@@ -50,10 +50,18 @@ export function TagPanel() {
   const [diffText, setDiffText] = useState<string>("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
+  const [remotes, setRemotes] = useState<string[]>([]);
+  const [remote, setRemote] = useState("");
+  const [remoteBusy, setRemoteBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (currentPath) {
       void refreshTags();
+      void gitService.listRemotes(currentPath).then((items) => {
+        const names = items.map((item) => item.name);
+        setRemotes(names);
+        setRemote((current) => current || names[0] || "");
+      }).catch(() => undefined);
     }
   }, [currentPath, refreshTags]);
 
@@ -101,6 +109,24 @@ export function TagPanel() {
     }
   };
 
+  const handleRemoteTag = async (tag: TagInfo, remove: boolean) => {
+    if (!currentPath || !remote) return;
+    setRemoteBusy(`${remove ? "delete" : "push"}:${tag.name}`);
+    try {
+      if (remove) {
+        await gitService.deleteRemoteTag(currentPath, remote, tag.name);
+        toast.success(t("tags.remoteDeleted", { name: tag.name, remote }));
+      } else {
+        await gitService.pushTag(currentPath, remote, tag.name);
+        toast.success(t("tags.pushed", { name: tag.name, remote }));
+      }
+    } catch (e) {
+      toast.error(formatError(e), t("tags.remoteFailed"));
+    } finally {
+      setRemoteBusy(null);
+    }
+  };
+
   const handleSelect = async (tag: TagInfo) => {
     if (selected?.name === tag.name) {
       setSelected(null);
@@ -142,6 +168,14 @@ export function TagPanel() {
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
         <TagIcon size={16} className="text-text-secondary" />
         <span className="text-base font-semibold flex-1">{t("tags.title")}</span>
+        <select
+          className="input w-28 py-1 text-xs"
+          value={remote}
+          onChange={(e) => setRemote(e.target.value)}
+          aria-label={t("tags.remote")}
+        >
+          {remotes.map((name) => <option key={name} value={name}>{name}</option>)}
+        </select>
         <button
           onClick={() => setShowForm((v) => !v)}
           className="btn-ghost"
@@ -246,6 +280,28 @@ export function TagPanel() {
                           · {tag.short_hash}
                         </div>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRemoteTag(tag, false);
+                        }}
+                        disabled={!remote || remoteBusy !== null}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-muted hover:text-accent transition-opacity text-2xs"
+                        title={t("tags.pushRemote")}
+                      >
+                        {remoteBusy === `push:${tag.name}` ? <SpinnerIcon size={12} /> : "↑"}
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void handleRemoteTag(tag, true);
+                        }}
+                        disabled={!remote || remoteBusy !== null}
+                        className="opacity-0 group-hover:opacity-100 focus:opacity-100 text-text-muted hover:text-danger transition-opacity text-2xs"
+                        title={t("tags.deleteRemote")}
+                      >
+                        {remoteBusy === `delete:${tag.name}` ? <SpinnerIcon size={12} /> : "×R"}
+                      </button>
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

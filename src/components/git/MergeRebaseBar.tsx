@@ -4,6 +4,8 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
+import { gitService } from "@/services/git";
+import { ConflictResolver } from "@/components/git/ConflictResolver";
 import {
   GitMergeIcon,
   GitPullRequestIcon,
@@ -32,6 +34,7 @@ export function MergeRebaseBar() {
     currentPath,
     branches,
     repoInfo,
+    operationKind,
     mergeInProgress,
     isRebasing,
     conflicts,
@@ -52,6 +55,7 @@ export function MergeRebaseBar() {
   const [targetBranch, setTargetBranch] = useState("");
   const [noFf, setNoFf] = useState(false);
   const [resolving, setResolving] = useState<string | null>(null);
+  const [resolverOpen, setResolverOpen] = useState(false);
 
   // Refresh merge state on mount.
   useEffect(() => {
@@ -110,7 +114,10 @@ export function MergeRebaseBar() {
     );
     if (!confirmed) return;
     try {
-      if (isRebasing) {
+      if (operationKind && operationKind !== "merge" && operationKind !== "rebase") {
+        await gitService.abortOperation(currentPath!);
+        await refreshMergeState();
+      } else if (isRebasing) {
         await abortRebase();
       } else {
         await abortMerge();
@@ -123,11 +130,14 @@ export function MergeRebaseBar() {
 
   const handleContinue = async () => {
     try {
-      if (isRebasing) {
+      if (operationKind && operationKind !== "merge" && operationKind !== "rebase") {
+        await gitService.continueOperation(currentPath!);
+      } else if (isRebasing) {
         await continueRebase();
       } else {
         await continueMerge();
       }
+      await refreshMergeState();
       toast.success(t("common.ok"));
     } catch (e) {
       toast.error(formatError(e));
@@ -136,7 +146,12 @@ export function MergeRebaseBar() {
 
   const handleSkip = async () => {
     try {
-      await skipRebase();
+      if (operationKind === "rebase") {
+        await skipRebase();
+      } else {
+        await gitService.skipOperation(currentPath!);
+        await refreshMergeState();
+      }
       toast.success(t("common.ok"));
     } catch (e) {
       toast.error(formatError(e));
@@ -162,6 +177,7 @@ export function MergeRebaseBar() {
   // ----- In-progress view (merge or rebase) -----
   if (mergeInProgress) {
     return (
+      <>
       <div className="border-b border-warning/30 bg-warning/5">
         <div className="flex items-center gap-3 px-4 py-2.5">
           {isRebasing ? (
@@ -170,7 +186,7 @@ export function MergeRebaseBar() {
             <GitMergeIcon size={16} className="text-warning shrink-0" />
           )}
           <span className="text-sm font-medium text-warning">
-            {isRebasing ? t("branches.rebaseInProgress") : t("branches.mergeInProgress")}
+            {t(`conflictResolver.operation.${operationKind ?? "merge"}`)}
           </span>
           {conflicts.length > 0 && (
             <span className="text-xs text-danger flex items-center gap-1">
@@ -179,34 +195,39 @@ export function MergeRebaseBar() {
             </span>
           )}
           <div className="flex-1" />
-          {isRebasing && (
+          {conflicts.length > 0 && (
+            <button onClick={() => setResolverOpen(true)} className="btn-primary text-xs">
+              {t("conflictResolver.open")}
+            </button>
+          )}
+          {(operationKind === "rebase" || operationKind === "cherry_pick" || operationKind === "revert") && (
             <button
               onClick={handleSkip}
               disabled={merging}
               className="btn-ghost text-xs"
-              title={t("branches.skipCommit")}
+              title={operationKind === "rebase" ? t("branches.skipCommit") : t("conflictResolver.skip")}
             >
               <SkipForwardIcon size={14} />
-              {t("branches.skipCommit")}
+              {operationKind === "rebase" ? t("branches.skipCommit") : t("conflictResolver.skip")}
             </button>
           )}
           <button
             onClick={handleContinue}
             disabled={merging}
             className="btn-secondary text-xs"
-            title={isRebasing ? t("branches.continueRebase") : t("branches.continueMerge")}
+            title={t("conflictResolver.continue")}
           >
             {merging ? <SpinnerIcon size={14} /> : <PlayIcon size={14} />}
-            {isRebasing ? t("branches.continueRebase") : t("branches.continueMerge")}
+            {t("conflictResolver.continue")}
           </button>
           <button
             onClick={handleAbort}
             disabled={merging}
             className="btn-ghost text-xs text-danger"
-            title={isRebasing ? t("branches.abortRebase") : t("branches.abortMerge")}
+            title={operationKind === "stash" ? t("conflictResolver.stashAbortUnavailable") : t("conflictResolver.abort")}
           >
             <XIcon size={14} />
-            {isRebasing ? t("branches.abortRebase") : t("branches.abortMerge")}
+            {operationKind === "stash" ? t("conflictResolver.safety") : t("conflictResolver.abort")}
           </button>
         </div>
 
@@ -251,6 +272,8 @@ export function MergeRebaseBar() {
           </div>
         )}
       </div>
+      <ConflictResolver open={resolverOpen} onClose={() => setResolverOpen(false)} />
+      </>
     );
   }
 

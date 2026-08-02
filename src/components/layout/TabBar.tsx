@@ -1,9 +1,6 @@
-import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
+import { useRepoEntry } from "@/components/git/RepoEntryDialog";
 import { useRepoStore } from "@/stores/repoStore";
-import { useToastStore } from "@/stores/toastStore";
-import { formatError } from "@/utils/error";
-import { gitService } from "@/services/git";
 import { XIcon, PlusIcon, FolderIcon } from "@/components/common/Icons";
 import clsx from "clsx";
 
@@ -21,21 +18,11 @@ function tabLabel(path: string, name?: string | null): string {
 
 export function TabBar() {
   const { t } = useTranslation();
-  const { tabs, tabOrder, activePath, setActiveRepo, closeRepoTab, openRepo } =
+  const { tabs, tabOrder, activePath, setActiveRepo, closeRepoTab } =
     useRepoStore();
-  const toast = useToastStore();
+  const { showRepoEntry } = useRepoEntry();
 
-  const handleOpenNew = async () => {
-    const selected = await open({ directory: true, multiple: false });
-    if (!selected || typeof selected !== "string") return;
-    try {
-      const repoPath = await gitService.discoverRepo(selected);
-      await openRepo(repoPath);
-    } catch (e) {
-      console.error("[aigit] Open repo failed from TabBar:", e);
-      toast.error(formatError(e), t("tabs.openFailed"));
-    }
-  };
+  const handleOpenNew = () => showRepoEntry("open");
 
   const handleClose = async (path: string, e: React.MouseEvent) => {
     e.stopPropagation();

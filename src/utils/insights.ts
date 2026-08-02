@@ -75,11 +75,48 @@ export function saveAuthorAliasRules(repoId: string, rules: AuthorAliasRule[]): 
 }
 export function resetAuthorAliasRules(repoId: string): void { localStorage.removeItem(`aigit:insight-aliases:${repoId}`); }
 
-export function generateWeeklyReport(insights: RepositoryInsights, weekLabel = "最近一周"): string {
-  const commits = insights.recent_commits.slice(0, 20);
-  return `# ${insights.repository_name} 周报（${weekLabel}）\n\n- 提交数：${insights.total_commits}\n- 贡献者：${insights.contributor_count}\n- 活跃分支：${insights.branch_count}\n\n## 提交摘要\n${commits.length ? commits.map((c) => `- ${c.date} ${c.author}：${c.message}`).join("\n") : "- 暂无提交记录"}\n`;
+export interface InsightReportLabels {
+  weeklyTitle: string;
+  projectSummary: string;
+  period: string;
+  commits: string;
+  contributors: string;
+  branches: string;
+  localBranches: string;
+  remoteBranches: string;
+  commitSummary: string;
+  noCommits: string;
+  noContributors: string;
+  projectDescription: string;
 }
-export function generateProjectIntroduction(insights: RepositoryInsights): string {
-  const top = insights.contributors.slice(0, 5).map((c) => c.name).join("、") || "暂无记录";
-  return `# ${insights.repository_name}\n\n该项目共有 **${insights.total_commits}** 次提交，由 **${insights.contributor_count}** 位贡献者共同维护。主要贡献者：${top}。当前记录包含 ${insights.branch_count} 个分支和 ${insights.tag_count} 个版本标签。`;
+
+export function insightPeriod(insights: RepositoryInsights): string {
+  if (insights.start_date && insights.end_date) return `${insights.start_date} — ${insights.end_date}`;
+  return insights.start_date || insights.end_date || "—";
+}
+
+export function branchCounts(insights: RepositoryInsights): { total: number; local: number; remote: number } {
+  const local = insights.local_branch_count;
+  const remote = insights.remote_branch_count;
+  return {
+    total: insights.branch_count,
+    local: local ?? insights.branch_count,
+    remote: remote ?? 0,
+  };
+}
+
+export function generateWeeklyReport(insights: RepositoryInsights, labels: InsightReportLabels): string {
+  const commits = insights.recent_commits;
+  const branches = branchCounts(insights);
+  return `# ${insights.repository_name} ${labels.weeklyTitle}\n\n- ${labels.period}：${insightPeriod(insights)}\n- ${labels.commits}：${insights.total_commits}\n- ${labels.contributors}：${insights.contributor_count}\n- ${labels.branches}：${branches.total}（${labels.localBranches} ${branches.local}，${labels.remoteBranches} ${branches.remote}）\n\n## ${labels.commitSummary}\n${commits.length ? commits.map((c) => `- ${c.date} ${c.author}：${c.message}`).join("\n") : `- ${labels.noCommits}`}\n`;
+}
+export function generateProjectIntroduction(insights: RepositoryInsights, labels: InsightReportLabels): string {
+  const top = insights.contributors.slice(0, 5).map((c) => c.name).join("、") || labels.noContributors;
+  const description = labels.projectDescription
+    .replace("{{commits}}", String(insights.total_commits))
+    .replace("{{contributors}}", String(insights.contributor_count))
+    .replace("{{top}}", top)
+    .replace("{{branches}}", String(insights.branch_count))
+    .replace("{{tags}}", String(insights.tag_count));
+  return `# ${insights.repository_name} ${labels.projectSummary}\n\n- ${labels.period}：${insightPeriod(insights)}\n\n${description}`;
 }

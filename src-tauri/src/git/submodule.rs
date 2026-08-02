@@ -1,9 +1,10 @@
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use git2::Repository;
 
 use crate::error::{AppError, AppResult};
 
+use super::cli::{self, REMOTE_TIMEOUT};
 use super::SubmoduleInfo;
 
 /// List all submodules registered in `.gitmodules`, including their current
@@ -87,9 +88,15 @@ pub fn update_submodule(repo: &Repository, name: Option<&str>) -> AppResult<Stri
         .workdir()
         .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
 
-    let mut args = vec!["submodule".to_string(), "update".to_string(), "--init".to_string(), "--recursive".to_string()];
+    let mut args = vec![
+        "submodule".to_string(),
+        "update".to_string(),
+        "--init".to_string(),
+        "--recursive".to_string(),
+    ];
     if let Some(n) = name {
         if !n.trim().is_empty() {
+            cli::validate_pathspec(n, "子模块路径")?;
             args.push("--".to_string());
             args.push(n.to_string());
         }
@@ -101,18 +108,27 @@ pub fn update_submodule(repo: &Repository, name: Option<&str>) -> AppResult<Stri
 /// Add a new submodule at `url` into `path` (relative to the superproject
 /// workdir). Delegates to `git submodule add` — libgit2 has no public helper
 /// for this workflow.
-pub fn add_submodule(repo: &Repository, url: &str, path: &str, branch: Option<&str>) -> AppResult<String> {
+pub fn add_submodule(
+    repo: &Repository,
+    url: &str,
+    path: &str,
+    branch: Option<&str>,
+) -> AppResult<String> {
     let workdir = repo
         .workdir()
         .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
 
+    cli::validate_non_option(url, "子模块 URL")?;
+    cli::validate_pathspec(path, "子模块路径")?;
     let mut args = vec!["submodule".to_string(), "add".to_string()];
     if let Some(b) = branch {
         if !b.trim().is_empty() {
+            cli::validate_non_option(b, "子模块分支")?;
             args.push("-b".to_string());
             args.push(b.to_string());
         }
     }
+    args.push("--".to_string());
     args.push(url.to_string());
     args.push(path.to_string());
 
@@ -129,67 +145,149 @@ pub fn remove_submodule(repo: &Repository, name: &str) -> AppResult<String> {
         .workdir()
         .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
 
-    // 1. deinit
+    cli::validate_pathspec(name, "子模块名称")?;
+    let registered = repo
+        .find_submodule(name)
+        .map_err(|_| AppError::General(format!("只能移除已注册的子模块，未找到：{name}")))?;
+    let submodule_path = normalize_relative_path(registered.path(), "子模块路径")?;
+    let modules_path = normalize_relative_path(Path::new(name), "子模块名称")?;
+    ensure_contained(workdir, &submodule_path, "子模块路径")?;
+
+    let submodule_arg = submodule_path.to_string_lossy().into_owned();
     let deinit_args = vec![
         "submodule".to_string(),
         "deinit".to_string(),
         "-f".to_string(),
-        name.to_string(),
+        "--".to_string(),
+        submodule_arg.clone(),
     ];
     run_git(workdir, &deinit_args, "停用子模块失败")?;
 
-    // 2. git rm
-    let rm_args = vec!["rm".to_string(), "-f".to_string(), name.to_string()];
+    let rm_args = vec![
+        "rm".to_string(),
+        "-f".to_string(),
+        "--".to_string(),
+        submodule_arg.clone(),
+    ];
     run_git(workdir, &rm_args, "移除子模块索引失败")?;
 
-    // 3. remove .git/modules/<name>
-    let git_dir = repo.path();
-    let modules_path = git_dir.join("modules").join(name);
-    if modules_path.exists() {
-        std::fs::remove_dir_all(&modules_path).map_err(|e| {
+    let modules_root = repo.path().join("modules");
+    let modules_root_canonical = canonicalize_existing_ancestor(&modules_root)?;
+    let module_git_dir = modules_root.join(modules_path);
+    if module_git_dir.exists() {
+        let module_git_dir_canonical = module_git_dir.canonicalize().map_err(|error| {
             AppError::General(format!(
-                "无法删除子模块 git 目录 {}: {e}",
-                modules_path.display()
+                "无法规范化子模块 git 目录 {}: {error}",
+                module_git_dir.display()
+            ))
+        })?;
+        if module_git_dir_canonical == modules_root_canonical
+            || !module_git_dir_canonical.starts_with(&modules_root_canonical)
+        {
+            return Err(AppError::General(format!(
+                "拒绝删除仓库 modules 目录之外的路径：{}",
+                module_git_dir.display()
+            )));
+        }
+        std::fs::remove_dir_all(&module_git_dir_canonical).map_err(|error| {
+            AppError::General(format!(
+                "无法删除子模块 git 目录 {}: {error}",
+                module_git_dir_canonical.display()
             ))
         })?;
     }
 
-    Ok(format!("子模块 {name} 已移除"))
+    Ok(format!("子模块 {submodule_arg} 已移除"))
 }
 
-fn run_git(
-    workdir: &Path,
-    args: &[String],
-    err_prefix: &str,
-) -> AppResult<String> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
+fn normalize_relative_path(path: &Path, label: &str) -> AppResult<PathBuf> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err(AppError::General(format!("{label}必须是非空相对路径")));
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(AppError::General(format!("{label}不能逃逸仓库目录")));
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err(AppError::General(format!("{label}必须是非空相对路径")));
+    }
+    Ok(normalized)
+}
+
+fn ensure_contained(root: &Path, relative: &Path, label: &str) -> AppResult<()> {
+    let root = root.canonicalize().map_err(|error| {
+        AppError::General(format!("无法规范化仓库目录 {}: {error}", root.display()))
+    })?;
+    let candidate = root.join(relative);
+    let canonical = canonicalize_existing_ancestor(&candidate)?;
+    if !canonical.starts_with(&root) {
+        return Err(AppError::General(format!("{label}不能逃逸仓库目录")));
+    }
+    Ok(())
+}
+
+fn canonicalize_existing_ancestor(path: &Path) -> AppResult<PathBuf> {
+    let mut ancestor = path;
+    while !ancestor.exists() {
+        ancestor = ancestor.parent().ok_or_else(|| {
+            AppError::General(format!("路径没有可规范化的父目录：{}", path.display()))
         })?;
+    }
+    ancestor
+        .canonicalize()
+        .map_err(|error| AppError::General(format!("无法规范化路径 {}: {error}", path.display())))
+}
 
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+fn run_git(workdir: &Path, args: &[String], err_prefix: &str) -> AppResult<String> {
+    cli::run_checked(workdir, args.iter().cloned(), REMOTE_TIMEOUT, err_prefix)
+}
 
-    if !output.status.success() {
-        let msg = if stderr.trim().is_empty() {
-            stdout.clone()
-        } else {
-            stderr.clone()
-        };
-        return Err(AppError::General(format!("{err_prefix}：\n{msg}")));
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("aigit-submodule-{name}-{unique}"))
     }
 
-    let combined = if stdout.trim().is_empty() {
-        stderr
-    } else if stderr.trim().is_empty() {
-        stdout
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-    Ok(combined.trim().to_string())
+    #[test]
+    fn rejects_absolute_and_parent_submodule_paths() {
+        assert!(normalize_relative_path(Path::new("nested/module"), "path").is_ok());
+        assert!(normalize_relative_path(Path::new("../outside"), "path").is_err());
+        assert!(normalize_relative_path(Path::new("nested/../../outside"), "path").is_err());
+        assert!(normalize_relative_path(Path::new("/outside"), "path").is_err());
+    }
+
+    #[test]
+    fn containment_rejects_paths_outside_repository() {
+        let root = temp_dir("containment");
+        fs::create_dir_all(&root).expect("create root");
+
+        assert!(ensure_contained(&root, Path::new("nested/module"), "path").is_ok());
+        assert!(ensure_contained(&root, Path::new("../outside"), "path").is_err());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn remove_rejects_unregistered_submodule_before_running_git() {
+        let root = temp_dir("unregistered");
+        fs::create_dir_all(&root).expect("create root");
+        let repo = Repository::init(&root).expect("init repository");
+
+        let error = remove_submodule(&repo, "not-registered").expect_err("must reject");
+        assert!(error.to_string().contains("已注册"));
+        let _ = fs::remove_dir_all(root);
+    }
 }

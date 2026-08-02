@@ -12,8 +12,28 @@ function bytesFromDataUrl(dataUrl: string): Uint8Array {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes;
 }
 function svgText(svg: SVGElement | string): string { return typeof svg === "string" ? svg : new XMLSerializer().serializeToString(svg); }
-function extension(format: ExportFormat): string { return format === "text" ? "txt" : format; }
+function extension(format: ExportFormat): string { return format === "text" ? "txt" : format === "markdown" ? "md" : format; }
 function defaultName(format: ExportFormat): string { return `insights-${new Date().toISOString().slice(0, 10)}.${extension(format)}`; }
+
+/**
+ * Accept only an absolute path returned by the native save dialog and require
+ * the selected file extension to match the requested encoder.
+ */
+export function validateExportPath(path: string, format: ExportFormat): string {
+  if (!path || path.length > 32767 || /[\0\r\n]/.test(path)) throw new Error("导出路径无效");
+  const absolute = /^(?:[A-Za-z]:[\\/]|\\\\|\/)/.test(path);
+  if (!absolute) throw new Error("导出路径必须来自系统保存对话框");
+  const expected = `.${extension(format)}`;
+  if (!path.toLocaleLowerCase().endsWith(expected)) throw new Error(`导出文件必须使用 ${expected} 扩展名`);
+  return path;
+}
+
+function safeDefaultPath(fileName: string | undefined, format: ExportFormat): string {
+  if (!fileName) return defaultName(format);
+  const rawBase = fileName.replace(/\\/g, "/").split("/").pop() || "insights";
+  const withoutExtension = rawBase.replace(/\.[^.]*$/, "");
+  return `${sanitizeFileName(withoutExtension, "insights")}.${extension(format)}`;
+}
 function svgSize(source: string): { width: number; height: number } {
   const root = source.match(/<svg\b[^>]*>/i)?.[0] || "";
   const viewBox = root.match(/viewBox=["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)/i);
@@ -53,8 +73,9 @@ function resizeRgba(source: { rgba: Uint8ClampedArray; width: number; height: nu
 }
 
 export async function exportInsights(request: ExportRequest): Promise<string | null> {
-  const path = await save({ defaultPath: request.fileName || defaultName(request.format), filters: [{ name: request.format.toUpperCase(), extensions: [extension(request.format)] }] });
-  if (!path) return null;
+  const selected = await save({ defaultPath: safeDefaultPath(request.fileName, request.format), filters: [{ name: request.format.toUpperCase(), extensions: [extension(request.format)] }] });
+  if (!selected) return null;
+  const path = validateExportPath(selected, request.format);
   const format = request.format;
   if (format === "markdown" || format === "text") { await writeTextFile(path, request.content || ""); return path; }
   let bytes: Uint8Array;

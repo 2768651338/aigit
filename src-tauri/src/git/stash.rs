@@ -2,6 +2,7 @@ use git2::{Repository, StashApplyOptions};
 
 use crate::error::{AppError, AppResult};
 
+use super::cli::{self, LOCAL_TIMEOUT};
 use super::StashInfo;
 
 /// List all stash entries (most recent first).
@@ -112,39 +113,6 @@ fn _stash_apply_libgit2(repo: &mut Repository, index: usize) -> AppResult<()> {
     Ok(())
 }
 
-fn run_git(
-    workdir: &std::path::Path,
-    args: &[String],
-    err_prefix: &str,
-) -> AppResult<String> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(workdir)
-        .output()
-        .map_err(|e| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{e}"
-            ))
-        })?;
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    if !output.status.success() {
-        let msg = if stderr.trim().is_empty() {
-            stdout.clone()
-        } else {
-            stderr.clone()
-        };
-        return Err(AppError::General(format!("{err_prefix}：\n{msg}")));
-    }
-
-    let combined = if stdout.trim().is_empty() {
-        stderr
-    } else if stderr.trim().is_empty() {
-        stdout
-    } else {
-        format!("{stdout}\n{stderr}")
-    };
-    Ok(combined.trim().to_string())
+fn run_git(workdir: &std::path::Path, args: &[String], err_prefix: &str) -> AppResult<String> {
+    cli::run_checked(workdir, args.iter().cloned(), LOCAL_TIMEOUT, err_prefix)
 }

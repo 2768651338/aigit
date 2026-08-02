@@ -1,0 +1,112 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Windows installers
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Run updater manifest contract tests
+        run: npm test -- scripts/updater-manifest.test.ts
+
+      - name: Verify tag and project versions
+        shell: pwsh
+        run: |
+          npm run check:version
+          $version = node -p "require('./package.json').version"
+          if ("v$version" -ne "${{ github.ref_name }}") {
+            throw "Tag ${{ github.ref_name }} does not match project version v$version"
+          }
+
+      - name: Configure signed updater artifacts
+        shell: pwsh
+        env:
+          UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+          UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          SIGNING_KEY_CONFIGURED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: node scripts/configure-updater.mjs
+
+      - name: Build MSI and NSIS installers
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npm run tauri build -- --bundles msi,nsis
+
+      - name: Generate release assets and SHA-256 checksums
+        shell: pwsh
+        run: |
+          $output = New-Item -ItemType Directory -Force release-assets
+          $artifacts = Get-ChildItem src-tauri/target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in '.msi', '.exe', '.zip', '.sig' }
+          if (-not ($artifacts | Where-Object Extension -eq '.msi')) { throw 'No MSI artifact was produced' }
+          if (-not ($artifacts | Where-Object Extension -eq '.exe')) { throw 'No NSIS artifact was produced' }
+          foreach ($artifact in $artifacts) {
+            Copy-Item $artifact.FullName $output.FullName
+          }
+          $lines = foreach ($artifact in Get-ChildItem $output.FullName -File) {
+            $hash = (Get-FileHash -Algorithm SHA256 $artifact.FullName).Hash.ToLowerInvariant()
+            "$hash  $($artifact.Name)"
+          }
+          $lines | Set-Content -Encoding ascii release-assets/SHA256SUMS.txt
+
+      - name: Generate signed updater manifest
+        shell: pwsh
+        env:
+          UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+        run: |
+          if (-not $env:UPDATER_ENDPOINT) { throw 'TAURI_UPDATER_ENDPOINT is required for release builds' }
+          $version = node -p "require('./package.json').version"
+          node scripts/generate-updater-manifest.mjs $version $env:UPDATER_ENDPOINT src-tauri/target/release/bundle release-assets
+          if (-not (Test-Path release-assets/latest.json)) { throw 'No updater latest.json was produced' }
+          if (-not (Get-ChildItem release-assets -Filter '*.sig')) { throw 'No updater signature was produced' }
+
+      - name: Validate release assets
+        shell: pwsh
+        run: |
+          if (-not (Test-Path LICENSE)) { throw 'LICENSE is missing' }
+          if (-not (Test-Path release-assets/SHA256SUMS.txt)) { throw 'Checksums are missing' }
+          if (-not (Get-ChildItem release-assets -Filter '*.msi')) { throw 'MSI artifact is missing' }
+          if (-not (Get-ChildItem release-assets -Filter '*.exe')) { throw 'NSIS artifact is missing' }
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: release-assets/*

@@ -1,12 +1,20 @@
-import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, ChatAttachment, ChatMessage } from "@/types";
+import { invoke, Channel } from "@tauri-apps/api/core";
+import type { ChatAttachment, ChatMessage, CommitPlan, FindingStatus, ReviewReport } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
-/**
- * When running outside a Tauri WebView (e.g. plain browser via `vite dev`),
- * `invoke` is unavailable. We throw a clear, user-facing error instead of
- * letting it fail silently so the UI can surface the message.
- */
+export type AiRequestKind = "chat" | "review" | "commit";
+export type AiStreamEvent =
+  | { type: "Started"; requestId: string; provider: string; streaming: boolean }
+  | { type: "Delta"; requestId: string; delta: string }
+  | { type: "Usage"; requestId: string; inputTokens?: number | null; outputTokens?: number | null }
+  | { type: "Completed"; requestId: string }
+  | { type: "Cancelled"; requestId: string }
+  | { type: "Failed"; requestId: string; code: string; message: string; retryable: boolean };
+
+export interface AiStreamHandlers {
+  onEvent: (event: AiStreamEvent) => void;
+}
+
 function ensureTauri(): void {
   if (!isTauriEnv()) {
     throw new Error(
@@ -15,46 +23,147 @@ function ensureTauri(): void {
   }
 }
 
+function createRequestId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+  return `ai-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+async function streamCommand(
+  command: string,
+  args: Record<string, unknown>,
+  handlers: AiStreamHandlers,
+  fallback: () => Promise<string>,
+  requestId = createRequestId()
+): Promise<string> {
+  ensureTauri();
+  let content = "";
+  let terminal = false;
+  let failure: Extract<AiStreamEvent, { type: "Failed" }> | null = null;
+  const channel = new Channel<AiStreamEvent>();
+  channel.onmessage = (event) => {
+    if (event.requestId !== requestId) return;
+    if (event.type === "Delta") content += event.delta;
+    if (event.type === "Failed") failure = event;
+    if (event.type === "Completed" || event.type === "Cancelled" || event.type === "Failed") {
+      terminal = true;
+    }
+    handlers.onEvent(event);
+  };
+  try {
+    await invoke<void>(command, { ...args, requestId, onEvent: channel });
+    if (failure) throw failure;
+    return content;
+  } catch (error) {
+    // Older backends do not know the stream command. Preserve compatibility by
+    // falling back only when no stream event was delivered; provider failures
+    // are sent as Failed events and must not trigger a duplicate request.
+    if (terminal || content) throw error;
+    const value = await fallback();
+    handlers.onEvent({ type: "Started", requestId, provider: "fallback", streaming: false });
+    if (value) handlers.onEvent({ type: "Delta", requestId, delta: value });
+    handlers.onEvent({ type: "Completed", requestId });
+    return value;
+  }
+}
+
 export const aiService = {
-  generateCommitMessage: (repoPath: string, config: AppConfig) => {
+  createRequestId,
+
+  generateSmartCommitPlan: (repoPath: string) => {
     ensureTauri();
-    return invoke<string>("generate_commit_message", { repoPath, config });
+    return invoke<CommitPlan>("generate_smart_commit_plan", { repoPath });
   },
 
-  reviewCode: (
+  generateCommitMessage: (repoPath: string) => {
+    ensureTauri();
+    return invoke<string>("generate_commit_message", { repoPath });
+  },
+
+  generatePullRequestDraft: (repoPath: string, base: string, head: string) => {
+    ensureTauri();
+    return invoke<{ title: string; body: string }>("generate_pull_request_draft", {
+      repoPath,
+      base,
+      head,
+    });
+  },
+
+  streamCommitMessage: (
     repoPath: string,
-    config: AppConfig,
-    filePath?: string,
-    stagedOnly?: boolean
-  ) => {
+    handlers: AiStreamHandlers,
+    requestId = createRequestId()
+  ) => ({
+    requestId,
+    done: streamCommand(
+      "generate_commit_message_stream",
+      { repoPath },
+      handlers,
+      () => aiService.generateCommitMessage(repoPath),
+      requestId
+    ),
+  }),
+
+  reviewCode: (repoPath: string, filePath?: string, stagedOnly?: boolean) => {
     ensureTauri();
-    return invoke<string>("review_code", {
-      repoPath,
-      config,
-      filePath,
-      stagedOnly,
-    });
+    return invoke<ReviewReport>("review_code", { repoPath, filePath, stagedOnly });
   },
 
-  /**
-   * Send a chat request with optional context attachments.
-   *
-   * `attachments` lets the user inject `@file:<path>` / `@commit:<hash>`
-   * references — the backend resolves them to actual file content / commit
-   * patches and appends them to the system prompt as repository context.
-   */
-  repoChat: (
-    messages: ChatMessage[],
-    config: AppConfig,
-    repoPath?: string,
-    attachments?: ChatAttachment[]
-  ) => {
+  streamReviewCode: (
+    repoPath: string,
+    filePath: string | undefined,
+    stagedOnly: boolean | undefined,
+    handlers: AiStreamHandlers,
+    requestId = createRequestId()
+  ) => ({
+    requestId,
+    done: streamCommand(
+      "review_code_stream",
+      { repoPath, filePath, stagedOnly },
+      handlers,
+      async () => {
+        const report = await aiService.reviewCode(repoPath, filePath, stagedOnly);
+        return report.raw_markdown || report.summary;
+      },
+      requestId
+    ),
+  }),
+
+  loadReviewReport: (repoPath: string) => {
     ensureTauri();
-    return invoke<string>("repo_chat", {
-      messages,
-      config,
-      repoPath,
-      attachments,
-    });
+    return invoke<ReviewReport | null>("load_review_report", { repoPath });
+  },
+
+  updateReviewFinding: (repoPath: string, findingId: string, status: FindingStatus) => {
+    ensureTauri();
+    return invoke<ReviewReport>("update_review_finding", { repoPath, findingId, status });
+  },
+
+  repoChat: (messages: ChatMessage[], repoPath?: string, attachments?: ChatAttachment[]) => {
+    ensureTauri();
+    return invoke<string>("repo_chat", { messages, repoPath, attachments });
+  },
+
+  streamRepoChat: (
+    messages: ChatMessage[],
+    repoPath: string | undefined,
+    attachments: ChatAttachment[] | undefined,
+    handlers: AiStreamHandlers,
+    requestId = createRequestId()
+  ) => ({
+    requestId,
+    done: streamCommand(
+      "repo_chat_stream",
+      { messages, repoPath, attachments },
+      handlers,
+      () => aiService.repoChat(messages, repoPath, attachments),
+      requestId
+    ),
+  }),
+
+  cancel: (requestId: string) => {
+    ensureTauri();
+    return invoke<boolean>("cancel_ai_request", { requestId });
   },
 };

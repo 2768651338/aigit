@@ -2,6 +2,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useState } from "react";
 import { CopyIcon, CheckIcon } from "@/components/common/Icons";
+import { openExternalUrl, safeExternalUrl } from "@/utils/externalUrl";
 
 export function MarkdownRenderer({ content }: { content: string }) {
   return (
@@ -55,11 +56,22 @@ export function MarkdownRenderer({ content }: { content: string }) {
               {children}
             </blockquote>
           ),
-          a: ({ children, href }) => (
-            <a href={href} className="text-accent hover:underline" target="_blank" rel="noopener noreferrer">
-              {children}
-            </a>
-          ),
+          a: ({ children, href }) => {
+            const safeHref = safeExternalUrl(href);
+            if (!safeHref) return <span className="text-text-secondary">{children}</span>;
+            return (
+              <a
+                href={safeHref}
+                className="text-accent hover:underline"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(safeHref);
+                }}
+              >
+                {children}
+              </a>
+            );
+          },
           table: ({ children }) => (
             <table className="w-full my-2 border-collapse text-xs">{children}</table>
           ),

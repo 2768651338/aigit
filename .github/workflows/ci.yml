@@ -1,0 +1,81 @@
+name: Windows CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Test, build, and audit
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify versions and license metadata
+        shell: pwsh
+        run: |
+          npm run check:version
+          if (-not (Test-Path LICENSE)) { throw 'LICENSE file is missing' }
+          if ((node -p "require('./package.json').license") -ne 'Apache-2.0') { throw 'package.json license mismatch' }
+          if (-not (Select-String -Path src-tauri/Cargo.toml -Pattern '^license = "Apache-2.0"$' -Quiet)) { throw 'Cargo license mismatch' }
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Type-check frontend
+        run: npm run typecheck
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Check Rust formatting
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+
+      - name: Check Rust code
+        run: cargo check --manifest-path src-tauri/Cargo.toml --all-targets --locked
+
+      - name: Lint Rust code
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
+
+      - name: Audit npm dependencies
+        run: npm audit --audit-level=high
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Audit Rust dependencies
+        run: cargo audit --file src-tauri/Cargo.lock

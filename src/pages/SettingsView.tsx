@@ -1,15 +1,17 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useSettingsStore } from "@/stores/aiStore";
+import { useSettingsStore, useAiStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
-import type { AppConfig, AiProviderConfig, PromptsConfig } from "@/types";
-import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon, GithubIcon } from "@/components/common/Icons";
+import type { AppConfig, AiProviderConfig, CredentialProvider, PromptsConfig, IndexStatus } from "@/types";
+import { codeIndexService } from "@/services/codeIndex";
+import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon, GithubIcon, TrashIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import { applyTheme, type ThemeMode } from "@/utils/theme";
 import clsx from "clsx";
-import { open as openExternal } from "@tauri-apps/plugin-shell";
+import { openExternalUrl } from "@/utils/externalUrl";
+import { updaterService, type AvailableUpdate } from "@/services/updater";
 
 const AUTHOR = "田小橙";
 const QQ = "2768651338";
@@ -32,13 +34,31 @@ const THEMES: { id: ThemeMode; labelKey: string }[] = [
 
 export function SettingsView() {
   const { t, i18n } = useTranslation();
-  const { config, loadConfig, saveConfig, error } = useSettingsStore();
+  const { config, loadConfig, saveConfig, setApiKey, deleteApiKey, error } = useSettingsStore();
   const openRepo = useRepoStore((s) => s.openRepo);
   const openTabs = useRepoStore((s) => s.tabOrder);
+  const currentPath = useRepoStore((s) => s.currentPath);
   const toast = useToastStore();
+  const localSaveEnabled = useAiStore((s) => s.localSaveEnabled);
+  const setLocalSaveEnabled = useAiStore((s) => s.setLocalSaveEnabled);
+  const clearAllHistory = useAiStore((s) => s.clearAllHistory);
   const [local, setLocal] = useState<AppConfig | null>(null);
+  const [apiKeys, setApiKeys] = useState<Record<CredentialProvider, string>>({
+    openai: "",
+    claude: "",
+    deepseek: "",
+    embedding_openai: "",
+  });
   const [saving, setSaving] = useState(false);
+  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
+  const [indexBusy, setIndexBusy] = useState(false);
+  const [embeddingKey, setEmbeddingKey] = useState("");
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [updaterEnabled, setUpdaterEnabled] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ downloaded: number; total?: number } | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!config) {
@@ -47,6 +67,78 @@ export function SettingsView() {
       setLocal(config);
     }
   }, [config, loadConfig]);
+
+  useEffect(() => {
+    if (!currentPath) { setIndexStatus(null); return; }
+    void codeIndexService.status(currentPath).then(setIndexStatus).catch(() => setIndexStatus(null));
+  }, [currentPath]);
+
+  useEffect(() => {
+    void updaterService.availability()
+      .then(({ enabled }) => setUpdaterEnabled(enabled))
+      .catch(() => setUpdaterEnabled(false));
+  }, []);
+
+  const handleCheckUpdate = async () => {
+    if (!updaterEnabled || updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateError(null);
+    setAvailableUpdate(null);
+    try {
+      const result = await updaterService.check();
+      setAvailableUpdate(result);
+      if (!result) toast.success(t("settings.updateCurrent"));
+    } catch (e) {
+      setUpdateError(String(e));
+    } finally {
+      setUpdateBusy(false);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (!availableUpdate || updateBusy) return;
+    setUpdateBusy(true);
+    setUpdateError(null);
+    setUpdateProgress({ downloaded: 0 });
+    try {
+      await updaterService.downloadAndInstall((downloaded, total) =>
+        setUpdateProgress((current) => ({ downloaded, total: total ?? current?.total })),
+      );
+    } catch (e) {
+      setUpdateError(String(e));
+      setUpdateBusy(false);
+    }
+  };
+
+  const runIndexAction = async (action: "rebuild" | "cancel" | "delete") => {
+    if (!currentPath || !local || (indexBusy && action !== "cancel")) return;
+    if (action === "rebuild") {
+      setIndexBusy(true);
+      try {
+        // The backend reloads persisted settings before indexing, so save first.
+        const configSaved = await saveConfig(local);
+        if (!configSaved) {
+          throw new Error(useSettingsStore.getState().error ?? t("settings.saveFailed"));
+        }
+        if (embeddingKey.trim()) {
+          await setApiKey("embedding_openai", embeddingKey.trim());
+          setEmbeddingKey("");
+        }
+        setIndexStatus((status) => status ? { ...status, phase: "scanning", stale: false, message: null } : status);
+        setIndexStatus(await codeIndexService.rebuild(currentPath, false));
+      } catch (e) {
+        toast.error(String(e), t("settings.indexActionFailed"));
+      } finally {
+        setIndexBusy(false);
+      }
+      return;
+    }
+    try {
+      if (action === "cancel") await codeIndexService.cancel(currentPath);
+      if (action === "delete") await codeIndexService.delete(currentPath);
+      setIndexStatus(await codeIndexService.status(currentPath));
+    } catch (e) { toast.error(String(e), t("settings.indexActionFailed")); }
+  };
 
   const update = (partial: Partial<AiProviderConfig>) => {
     if (!local) return;
@@ -63,16 +155,46 @@ export function SettingsView() {
     setLocal({ ...local, prompts: { ...local.prompts, ...partial } });
   };
 
+  const updateApiKey = (provider: CredentialProvider, value: string) => {
+    setApiKeys((current) => ({ ...current, [provider]: value }));
+  };
+
   const handleSave = async () => {
     if (!local || saving) return;
     setSaving(true);
-    // Clear any prior error so we can re-evaluate after this attempt.
-    await saveConfig(local);
-    setSaving(false);
-    if (useSettingsStore.getState().error) {
-      toast.error(useSettingsStore.getState().error as string, t("settings.saveFailed"));
-    } else {
+    try {
+      const configSaved = await saveConfig(local);
+      if (!configSaved) {
+        toast.error(useSettingsStore.getState().error ?? t("settings.saveFailed"), t("settings.saveFailed"));
+        return;
+      }
+
+      for (const provider of ["openai", "claude", "deepseek"] as const) {
+        const apiKey = apiKeys[provider].trim();
+        if (apiKey) await setApiKey(provider, apiKey);
+      }
+      if (embeddingKey.trim()) await setApiKey("embedding_openai", embeddingKey.trim());
+      setEmbeddingKey("");
+      setApiKeys({ openai: "", claude: "", deepseek: "", embedding_openai: "" });
       toast.success(t("settings.saved"));
+    } catch (e) {
+      toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteApiKey = async (provider: CredentialProvider) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await deleteApiKey(provider);
+      updateApiKey(provider, "");
+      toast.success(t("settings.apiKeyDeleted"));
+    } catch (e) {
+      toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -88,10 +210,9 @@ export function SettingsView() {
 
   const handleOpenUrl = async (url: string) => {
     try {
-      await openExternal(url);
+      if (!(await openExternalUrl(url))) throw new Error("Unsupported external URL");
     } catch (e) {
-      console.warn("[aigit] Tauri shell open failed, fallback to window.open:", e);
-      window.open(url, "_blank", "noopener,noreferrer");
+      console.warn("[aigit] external URL open failed:", e);
     }
   };
 
@@ -165,10 +286,12 @@ export function SettingsView() {
         {local.ai.active_provider === "openai" && (
           <ProviderFields
             title={t("settings.openaiConfig")}
-            apiKey={local.ai.openai_api_key}
+            apiKey={apiKeys.openai}
+            hasApiKey={local.ai.credential_status.openai}
             model={local.ai.openai_model}
             baseUrl={local.ai.openai_base_url}
-            onApiKey={(v) => update({ openai_api_key: v })}
+            onApiKey={(v) => updateApiKey("openai", v)}
+            onDeleteApiKey={() => handleDeleteApiKey("openai")}
             onModel={(v) => update({ openai_model: v })}
             onBaseUrl={(v) => update({ openai_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -178,10 +301,12 @@ export function SettingsView() {
         {local.ai.active_provider === "claude" && (
           <ProviderFields
             title={t("settings.claudeConfig")}
-            apiKey={local.ai.claude_api_key}
+            apiKey={apiKeys.claude}
+            hasApiKey={local.ai.credential_status.claude}
             model={local.ai.claude_model}
             baseUrl={local.ai.claude_base_url}
-            onApiKey={(v) => update({ claude_api_key: v })}
+            onApiKey={(v) => updateApiKey("claude", v)}
+            onDeleteApiKey={() => handleDeleteApiKey("claude")}
             onModel={(v) => update({ claude_model: v })}
             onBaseUrl={(v) => update({ claude_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -191,10 +316,12 @@ export function SettingsView() {
         {local.ai.active_provider === "deepseek" && (
           <ProviderFields
             title={t("settings.deepseekConfig")}
-            apiKey={local.ai.deepseek_api_key}
+            apiKey={apiKeys.deepseek}
+            hasApiKey={local.ai.credential_status.deepseek}
             model={local.ai.deepseek_model}
             baseUrl={local.ai.deepseek_base_url}
-            onApiKey={(v) => update({ deepseek_api_key: v })}
+            onApiKey={(v) => updateApiKey("deepseek", v)}
+            onDeleteApiKey={() => handleDeleteApiKey("deepseek")}
             onModel={(v) => update({ deepseek_model: v })}
             onBaseUrl={(v) => update({ deepseek_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -228,10 +355,12 @@ export function SettingsView() {
               <p className="text-xs text-text-muted">
                 {t("settings.ollamaHint")}{" "}
                 <a
-                  href="https://ollama.ai"
+                  href="https://ollama.ai/"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleOpenUrl("https://ollama.ai/");
+                  }}
                   className="text-accent hover:underline"
-                  target="_blank"
-                  rel="noopener noreferrer"
                 >
                   ollama.ai
                 </a>
@@ -384,6 +513,55 @@ export function SettingsView() {
           </div>
         </section>
 
+        {/* Local code index */}
+        <section>
+          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.codeIndex")}</h3>
+          <p className="text-xs text-text-muted mb-4">{t("settings.codeIndexHint")}</p>
+          <div className="space-y-4">
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={local.index.enabled} onChange={(e) => setLocal({ ...local, index: { ...local.index, enabled: e.target.checked } })} className="accent-accent w-4 h-4" />
+              <span className="text-sm text-text-secondary">{t("settings.indexEnabled")}</span>
+            </label>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={local.index.include_untracked} onChange={(e) => setLocal({ ...local, index: { ...local.index, include_untracked: e.target.checked } })} className="accent-accent w-4 h-4" />
+              <span className="text-sm text-text-secondary">{t("settings.includeUntrackedIndex")}</span>
+            </label>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input type="checkbox" checked={local.index.never_upload_index} onChange={(e) => setLocal({ ...local, index: { ...local.index, never_upload_index: e.target.checked } })} className="accent-accent w-4 h-4" />
+              <span className="text-sm text-text-secondary">{t("settings.neverUploadIndex")}</span>
+            </label>
+            <Field label={t("settings.embeddingProvider")}>
+              <select value={local.index.embedding_provider} onChange={(e) => setLocal({ ...local, index: { ...local.index, embedding_provider: e.target.value as "ollama" | "openai_compatible" } })} className="input">
+                <option value="ollama">Ollama (local)</option><option value="openai_compatible">OpenAI-compatible (explicit)</option>
+              </select>
+            </Field>
+            {local.index.embedding_provider === "ollama" ? <>
+              <Field label={t("settings.model")}><input className="input font-mono" value={local.index.ollama_embedding_model} onChange={(e) => setLocal({ ...local, index: { ...local.index, ollama_embedding_model: e.target.value } })} /></Field>
+              <Field label={t("settings.baseUrl")}><input className="input font-mono" value={local.index.ollama_embedding_base_url} onChange={(e) => setLocal({ ...local, index: { ...local.index, ollama_embedding_base_url: e.target.value } })} /></Field>
+            </> : <>
+              <label className="flex items-center gap-2.5 cursor-pointer"><input type="checkbox" checked={local.index.cloud_embedding_enabled} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_enabled: e.target.checked } })} className="accent-accent w-4 h-4" /><span className="text-sm text-text-secondary">{t("settings.enableCloudEmbedding")}</span></label>
+              <Field label={t("settings.apiKey")}><input type="password" autoComplete="new-password" className="input font-mono" value={embeddingKey} onChange={(e) => setEmbeddingKey(e.target.value)} placeholder={local.ai.credential_status.embedding_openai ? t("settings.apiKeyConfigured") : "sk-..."} /></Field>
+              <Field label={t("settings.model")}><input className="input font-mono" value={local.index.cloud_embedding_model} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_model: e.target.value } })} /></Field>
+              <Field label={t("settings.baseUrl")}><input className="input font-mono" value={local.index.cloud_embedding_base_url} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_base_url: e.target.value } })} /></Field>
+            </>}
+            {indexStatus?.message && <p className={clsx("text-xs", indexStatus.stale ? "text-warning" : "text-text-muted")}>{indexStatus.message}</p>}
+            <div className="flex items-center gap-2 text-xs text-text-muted"><span>{t("settings.indexStatus")}: {indexStatus?.phase ?? "idle"}{indexStatus?.stale ? ` (${t("settings.indexStale")})` : ""} · {indexStatus?.chunks ?? 0} chunks</span><div className="flex-1" /><button className="btn-secondary" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("rebuild")}>{t("settings.rebuildIndex")}</button><button className="btn-secondary" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("cancel")}>{t("settings.cancelIndex")}</button><button className="btn-secondary text-danger" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("delete")}>{t("settings.deleteIndex")}</button></div>
+          </div>
+        </section>
+
+        {/* Local chat privacy */}
+        <section>
+          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.chatPrivacy")}</h3>
+          <p className="text-xs text-text-muted mb-4">{t("settings.chatPrivacyHint")}</p>
+          <label className="flex items-center gap-2.5 cursor-pointer mb-4">
+            <input type="checkbox" checked={localSaveEnabled} onChange={(e) => setLocalSaveEnabled(e.target.checked)} className="accent-accent w-4 h-4" />
+            <span className="text-sm text-text-secondary">{t("settings.saveChatLocally")}</span>
+          </label>
+          <button type="button" className="btn-secondary text-danger" onClick={() => { if (window.confirm(t("settings.clearChatConfirm"))) void clearAllHistory().then(() => toast.success(t("settings.chatCleared"))); }}>
+            <TrashIcon size={14} /> {t("settings.clearChatHistory")}
+          </button>
+        </section>
+
         {/* Recent repos */}
         {local.recent_repos.length > 0 && (
           <section>
@@ -419,6 +597,46 @@ export function SettingsView() {
             </div>
           </section>
         )}
+
+        {/* Updates */}
+        <section>
+          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.updates")}</h3>
+          <p className="text-xs text-text-muted mb-4">
+            {updaterEnabled ? t("settings.updateEnabledHint") : t("settings.updateDisabledHint")}
+          </p>
+          {updateError && <p className="text-xs text-danger mb-3 break-words">{updateError}</p>}
+          {availableUpdate && (
+            <p className="text-sm text-text-secondary mb-3">
+              {t("settings.updateAvailable", { version: availableUpdate.version })}
+            </p>
+          )}
+          {updateProgress && (
+            <div className="mb-3">
+              <progress
+                className="w-full"
+                value={updateProgress.downloaded}
+                max={updateProgress.total ?? Math.max(updateProgress.downloaded, 1)}
+              />
+              <p className="text-xs text-text-muted mt-1">
+                {updateProgress.total
+                  ? `${Math.min(100, Math.round(updateProgress.downloaded * 100 / updateProgress.total))}%`
+                  : t("settings.updateDownloading")}
+              </p>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary" disabled={!updaterEnabled || updateBusy} onClick={() => void handleCheckUpdate()}>
+              {updateBusy && !updateProgress ? <SpinnerIcon size={14} /> : null}
+              {t("settings.checkUpdate")}
+            </button>
+            {availableUpdate && (
+              <button type="button" className="btn-primary" disabled={updateBusy} onClick={() => void handleInstallUpdate()}>
+                {updateBusy ? <SpinnerIcon size={14} /> : null}
+                {t("settings.installUpdate")}
+              </button>
+            )}
+          </div>
+        </section>
 
         {/* About / Copyright */}
         <section className="mt-2 pt-8 border-t border-border">
@@ -466,6 +684,10 @@ export function SettingsView() {
                 <MailIcon size={14} className="text-text-muted" />
                 <a
                   href={`mailto:${EMAIL}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void handleOpenUrl(`mailto:${EMAIL}`);
+                  }}
                   className="text-accent hover:underline font-mono"
                 >
                   {EMAIL}
@@ -515,35 +737,50 @@ export function SettingsView() {
 function ProviderFields({
   title,
   apiKey,
+  hasApiKey,
   model,
   baseUrl,
   onApiKey,
+  onDeleteApiKey,
   onModel,
   onBaseUrl,
   labels,
 }: {
   title: string;
   apiKey: string;
+  hasApiKey: boolean;
   model: string;
   baseUrl: string;
   onApiKey: (v: string) => void;
+  onDeleteApiKey: () => void;
   onModel: (v: string) => void;
   onBaseUrl: (v: string) => void;
   labels: { apiKey: string; model: string; baseUrl: string };
 }) {
+  const { t } = useTranslation();
   return (
     <section>
       <h3 className="text-base font-semibold text-text-primary mb-4">{title}</h3>
       <div className="space-y-4">
         <Field label={labels.apiKey}>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => onApiKey(e.target.value)}
-            className="input font-mono"
-            placeholder="sk-..."
-            autoComplete="off"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => onApiKey(e.target.value)}
+              className="input font-mono flex-1"
+              placeholder={hasApiKey ? t("settings.apiKeyConfigured") : "sk-..."}
+              autoComplete="new-password"
+            />
+            {hasApiKey && (
+              <button type="button" onClick={onDeleteApiKey} className="btn-secondary shrink-0">
+                {t("settings.apiKeyDelete")}
+              </button>
+            )}
+          </div>
+          <p className="mt-1.5 text-xs text-text-muted">
+            {hasApiKey ? t("settings.apiKeyConfigured") : t("settings.apiKeyNotConfigured")}
+          </p>
         </Field>
         <Field label={labels.model}>
           <input
@@ -556,12 +793,14 @@ function ProviderFields({
         </Field>
         <Field label={labels.baseUrl}>
           <input
-            type="text"
+            type="url"
+            maxLength={2048}
             value={baseUrl}
             onChange={(e) => onBaseUrl(e.target.value)}
             className="input font-mono"
             placeholder="https://api.example.com/v1"
           />
+          <p className="mt-1.5 text-xs text-text-muted">{t("settings.endpointHint")}</p>
         </Field>
       </div>
     </section>

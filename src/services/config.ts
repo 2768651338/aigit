@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, DefaultPrompts } from "@/types";
+import type { AppConfig, CredentialProvider, DefaultPrompts } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
 function ensureTauri(): void {
@@ -18,7 +18,17 @@ export const configService = {
 
   saveConfig: (config: AppConfig) => {
     ensureTauri();
-    return invoke<void>("save_config", { config });
+    return invoke<AppConfig>("save_config", { config });
+  },
+
+  setApiKey: (provider: CredentialProvider, apiKey: string) => {
+    ensureTauri();
+    return invoke<AppConfig>("set_api_key", { provider, apiKey });
+  },
+
+  deleteApiKey: (provider: CredentialProvider) => {
+    ensureTauri();
+    return invoke<AppConfig>("delete_api_key", { provider });
   },
 
   addRecentRepo: (path: string) => {
@@ -26,18 +36,9 @@ export const configService = {
     return invoke<AppConfig>("add_recent_repo", { path });
   },
 
-  /**
-   * Persist the set of currently open repo tabs and the active one.
-   * Returns the updated AppConfig (with open_repos / active_repo normalized
-   * by the backend — e.g. active_repo is auto-set to the first item when
-   * the caller passes an inconsistent value).
-   */
   setOpenRepos: (openRepos: string[], activeRepo: string | null) => {
     ensureTauri();
-    return invoke<AppConfig>("set_open_repos", {
-      openRepos,
-      activeRepo,
-    });
+    return invoke<AppConfig>("set_open_repos", { openRepos, activeRepo });
   },
 
   getDefaultPrompts: () => {

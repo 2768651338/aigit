@@ -3,13 +3,16 @@ import type {
   BranchInfo,
   FileDiff,
   FileStatus,
+  GitOperationKind,
   LogEntry,
   MergeResult,
+  RemoteInfo,
   RepoInfo,
   RepoTabState,
   StashInfo,
   SubmoduleInfo,
   TagInfo,
+  TrackingInfo,
 } from "@/types";
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
@@ -29,6 +32,12 @@ interface ActiveTabProjection {
   stagedDiff: FileDiff[];
   branches: BranchInfo[];
   log: LogEntry[];
+  remotes: RemoteInfo[];
+  tracking: TrackingInfo | null;
+  fetchUpdatedAt: number | null;
+  remoteBusy: string | null;
+  remoteError: string | null;
+  remoteTask: RepoTabState["remoteTask"];
   loading: boolean;
   error: string | null;
   pushing: boolean;
@@ -43,6 +52,7 @@ interface ActiveTabProjection {
   stashes: StashInfo[] | null;
   tags: TagInfo[] | null;
   submodules: SubmoduleInfo[] | null;
+  operationKind: GitOperationKind | null;
   mergeInProgress: boolean;
   isRebasing: boolean;
   conflicts: string[];
@@ -85,16 +95,22 @@ interface RepoStoreState extends ActiveTabProjection {
 
   // Git operations (operate on the active tab)
   refreshStatus: (force?: boolean) => Promise<void>;
+  refreshRepoInfo: () => Promise<void>;
   selectFile: (path: string | null) => Promise<void>;
   stageFiles: (files: string[]) => Promise<void>;
   unstageFiles: (files: string[]) => Promise<void>;
   stageAll: () => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
   commit: (message: string) => Promise<string>;
-  push: (setUpstream?: boolean) => Promise<string>;
+  amend: (message: string, includeStaged?: boolean, confirmPushed?: boolean) => Promise<string>;
+  push: (remote?: string, remoteBranch?: string) => Promise<string>;
   pull: () => Promise<string>;
   refreshBranches: (force?: boolean) => Promise<void>;
   refreshLog: (force?: boolean) => Promise<void>;
+  loadRemoteState: (path?: string, afterFetch?: boolean) => Promise<void>;
+  setRemoteBusy: (path: string, busy: string | null) => void;
+  setRemoteError: (path: string, error: string | null) => void;
+  setRemoteTask: (path: string, task: RepoTabState["remoteTask"]) => void;
   switchBranch: (name: string) => Promise<void>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
@@ -159,6 +175,12 @@ function createEmptyTab(path: string): RepoTabState {
     stagedDiff: [],
     branches: [],
     log: [],
+    remotes: [],
+    tracking: null,
+    fetchUpdatedAt: null,
+    remoteBusy: null,
+    remoteError: null,
+    remoteTask: null,
     loading: false,
     error: null,
     pushing: false,
@@ -173,6 +195,7 @@ function createEmptyTab(path: string): RepoTabState {
     stashes: null,
     tags: null,
     submodules: null,
+    operationKind: null,
     mergeInProgress: false,
     isRebasing: false,
     conflicts: [],
@@ -230,6 +253,12 @@ function projectActiveTab(
       stagedDiff: [],
       branches: [],
       log: [],
+      remotes: [],
+      tracking: null,
+      fetchUpdatedAt: null,
+      remoteBusy: null,
+      remoteError: null,
+      remoteTask: null,
       loading: false,
       error: null,
       pushing: false,
@@ -244,6 +273,7 @@ function projectActiveTab(
       stashes: null,
       tags: null,
       submodules: null,
+      operationKind: null,
       mergeInProgress: false,
       isRebasing: false,
       conflicts: [],
@@ -259,6 +289,12 @@ function projectActiveTab(
     stagedDiff: tab.stagedDiff,
     branches: tab.branches,
     log: tab.log,
+    remotes: tab.remotes,
+    tracking: tab.tracking,
+    fetchUpdatedAt: tab.fetchUpdatedAt,
+    remoteBusy: tab.remoteBusy,
+    remoteError: tab.remoteError,
+    remoteTask: tab.remoteTask,
     loading: tab.loading,
     error: tab.error,
     pushing: tab.pushing,
@@ -273,6 +309,7 @@ function projectActiveTab(
     stashes: tab.stashes,
     tags: tab.tags,
     submodules: tab.submodules,
+    operationKind: tab.operationKind,
     mergeInProgress: tab.mergeInProgress,
     isRebasing: tab.isRebasing,
     conflicts: tab.conflicts,
@@ -359,12 +396,26 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
       }
       updateTab(set, get, path, { repoInfo: info, loading: false });
 
-      // Refresh the new tab's data. These read `activePath`, which is now
-      // `path`, so they'll update the correct tab.
-      await get().refreshStatus(true);
-      await get().refreshBranches(true);
-      await get().refreshLog(true);
-      await get().refreshMergeState();
+      // Load the originating repository explicitly. The user may switch tabs
+      // while getRepoInfo/addRecentRepo is awaiting; calling the active-tab
+      // refresh actions here would otherwise write repo A's completion into
+      // whichever tab is active at that moment.
+      if (!get().tabs[path]) return;
+      const [statuses, branches, log, operation] = await Promise.all([
+        gitService.getStatus(path),
+        gitService.listBranches(path),
+        gitService.getLog(path, 100),
+        gitService.getOperationState(path),
+      ]);
+      updateTab(set, get, path, {
+        fileStatuses: statuses,
+        branches,
+        log,
+        operationKind: operation.kind,
+        mergeInProgress: operation.in_progress,
+        isRebasing: operation.kind === "rebase",
+        conflicts: operation.conflicts,
+      });
     } catch (e) {
       updateTab(set, get, path, {
         loading: false,
@@ -495,6 +546,17 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
+  refreshRepoInfo: async () => {
+    const { activePath } = get();
+    if (!activePath) return;
+    try {
+      const info = await gitService.getRepoInfo(activePath);
+      updateTab(set, get, activePath, { repoInfo: info });
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+    }
+  },
+
   selectFile: async (path: string | null) => {
     const { activePath } = get();
     if (!activePath) {
@@ -594,12 +656,26 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  push: async (setUpstream?: boolean) => {
+  amend: async (message: string, includeStaged = false, confirmPushed = false) => {
+    const { activePath } = get();
+    if (!activePath) throw new Error("No repository open");
+    try {
+      const hash = await gitService.amend(activePath, message, includeStaged, confirmPushed);
+      await get().refreshStatus(true);
+      await get().refreshLog(true);
+      return hash;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      throw e;
+    }
+  },
+
+  push: async (remote?: string, remoteBranch?: string) => {
     const { activePath } = get();
     if (!activePath) throw new Error("No repository open");
     updateTab(set, get, activePath, { pushing: true, error: null });
     try {
-      const result = await gitService.push(activePath, setUpstream);
+      const result = await gitService.push(activePath, remote, remoteBranch);
       try {
         const info = await gitService.getRepoInfo(activePath);
         updateTab(set, get, activePath, { repoInfo: info });
@@ -667,6 +743,44 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     } finally {
       updateTab(set, get, activePath, { refreshing: false });
     }
+  },
+
+  loadRemoteState: async (requestedPath?: string, afterFetch = false) => {
+    const path = requestedPath ?? get().activePath;
+    if (!path || !get().tabs[path]) return;
+    try {
+      const [remotes, tracking, repoInfo, branches] = await Promise.all([
+        gitService.listRemotes(path),
+        gitService.getTrackingInfo(path),
+        afterFetch ? gitService.getRepoInfo(path) : Promise.resolve(null),
+        afterFetch ? gitService.listBranches(path) : Promise.resolve(null),
+      ]);
+      if (!get().tabs[path]) return;
+      updateTab(set, get, path, {
+        remotes,
+        tracking,
+        remoteError: null,
+        ...(repoInfo ? { repoInfo } : {}),
+        ...(branches ? { branches } : {}),
+        ...(afterFetch ? { fetchUpdatedAt: Date.now() } : {}),
+      });
+    } catch (e) {
+      const message = formatError(e);
+      updateTab(set, get, path, { remoteError: message });
+      throw e;
+    }
+  },
+
+  setRemoteBusy: (path, busy) => {
+    updateTab(set, get, path, { remoteBusy: busy });
+  },
+
+  setRemoteError: (path, error) => {
+    updateTab(set, get, path, { remoteError: error });
+  },
+
+  setRemoteTask: (path, task) => {
+    updateTab(set, get, path, { remoteTask: task });
   },
 
   switchBranch: async (name: string) => {
@@ -1036,23 +1150,12 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     const { activePath } = get();
     if (!activePath) return;
     try {
-      const [merging, rebasing] = await Promise.all([
-        gitService.isMerging(activePath),
-        gitService.isRebasing(activePath),
-      ]);
-      const inProgress = merging || rebasing;
-      let conflicts: string[] = [];
-      if (inProgress) {
-        try {
-          conflicts = await gitService.listConflictedFiles(activePath);
-        } catch {
-          conflicts = [];
-        }
-      }
+      const operation = await gitService.getOperationState(activePath);
       updateTab(set, get, activePath, {
-        mergeInProgress: inProgress,
-        isRebasing: rebasing,
-        conflicts,
+        operationKind: operation.kind,
+        mergeInProgress: operation.in_progress,
+        isRebasing: operation.kind === "rebase",
+        conflicts: operation.conflicts,
       });
     } catch (e) {
       // Merge-state detection is best-effort — don't surface as a hard error.

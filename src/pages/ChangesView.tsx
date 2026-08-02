@@ -4,12 +4,12 @@ import clsx from "clsx";
 import { FileStatusList } from "@/components/git/FileStatusList";
 import { DiffViewer } from "@/components/git/DiffViewer";
 import { CommitPanel } from "@/components/git/CommitPanel";
-import { RefreshIcon, AlertCircleIcon, SpinnerIcon, FolderIcon } from "@/components/common/Icons";
+import { SmartCommitPanel } from "@/components/git/SmartCommitPanel";
+import { useRepoEntry } from "@/components/git/RepoEntryDialog";
+import { RefreshIcon, AlertCircleIcon, SpinnerIcon, FolderIcon, ChevronRightIcon } from "@/components/common/Icons";
+import { useSettingsStore } from "@/stores/aiStore";
 import { useEffect, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
-import { gitService } from "@/services/git";
-import { formatError } from "@/utils/error";
-import { useToastStore } from "@/stores/toastStore";
+import type { FileDiff } from "@/types";
 
 /** localStorage key for the resizable commit panel height (px). */
 const COMMIT_PANEL_HEIGHT_KEY = "aigit:commitPanelHeight";
@@ -43,6 +43,7 @@ export function ChangesView() {
     error,
     clearError,
   } = useRepoStore();
+  const showDiffInline = useSettingsStore((s) => s.config?.ui.show_diff_inline ?? true);
 
   useEffect(() => {
     if (currentPath) {
@@ -57,6 +58,7 @@ export function ChangesView() {
   // commit message input. The height is persisted to localStorage.
   const [panelHeight, setPanelHeight] = useState<number>(loadPanelHeight);
   const [isResizing, setIsResizing] = useState(false);
+  const [showSmartCommit, setShowSmartCommit] = useState(false);
   const dragInfo = useRef<{ startY: number; startHeight: number; maxHeight: number } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -135,10 +137,8 @@ export function ChangesView() {
     return <NoRepoOpen />;
   }
 
-  const showDiff = selectedFile ? [...stagedDiff, ...workdirDiff] : [];
-
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative flex h-full flex-col">
       {error && (
         <div className="flex items-center gap-2 px-4 py-2.5 bg-danger/10 text-danger text-sm border-b border-danger/20">
           <AlertCircleIcon size={16} />
@@ -166,11 +166,12 @@ export function ChangesView() {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: File lists + commit */}
+        {/* Left: File lists + commit. In full-width mode it is replaced by the diff. */}
+        {(!selectedFile || showDiffInline) && (
         <div
           className={clsx(
             "flex flex-col overflow-hidden",
-            selectedFile ? "w-96 border-r border-border" : "flex-1"
+            selectedFile && showDiffInline ? "w-96 border-r border-border" : "flex-1"
           )}
         >
           {/* Staged section */}
@@ -208,50 +209,84 @@ export function ChangesView() {
               <div className="h-0.5 w-10 rounded-full bg-border-strong group-hover:bg-accent transition-colors" />
             </div>
             <div className="flex-1 min-h-0">
-              <CommitPanel />
+              <CommitPanel onSmartCommit={() => setShowSmartCommit(true)} />
             </div>
           </div>
         </div>
+        )}
 
-        {/* Right: Diff viewer — only when a file is selected */}
+        {/* Diff viewer: inline beside the file list, or a dedicated full-width view. */}
         {selectedFile && (
           <div className="flex-1 overflow-hidden flex flex-col">
-            <div className="flex items-center px-5 h-12 border-b border-border">
+            <div className="flex items-center gap-2 px-5 h-12 border-b border-border">
+              {!showDiffInline && (
+                <button
+                  type="button"
+                  onClick={() => useRepoStore.getState().selectFile(null)}
+                  className="btn-ghost text-xs"
+                  aria-label={t("changes.backToChanges")}
+                >
+                  <ChevronRightIcon size={14} className="rotate-180" />
+                  {t("changes.backToChanges")}
+                </button>
+              )}
               <span className="text-sm font-medium text-text-primary truncate">
                 {selectedFile}
               </span>
             </div>
             <div className="flex-1 overflow-auto">
-              <DiffViewer diffs={showDiff} className="h-full" />
+              {stagedDiff.length > 0 && (
+                <DiffSection
+                  title={t("changes.stagedChanges")}
+                  diffs={stagedDiff}
+                  mode="staged"
+                />
+              )}
+              {workdirDiff.length > 0 && (
+                <DiffSection
+                  title={t("changes.workdirChanges")}
+                  diffs={workdirDiff}
+                  mode="workdir"
+                />
+              )}
+              {stagedDiff.length === 0 && workdirDiff.length === 0 && (
+                <DiffViewer diffs={[]} className="h-full" />
+              )}
             </div>
           </div>
         )}
       </div>
+      {showSmartCommit && (
+        <div className="absolute inset-0 z-50 bg-bg-base">
+          <SmartCommitPanel onClose={() => setShowSmartCommit(false)} />
+        </div>
+      )}
     </div>
+  );
+}
+
+function DiffSection({
+  title,
+  diffs,
+  mode,
+}: {
+  title: string;
+  diffs: FileDiff[];
+  mode: "workdir" | "staged";
+}) {
+  return (
+    <section aria-label={title}>
+      <div className="sticky top-0 z-30 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-text-muted bg-bg-base border-b border-border">
+        {title}
+      </div>
+      <DiffViewer diffs={diffs} mode={mode} />
+    </section>
   );
 }
 
 function NoRepoOpen() {
   const { t } = useTranslation();
-  const openRepo = useRepoStore((s) => s.openRepo);
-  const toast = useToastStore();
-  const [opening, setOpening] = useState(false);
-
-  const handleOpen = async () => {
-    if (opening) return;
-    setOpening(true);
-    try {
-      const selected = await open({ directory: true, multiple: false });
-      if (!selected || typeof selected !== "string") return;
-      const repoPath = await gitService.discoverRepo(selected);
-      await openRepo(repoPath);
-    } catch (e) {
-      console.error("[aigit] Open repo failed:", e);
-      toast.error(formatError(e), t("tabs.openFailed"));
-    } finally {
-      setOpening(false);
-    }
-  };
+  const { showRepoEntry } = useRepoEntry();
 
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
@@ -262,8 +297,8 @@ function NoRepoOpen() {
       <p className="text-sm text-text-secondary max-w-sm mb-5">
         {t("changes.noRepoDesc")}
       </p>
-      <button onClick={handleOpen} disabled={opening} aria-busy={opening} className="btn-primary">
-        {opening ? <SpinnerIcon size={14} /> : <FolderIcon size={14} />}
+      <button onClick={() => showRepoEntry("open")} className="btn-primary">
+        <FolderIcon size={14} />
         {t("changes.openRepo")}
       </button>
     </div>

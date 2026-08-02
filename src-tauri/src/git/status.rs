@@ -19,9 +19,9 @@ pub fn get_status(repo: &Repository) -> AppResult<Vec<FileStatus>> {
         let s = entry.status();
         let path = entry.path().unwrap_or("").to_string();
 
-        let old_path = entry.head_to_index().and_then(|d| {
-            d.old_file().path().map(|p| p.to_string_lossy().to_string())
-        });
+        let old_path = entry
+            .head_to_index()
+            .and_then(|d| d.old_file().path().map(|p| p.to_string_lossy().to_string()));
 
         if s.is_wt_new() || s == Status::WT_NEW {
             result.push(FileStatus {

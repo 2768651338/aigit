@@ -4,6 +4,7 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
+import { gitService } from "@/services/git";
 import {
   CheckIcon,
   PlusIcon,
@@ -14,6 +15,7 @@ import {
   SpinnerIcon,
   HistoryIcon,
   ChevronDownIcon,
+  XIcon,
 } from "@/components/common/Icons";
 
 /** localStorage key prefix for per-repo commit message history. */
@@ -42,7 +44,7 @@ function saveHistory(repoPath: string, messages: string[]) {
   }
 }
 
-export function CommitPanel() {
+export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
   const { t } = useTranslation();
 
   const {
@@ -51,6 +53,7 @@ export function CommitPanel() {
     stageAll,
     unstageFiles,
     commit,
+    amend,
     push,
     pull,
     refreshStatus,
@@ -61,7 +64,6 @@ export function CommitPanel() {
     commitAndPushing,
     pushError,
     aiError,
-    aiLoading,
     commitMessage: message,
     setCommitMessage: setMessage,
     setCommitting,
@@ -72,12 +74,15 @@ export function CommitPanel() {
     setAiErrorFor,
     setAiLoadingFor,
   } = useRepoStore();
-  const { generateCommitMessage } = useAiStore();
+  const { generateCommitMessage, cancelTask } = useAiStore();
+  const aiRequestActive = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000commit`]) : false);
   const { config } = useSettingsStore();
   const toast = useToastStore();
 
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
+  const [amendMode, setAmendMode] = useState(false);
+  const [includeStagedInAmend, setIncludeStagedInAmend] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Load history when the active repo changes.
@@ -113,7 +118,7 @@ export function CommitPanel() {
     setAiErrorFor(targetPath, null);
     setAiLoadingFor(targetPath, true);
     try {
-      const msg = await generateCommitMessage(targetPath, config);
+      const msg = await generateCommitMessage(targetPath);
       setCommitMessageFor(targetPath, msg);
       toast.success(t("commit.aiGenerated"));
     } catch (e) {
@@ -128,20 +133,21 @@ export function CommitPanel() {
     }
   };
 
-  // If there are working-directory changes but nothing is staged yet,
-  // auto-stage all so the user can commit without manual staging.
-  const ensureStaged = async () => {
-    if (stagedCount === 0 && hasChanges) {
-      await stageAll();
-    }
-  };
-
   const handleCommit = async () => {
     if (!message.trim()) return;
     setCommitting(true);
     try {
-      await ensureStaged();
-      await commit(message);
+      if (amendMode) {
+        let confirmPushed = false;
+        if (currentPath && await gitService.isHeadPushed(currentPath)) {
+          confirmPushed = window.confirm(t("commit.amendPushedConfirm"));
+          if (!confirmPushed) return;
+        }
+        await amend(message, includeStagedInAmend, confirmPushed);
+      } else {
+        if (stagedCount === 0) throw new Error(t("commit.explicitStageRequired"));
+        await commit(message);
+      }
       // Persist this message into per-repo history (deduped, most-recent first).
       if (currentPath) {
         const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
@@ -149,13 +155,14 @@ export function CommitPanel() {
         saveHistory(currentPath, next);
       }
       setMessage("");
-      // commit() already calls refreshStatus(true) + refreshLog(true) internally,
-      // so no redundant refresh here.
-      toast.success(t("commit.commitSuccess"));
+      setAmendMode(false);
+      setIncludeStagedInAmend(false);
+      // commit()/amend() already refresh status and log internally.
+      toast.success(t(amendMode ? "commit.amendSuccess" : "commit.commitSuccess"));
     } catch (e) {
       const msg = formatError(e);
       console.error("[aigit] commit failed:", e);
-      toast.error(msg, t("commit.commitFailed"));
+      toast.error(msg, t(amendMode ? "commit.amendFailed" : "commit.commitFailed"));
     } finally {
       setCommitting(false);
     }
@@ -166,7 +173,7 @@ export function CommitPanel() {
     setCommitAndPushing(true);
     setPushError(null);
     try {
-      await ensureStaged();
+      if (stagedCount === 0) throw new Error(t("commit.explicitStageRequired"));
       await commit(message);
       // Persist this message into per-repo history (deduped, most-recent first).
       if (currentPath) {
@@ -175,10 +182,10 @@ export function CommitPanel() {
         saveHistory(currentPath, next);
       }
       setMessage("");
-      // Push after a successful commit. If upstream is not configured,
-      // pass set_upstream=true so the branch tracks origin on first push.
+      // Push only to the branch's configured upstream. Branches without an
+      // upstream are configured explicitly from the Remotes panel.
       try {
-        await push(true);
+        await push();
         const body = branch
           ? t("commit.pushSuccessBody", { branch })
           : t("commit.pushSuccessBodyGeneric");
@@ -202,7 +209,7 @@ export function CommitPanel() {
   const handlePushOnly = async () => {
     setPushError(null);
     try {
-      await push(true);
+      await push();
       const body = branch
         ? t("commit.pushSuccessBody", { branch })
         : t("commit.pushSuccessBodyGeneric");
@@ -256,7 +263,7 @@ export function CommitPanel() {
   const handleMessageKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
       e.preventDefault();
-      if (message.trim() && !busy && hasChanges) {
+      if (message.trim() && !busy && (amendMode || hasChanges)) {
         handleCommit();
       }
     }
@@ -268,6 +275,14 @@ export function CommitPanel() {
     <div className="flex flex-col h-full">
       {/* Stage controls */}
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border">
+        <button
+          onClick={onSmartCommit}
+          disabled={!currentPath}
+          className="btn-secondary text-xs"
+          title={t("smartCommit.open")}
+        >
+          {t("smartCommit.open")}
+        </button>
         <button
           onClick={stageAll}
           className="btn-ghost text-xs"
@@ -367,6 +382,38 @@ export function CommitPanel() {
             </div>
           )}
         </div>
+        {/* Amend controls */}
+        <div className="flex items-center gap-3 text-xs">
+          <label className="flex items-center gap-2 text-text-secondary cursor-pointer">
+            <input
+              type="checkbox"
+              checked={amendMode}
+              onChange={(e) => {
+                setAmendMode(e.target.checked);
+                if (!e.target.checked) setIncludeStagedInAmend(false);
+              }}
+              disabled={!repoInfo?.head_hash || busy}
+            />
+            {t("commit.amendMode")}
+          </label>
+          {amendMode && (
+            <label className="flex items-center gap-2 text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeStagedInAmend}
+                onChange={(e) => setIncludeStagedInAmend(e.target.checked)}
+                disabled={busy || stagedCount === 0}
+              />
+              {t("commit.includeStaged")}
+            </label>
+          )}
+        </div>
+        {amendMode && (
+          <div className="flex items-start gap-2 rounded border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+            <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
+            <span>{t("commit.amendWarning")}</span>
+          </div>
+        )}
         <textarea
           ref={textareaRef}
           value={message}
@@ -381,13 +428,13 @@ export function CommitPanel() {
       {/* Actions */}
       <div className="flex items-center gap-2 p-4 border-t border-border">
         <button
-          onClick={handleAiGenerate}
-          disabled={!currentPath || aiLoading}
-          aria-busy={aiLoading}
-          className="btn-ghost"
+          onClick={() => aiRequestActive && currentPath ? void cancelTask(currentPath, "commit") : void handleAiGenerate()}
+          disabled={!currentPath}
+          aria-busy={aiRequestActive}
+          className={aiRequestActive ? "btn-secondary" : "btn-ghost"}
         >
-          {aiLoading ? <SpinnerIcon size={14} /> : <PlusIcon size={14} />}
-          {aiLoading ? t("commit.generating") : t("commit.aiGenerate")}
+          {aiRequestActive ? <XIcon size={14} /> : <PlusIcon size={14} />}
+          {aiRequestActive ? t("commit.stopGenerating") : t("commit.aiGenerate")}
         </button>
         <div className="flex-1" />
         {behind > 0 && (
@@ -430,26 +477,28 @@ export function CommitPanel() {
           </button>
         )}
         {/* Commit & Push button */}
-        <button
-          onClick={handleCommitAndPush}
-          disabled={!message.trim() || busy || !hasChanges}
-          aria-busy={commitAndPushing}
-          className="btn-secondary"
-          title={t("commit.commitAndPush")}
-        >
-          {commitAndPushing ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
-          {commitAndPushing ? t("commit.committingAndPushing") : t("commit.commitAndPush")}
-        </button>
+        {!amendMode && (
+          <button
+            onClick={handleCommitAndPush}
+            disabled={!message.trim() || busy || !hasChanges}
+            aria-busy={commitAndPushing}
+            className="btn-secondary"
+            title={t("commit.commitAndPush")}
+          >
+            {commitAndPushing ? <SpinnerIcon size={14} /> : <SendIcon size={14} />}
+            {commitAndPushing ? t("commit.committingAndPushing") : t("commit.commitAndPush")}
+          </button>
+        )}
         {/* Commit-only button */}
         <button
           onClick={handleCommit}
-          disabled={!message.trim() || busy || !hasChanges}
+          disabled={!message.trim() || busy || (!amendMode && !hasChanges)}
           aria-busy={committing}
           className="btn-primary"
-          title={t("commit.commitShortcut")}
+          title={t(amendMode ? "commit.amend" : "commit.commitShortcut")}
         >
           {committing ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />}
-          {committing ? t("commit.committing") : t("commit.commit")}
+          {committing ? t("commit.committing") : t(amendMode ? "commit.amend" : "commit.commit")}
         </button>
       </div>
     </div>

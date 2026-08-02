@@ -1,15 +1,22 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   BranchInfo,
+  CommitGroupResult,
+  CommitPlan,
+  ConflictFile,
   FileDiff,
   FileStatus,
   LogEntry,
   MergeResult,
+  GitOperationState,
   RepoInfo,
+  StageGroupResult,
   StashInfo,
   SubmoduleInfo,
+  RemoteInfo,
   RepositoryInsights,
   TagInfo,
+  TrackingInfo,
 } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
@@ -77,9 +84,14 @@ export const gitService = {
     return invoke<string>("commit", { path, message });
   },
 
-  amendMessage: (path: string, message: string) => {
+  amend: (path: string, message: string, includeStaged = false, confirmPushed = false) => {
     ensureTauri();
-    return invoke<string>("amend_message", { path, message });
+    return invoke<string>("amend", { path, message, includeStaged, confirmPushed });
+  },
+
+  isHeadPushed: (path: string) => {
+    ensureTauri();
+    return invoke<boolean>("is_head_pushed", { path });
   },
 
   /**
@@ -98,6 +110,31 @@ export const gitService = {
   applyPatchToIndexReverse: (path: string, patch: string) => {
     ensureTauri();
     return invoke<void>("apply_patch_to_index_reverse", { path, patch });
+  },
+
+  validateSmartCommitPlan: (path: string, plan: CommitPlan) => {
+    ensureTauri();
+    return invoke<void>("validate_smart_commit_plan", { path, plan });
+  },
+
+  stageSmartCommitGroup: (path: string, plan: CommitPlan, groupId: string) => {
+    ensureTauri();
+    return invoke<StageGroupResult>("stage_smart_commit_group", { path, plan, groupId });
+  },
+
+  commitSmartCommitGroup: (
+    path: string,
+    plan: CommitPlan,
+    groupId: string,
+    stagedTree: string,
+  ) => {
+    ensureTauri();
+    return invoke<CommitGroupResult>("commit_smart_commit_group", {
+      path,
+      plan,
+      groupId,
+      stagedTree,
+    });
   },
 
   listBranches: (path: string) => {
@@ -125,9 +162,9 @@ export const gitService = {
     return invoke<LogEntry[]>("get_log", { path, limit });
   },
 
-  getRepositoryInsights: (path: string) => {
+  getRepositoryInsights: (path: string, startDate?: string, endDate?: string) => {
     ensureTauri();
-    return invoke<RepositoryInsights>("get_repository_insights", { path });
+    return invoke<RepositoryInsights>("get_repository_insights", { path, startDate, endDate });
   },
 
   getCommitDiff: (path: string, hash: string) => {
@@ -141,14 +178,94 @@ export const gitService = {
     return invoke<string[]>("list_files", { path });
   },
 
-  push: (path: string, setUpstream?: boolean) => {
+  listRemotes: (path: string) => {
     ensureTauri();
-    return invoke<string>("push", { path, setUpstream });
+    return invoke<RemoteInfo[]>("list_remotes", { path });
+  },
+
+  addRemote: (path: string, name: string, url: string) => {
+    ensureTauri();
+    return invoke<void>("add_remote", { path, name, url });
+  },
+
+  editRemote: (path: string, oldName: string, newName: string, url: string) => {
+    ensureTauri();
+    return invoke<void>("edit_remote", { path, oldName, newName, url });
+  },
+
+  removeRemote: (path: string, name: string) => {
+    ensureTauri();
+    return invoke<void>("remove_remote", { path, name });
+  },
+
+  renameRemote: (path: string, oldName: string, newName: string) => {
+    ensureTauri();
+    return invoke<void>("rename_remote", { path, oldName, newName });
+  },
+
+  setRemoteUrl: (path: string, name: string, url: string, push = false) => {
+    ensureTauri();
+    return invoke<void>("set_remote_url", { path, name, url, push });
+  },
+
+  getTrackingInfo: (path: string) => {
+    ensureTauri();
+    return invoke<TrackingInfo>("get_tracking_info", { path });
+  },
+
+  setUpstream: (path: string, remote: string, remoteBranch: string) => {
+    ensureTauri();
+    return invoke<TrackingInfo>("set_upstream", { path, remote, remoteBranch });
+  },
+
+  fetch: (path: string, remote?: string, prune = false, tags = false) => {
+    ensureTauri();
+    return invoke<string>("fetch", { path, remote, prune, tags });
+  },
+
+  push: (path: string, remote?: string, remoteBranch?: string) => {
+    ensureTauri();
+    return invoke<string>("push", { path, remote, remoteBranch });
   },
 
   pull: (path: string) => {
     ensureTauri();
     return invoke<string>("pull", { path });
+  },
+
+  fetchTask: (path: string, taskId: string, remote?: string, prune = false, tags = false) => {
+    ensureTauri();
+    return invoke<string>("fetch_task", { path, taskId, remote, prune, tags });
+  },
+
+  pushTask: (path: string, taskId: string, remote?: string, remoteBranch?: string) => {
+    ensureTauri();
+    return invoke<string>("push_task", { path, taskId, remote, remoteBranch });
+  },
+
+  pullTask: (path: string, taskId: string) => {
+    ensureTauri();
+    return invoke<string>("pull_task", { path, taskId });
+  },
+
+  cancelGitTask: (taskId: string) => {
+    ensureTauri();
+    return invoke<boolean>("cancel_git_task", { taskId });
+  },
+
+  createTrackingBranch: (path: string, remoteBranch: string, localName?: string) => {
+    ensureTauri();
+    return invoke<string>("create_tracking_branch", { path, remoteBranch, localName });
+  },
+
+  pushTag: (path: string, remote: string, tag: string) => {
+    ensureTauri();
+    return invoke<string>("push_tag", { path, remote, tag });
+  },
+
+  deleteRemoteTag: (path: string, remote: string, tag: string) => {
+    ensureTauri();
+    return invoke<string>("delete_remote_tag", { path, remote, tag });
   },
 
   discardFiles: (path: string, files: string[]) => {
@@ -302,6 +419,36 @@ export const gitService = {
   listConflictedFiles: (path: string) => {
     ensureTauri();
     return invoke<string[]>("list_conflicted_files", { path });
+  },
+
+  getOperationState: (path: string) => {
+    ensureTauri();
+    return invoke<GitOperationState>("get_operation_state", { path });
+  },
+
+  listConflictDetails: (path: string) => {
+    ensureTauri();
+    return invoke<ConflictFile[]>("list_conflict_details", { path });
+  },
+
+  saveConflictResolution: (path: string, filePath: string, content: string) => {
+    ensureTauri();
+    return invoke<void>("save_conflict_resolution", { path, filePath, content });
+  },
+
+  continueOperation: (path: string) => {
+    ensureTauri();
+    return invoke<string>("continue_operation", { path });
+  },
+
+  skipOperation: (path: string) => {
+    ensureTauri();
+    return invoke<string>("skip_operation", { path });
+  },
+
+  abortOperation: (path: string) => {
+    ensureTauri();
+    return invoke<string>("abort_operation", { path });
   },
 
   // --- History (commit-level operations) ---

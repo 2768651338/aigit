@@ -18,9 +18,10 @@ pub fn list_branches(repo: &Repository) -> AppResult<Vec<BranchInfo>> {
         let is_current = current.as_deref() == Some(name.as_str());
 
         let commit = b.get().peel_to_commit()?;
-        let upstream = b.upstream().ok().and_then(|u| {
-            u.name().ok().flatten().map(|s| s.to_string())
-        });
+        let upstream = b
+            .upstream()
+            .ok()
+            .and_then(|u| u.name().ok().flatten().map(|s| s.to_string()));
 
         branches.push(BranchInfo {
             name: name.clone(),

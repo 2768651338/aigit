@@ -13,10 +13,7 @@ pub fn get_workdir_diff(repo: &Repository, path: Option<&str>) -> AppResult<Vec<
     }
 
     let head_tree = repo.head()?.peel_to_tree()?;
-    let diff = repo.diff_tree_to_workdir_with_index(
-        Some(&head_tree),
-        Some(&mut opts),
-    )?;
+    let diff = repo.diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut opts))?;
 
     let mut files = parse_diff(&diff)?;
     // libgit2 的 `diff_tree_to_workdir_with_index` 不会可靠地包含未跟踪文件
@@ -114,7 +111,9 @@ pub fn get_staged_diff(repo: &Repository, path: Option<&str>) -> AppResult<Vec<F
 
     let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
     let diff = match head_tree {
-        Some(tree) => repo.diff_tree_to_index(Some(&tree), Some(&repo.index()?), Some(&mut opts))?,
+        Some(tree) => {
+            repo.diff_tree_to_index(Some(&tree), Some(&repo.index()?), Some(&mut opts))?
+        }
         None => repo.diff_tree_to_index(None, Some(&repo.index()?), Some(&mut opts))?,
     };
 
@@ -155,12 +154,31 @@ fn ref_to_tree<'a>(repo: &'a Repository, refname: &str) -> AppResult<git2::Tree<
     Ok(obj.peel_to_tree()?)
 }
 
+fn strip_line_ending(content: &[u8]) -> String {
+    let content = if content.ends_with(b"\r\n") {
+        &content[..content.len() - 2]
+    } else if content.ends_with(b"\n") || content.ends_with(b"\r") {
+        &content[..content.len() - 1]
+    } else {
+        content
+    };
+    String::from_utf8_lossy(content).into_owned()
+}
+
 fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
     let mut files = Vec::new();
 
     diff.print(git2::DiffFormat::Patch, |delta, _hunk, line| {
-        let path = delta.new_file().path().and_then(|p| p.to_str()).unwrap_or("");
-        let old_path = delta.old_file().path().and_then(|p| p.to_str()).map(|s| s.to_string());
+        let path = delta
+            .new_file()
+            .path()
+            .and_then(|p| p.to_str())
+            .unwrap_or("");
+        let old_path = delta
+            .old_file()
+            .path()
+            .and_then(|p| p.to_str())
+            .map(|s| s.to_string());
 
         let file = files.iter_mut().find(|f: &&mut FileDiff| f.path == path);
         let file = match file {
@@ -177,18 +195,18 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
             }
         };
 
-        let content = String::from_utf8_lossy(line.content()).to_string();
+        let content = strip_line_ending(line.content());
         match line.origin() {
             'H' => {
                 file.hunks.push(DiffHunk {
-                    header: content.trim_end().to_string(),
+                    header: content,
                     lines: Vec::new(),
                 });
             }
             '+' => {
                 if let Some(hunk) = file.hunks.last_mut() {
                     hunk.lines.push(DiffLine {
-                        content: content.trim_end().to_string(),
+                        content: content.clone(),
                         line_type: "add".to_string(),
                         old_line_no: None,
                         new_line_no: line.new_lineno(),
@@ -199,7 +217,7 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
             '-' => {
                 if let Some(hunk) = file.hunks.last_mut() {
                     hunk.lines.push(DiffLine {
-                        content: content.trim_end().to_string(),
+                        content: content.clone(),
                         line_type: "delete".to_string(),
                         old_line_no: line.old_lineno(),
                         new_line_no: None,
@@ -207,10 +225,20 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
                     file.deletions += 1;
                 }
             }
+            '\\' => {
+                if let Some(hunk) = file.hunks.last_mut() {
+                    hunk.lines.push(DiffLine {
+                        content: content.clone(),
+                        line_type: "no_newline".to_string(),
+                        old_line_no: None,
+                        new_line_no: None,
+                    });
+                }
+            }
             _ => {
                 if let Some(hunk) = file.hunks.last_mut() {
                     hunk.lines.push(DiffLine {
-                        content: content.trim_end().to_string(),
+                        content: content.clone(),
                         line_type: "context".to_string(),
                         old_line_no: line.old_lineno(),
                         new_line_no: line.new_lineno(),
@@ -222,4 +250,16 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
     })?;
 
     Ok(files)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_line_ending;
+
+    #[test]
+    fn strips_only_line_endings_and_preserves_content_whitespace() {
+        assert_eq!(strip_line_ending(b"value  \n"), "value  ");
+        assert_eq!(strip_line_ending(b"value\t\r\n"), "value\t");
+        assert_eq!(strip_line_ending(b"no-newline"), "no-newline");
+    }
 }

@@ -1,13 +1,16 @@
 pub mod branch;
+pub(crate) mod cli;
 pub mod commit;
+pub mod conflict;
 pub mod diff;
 pub mod history;
 pub mod insights;
 pub mod merge;
 pub mod remote;
 pub mod repo;
-pub mod status;
+pub mod smart_commit;
 pub mod stash;
+pub mod status;
 pub mod submodule;
 pub mod tag;
 
@@ -53,6 +56,23 @@ pub struct CommitInfo {
     pub email: String,
     pub message: String,
     pub timestamp: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteInfo {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrackingInfo {
+    pub branch: String,
+    pub upstream: Option<String>,
+    pub remote: Option<String>,
+    pub remote_branch: Option<String>,
+    pub ahead: usize,
+    pub behind: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

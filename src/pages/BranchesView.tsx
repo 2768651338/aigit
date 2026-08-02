@@ -1,13 +1,16 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
 import { BranchGraph } from "@/components/git/BranchGraph";
 import { MergeRebaseBar } from "@/components/git/MergeRebaseBar";
+import { RemotePanel } from "@/components/git/RemotePanel";
 import { TagPanel } from "@/components/git/TagPanel";
 import { StashPanel } from "@/components/git/StashPanel";
 import { SubmodulePanel } from "@/components/git/SubmodulePanel";
+import { PullRequestsPanel } from "@/components/git/PullRequestsPanel";
 import {
   GitBranchIcon,
   TagIcon,
@@ -24,7 +27,7 @@ import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import { confirmDialog } from "@/utils/dialog";
 import clsx from "clsx";
 
-type SubTab = "branches" | "tags" | "stashes" | "submodules";
+type SubTab = "branches" | "pullRequests" | "tags" | "stashes" | "submodules";
 
 export function BranchesView() {
   const { t } = useTranslation();
@@ -104,6 +107,17 @@ export function BranchesView() {
     }
   };
 
+  const handleRemoteBranch = async (name: string) => {
+    if (!currentPath) return;
+    try {
+      const localName = await gitService.createTrackingBranch(currentPath, name);
+      await Promise.all([refreshBranches(true), useRepoStore.getState().refreshLog(true)]);
+      toast.success(t("branches.trackingCreated", { name: localName, remote: name }));
+    } catch (e) {
+      toast.error(formatError(e), t("branches.trackingCreateFailed"));
+    }
+  };
+
   const handleBranchContextMenu = (
     e: React.MouseEvent,
     branch: { name: string; is_current: boolean },
@@ -140,12 +154,14 @@ export function BranchesView() {
 
   const subTabs: { id: SubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
     { id: "branches", label: t("branches.tabBranches"), icon: GitBranchIcon },
+    { id: "pullRequests", label: t("branches.tabPullRequests"), icon: CheckIcon },
     { id: "tags", label: t("branches.tabTags"), icon: TagIcon },
     { id: "stashes", label: t("branches.tabStashes"), icon: ArchiveIcon },
     { id: "submodules", label: t("branches.tabSubmodules"), icon: PackageIcon },
   ];
 
   // Delegate the whole panel to the dedicated component for non-branch tabs.
+  if (subTab === "pullRequests") return <PullRequestsPanel onBack={() => setSubTab("branches")} />;
   if (subTab === "tags") return <TagPanel />;
   if (subTab === "stashes") return <StashPanel />;
   if (subTab === "submodules") return <SubmodulePanel />;
@@ -298,6 +314,8 @@ export function BranchesView() {
                   <div
                     key={branch.name}
                     className="flex items-center gap-2 px-3 py-2 rounded hover:bg-bg-hover cursor-pointer"
+                    onClick={() => handleRemoteBranch(branch.name)}
+                    title={t("branches.createTracking")}
                   >
                     <GitBranchIcon size={16} className="text-text-muted" />
                     <span className="flex-1 text-sm truncate text-text-secondary">
@@ -313,6 +331,7 @@ export function BranchesView() {
 
       {/* Right panel: merge/rebase bar + commit graph */}
       <div className="flex-1 flex flex-col overflow-hidden">
+        <RemotePanel />
         <MergeRebaseBar />
         <BranchGraph />
       </div>

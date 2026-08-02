@@ -1,21 +1,27 @@
 {
   "$schema": "https://schema.tauri.app/config/2/capability",
   "identifier": "default",
-  "description": "Default capability for aigit main window",
+  "description": "Minimum desktop APIs used by the aigit main window",
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:allow-open",
-    "fs:allow-read-text-file",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*" },
+        { "url": "http://*" },
+        { "url": "mailto:*" }
+      ]
+    },
+    "opener:allow-open-path",
     "fs:allow-write-text-file",
     "fs:allow-write-file",
-    "fs:allow-exists",
-    "fs:allow-mkdir",
-    "fs:allow-read-dir",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-confirm",
     "dialog:allow-message",
-    "dialog:allow-ask"
+    "updater:allow-check",
+    "updater:allow-download-and-install",
+    "process:allow-restart"
   ]
 }

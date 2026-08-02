@@ -5,6 +5,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { TabBar } from "@/components/layout/TabBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
+import { RepoEntryProvider } from "@/components/git/RepoEntryDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import {
   ContextMenuProvider,
@@ -27,7 +28,9 @@ import type { ViewType } from "@/types";
 export default function App() {
   return (
     <ContextMenuProvider>
-      <AppShell />
+      <RepoEntryProvider>
+        <AppShell />
+      </RepoEntryProvider>
     </ContextMenuProvider>
   );
 }
@@ -178,7 +181,7 @@ function AppShell() {
               <ErrorBoundary>
                 {activeView === "changes" && <ChangesView />}
                 {activeView === "branches" && <BranchesView />}
-                {activeView === "review" && <ReviewView />}
+                {activeView === "review" && <ReviewView onNavigateChanges={() => setActiveView("changes")} />}
                 {activeView === "chat" && <ChatView />}
                 {activeView === "insights" && <InsightsView />}
                 {activeView === "settings" && <SettingsView />}

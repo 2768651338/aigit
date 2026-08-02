@@ -6,15 +6,15 @@ import { render, fireEvent } from "@testing-library/react";
 // and services are never loaded. The repo store is replaced with a plain
 // in-memory state object the tests fully control.
 // ---------------------------------------------------------------------------
-const { mockRepoState } = vi.hoisted(() => {
+const { mockRepoState, mockSettingsState } = vi.hoisted(() => {
   const noop = () => {};
   const noopAsync = () => Promise.resolve();
   return {
     mockRepoState: {
       currentPath: "D:/test/repo",
-      selectedFile: null,
-      workdirDiff: [],
-      stagedDiff: [],
+      selectedFile: null as string | null,
+      workdirDiff: [] as import("@/types").FileDiff[],
+      stagedDiff: [] as import("@/types").FileDiff[],
       fileStatuses: [],
       repoInfo: {
         path: "D:/test/repo",
@@ -41,6 +41,7 @@ const { mockRepoState } = vi.hoisted(() => {
       stageFiles: noopAsync,
       discardFiles: noopAsync,
       commit: noopAsync,
+      amend: noopAsync,
       push: noopAsync,
       pull: noopAsync,
       refreshStatus: noopAsync,
@@ -57,6 +58,11 @@ const { mockRepoState } = vi.hoisted(() => {
       setCommitMessageFor: noop,
       setAiErrorFor: noop,
       setAiLoadingFor: noop,
+      applyPatchToIndex: noopAsync,
+      applyPatchToIndexReverse: noopAsync,
+    },
+    mockSettingsState: {
+      config: { ui: { show_diff_inline: true } },
     },
   };
 });
@@ -68,6 +74,13 @@ vi.mock("@/stores/repoStore", () => ({
     ),
     { getState: () => mockRepoState, setState: () => {} },
   ),
+}) as unknown as never);
+
+vi.mock("@/stores/aiStore", () => ({
+  useSettingsStore: vi.fn((selector?: (s: typeof mockSettingsState) => unknown) =>
+    selector ? selector(mockSettingsState) : mockSettingsState,
+  ),
+  useAiStore: vi.fn(() => ({ generateCommitMessage: vi.fn() })),
 }) as unknown as never);
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }) as unknown as never);
@@ -140,6 +153,10 @@ function drag(panel: HTMLElement, fromY: number, toY: number) {
 
 beforeEach(() => {
   localStorage.clear();
+  mockRepoState.selectedFile = null;
+  mockRepoState.workdirDiff = [];
+  mockRepoState.stagedDiff = [];
+  mockSettingsState.config.ui.show_diff_inline = true;
 });
 
 describe("ChangesView resizable commit panel", () => {
@@ -220,5 +237,40 @@ describe("ChangesView resizable commit panel", () => {
     localStorage.setItem(HEIGHT_KEY, "50"); // below the 160px minimum
     const { container: c2 } = renderView();
     expect(getPanel(c2).style.height).toBe("288px");
+  });
+});
+
+describe("ChangesView diff presentation", () => {
+  const diff = {
+    path: "src/example.ts",
+    old_path: null,
+    additions: 1,
+    deletions: 0,
+    hunks: [{
+      header: "@@ -1,0 +1,1 @@",
+      lines: [{ content: "value", line_type: "add", old_line_no: null, new_line_no: 1 }],
+    }],
+  };
+
+  it("renders staged and workdir diffs as separate interactive sections", () => {
+    mockRepoState.selectedFile = diff.path;
+    mockRepoState.stagedDiff = [diff];
+    mockRepoState.workdirDiff = [diff];
+    const { getByLabelText } = renderView();
+
+    expect(getByLabelText("已暂存的改动")).toBeInTheDocument();
+    expect(getByLabelText("工作区改动")).toBeInTheDocument();
+    expect(getByLabelText("取消暂存此代码块")).toBeInTheDocument();
+    expect(getByLabelText("暂存此代码块")).toBeInTheDocument();
+  });
+
+  it("uses a full-width diff with a back action when inline display is disabled", () => {
+    mockSettingsState.config.ui.show_diff_inline = false;
+    mockRepoState.selectedFile = diff.path;
+    mockRepoState.workdirDiff = [diff];
+    const { getByLabelText, container } = renderView();
+
+    expect(getByLabelText("返回改动列表")).toBeInTheDocument();
+    expect(container.querySelector('[role="separator"]')).toBeNull();
   });
 });
