@@ -622,6 +622,10 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     try {
       await gitService.stageAll(activePath);
       await get().refreshStatus(true);
+      const tab = get().tabs[activePath];
+      if (tab?.selectedFile) {
+        await get().selectFile(tab.selectedFile);
+      }
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
     }

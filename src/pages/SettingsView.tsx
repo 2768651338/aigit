@@ -403,6 +403,20 @@ export function SettingsView() {
                 className="w-full accent-accent"
               />
             </Field>
+            <Field label={t("settings.maxContextTokens", { value: local.ai.max_context_tokens })}>
+              <input
+                type="range"
+                min="8192"
+                max="1048576"
+                step="8192"
+                value={local.ai.max_context_tokens}
+                onChange={(e) => update({ max_context_tokens: parseInt(e.target.value) })}
+                className="w-full accent-accent"
+              />
+              <p className="text-xs text-text-muted mt-2">
+                {t("settings.maxContextHint")}
+              </p>
+            </Field>
           </div>
         </section>
 

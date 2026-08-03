@@ -6,6 +6,7 @@ const CODE_HINTS: Record<string, string> = {
   ai_timeout: "AI 请求超时，请检查网络后重试。",
   ai_network: "无法连接 AI 服务，请检查网络和服务地址后重试。",
   ai_upstream: "AI 服务暂时不可用，请稍后重试。",
+  ai_context_exceeded: "输入超出模型上下文限制。请减少输入内容（如分批提交/审查），或在设置中调大“最大上下文 Token 数”。",
   ai_response_invalid: "AI 返回了无法解析的响应，请重试；若持续发生请反馈诊断 ID。",
   credential_error: "无法访问系统凭据存储，请检查系统凭据服务后重试。",
   config_error: "配置无效或无法保存，请检查设置后重试。",

@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::ai::stream::JsonLineDecoder;
 use crate::ai::{
-    http_client, read_json_limited, upstream_error, AiProvider, CancellationToken, ChatMessage,
-    ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
+    http_client, prepare_input, read_json_limited, upstream_error, AiProvider, CancellationToken,
+    ChatMessage, ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
 };
 use crate::config::AiProviderConfig;
 use crate::error::{AppError, AppResult};
@@ -40,6 +40,9 @@ impl AiProvider for OllamaProvider {
         config: &AiProviderConfig,
         _api_key: Option<&str>,
     ) -> AppResult<String> {
+        let prepared = prepare_input(system_prompt, messages, config);
+        let system_prompt = &prepared.system_prompt;
+        let messages = &prepared.messages;
         let mut all_messages = vec![json!({ "role": "system", "content": system_prompt })];
         for message in messages {
             all_messages.push(json!({ "role": message.role, "content": message.content }));
@@ -85,6 +88,9 @@ impl AiProvider for OllamaProvider {
         mut emit: ProviderEventSink<'a>,
     ) -> StreamFuture<'a> {
         Box::pin(async move {
+            let prepared = prepare_input(system_prompt, messages, config);
+            let system_prompt = &prepared.system_prompt;
+            let messages = &prepared.messages;
             let mut all_messages = vec![json!({ "role": "system", "content": system_prompt })];
             for message in messages {
                 all_messages.push(json!({ "role": message.role, "content": message.content }));

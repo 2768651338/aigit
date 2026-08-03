@@ -28,6 +28,120 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Input prepared for a provider call: bounded to the configured context
+/// window so oversized diffs/attachments can no longer cause HTTP 400.
+#[derive(Debug)]
+pub struct PreparedInput {
+    pub system_prompt: String,
+    pub messages: Vec<ChatMessage>,
+    /// Whether any part of the input was cut; consumed by tests and useful
+    /// for future UI warnings.
+    #[allow(dead_code)]
+    pub truncated: bool,
+}
+
+/// Rough token estimate consistent with the frontend's `estimateTokens`:
+/// ASCII ≈ 4 chars/token, non-ASCII ≈ 1 char/token.
+pub fn estimate_tokens(text: &str) -> usize {
+    let ascii = text.chars().filter(|c| c.is_ascii()).count();
+    ascii.div_ceil(4) + (text.chars().count() - ascii)
+}
+
+/// Token budget available for input after reserving the requested completion
+/// length. Applies a small safety margin because the estimate is approximate;
+/// floored so tiny budgets never produce an empty request.
+fn context_budget(config: &AiProviderConfig) -> usize {
+    let context = usize::try_from(config.max_context_tokens).unwrap_or(usize::MAX);
+    let output = usize::try_from(config.max_tokens).unwrap_or(0);
+    (context.saturating_sub(output) * 95 / 100).max(2048)
+}
+
+/// Truncate `system_prompt` + `messages` to the configured context window.
+///
+/// Keeps the newest messages first (the latest user question always survives,
+/// truncated if it alone exceeds the budget); older messages that no longer
+/// fit are dropped. A notice is appended where the cut happened so the model
+/// knows the input is partial.
+pub fn prepare_input(
+    system_prompt: &str,
+    messages: &[ChatMessage],
+    config: &AiProviderConfig,
+) -> PreparedInput {
+    const TRUNCATION_NOTICE: &str = "\n\n[注意] 输入内容因超出模型上下文限制已被自动截断，请仅基于当前提供的部分内容作答。";
+
+    // Reserve the notice cost up front (worst case: appended to both the
+    // system prompt and the truncated message) so the final input still fits.
+    let notice_tokens = estimate_tokens(TRUNCATION_NOTICE);
+    let budget = context_budget(config).saturating_sub(notice_tokens * 2);
+    let mut truncated = false;
+
+    // The system prompt gets at most a quarter of the budget; keep its head.
+    let system_room = budget / 4;
+    let mut system = system_prompt.to_string();
+    if estimate_tokens(&system) > system_room {
+        system = truncate_to_budget(system, system_room);
+        truncated = true;
+    }
+    let mut remaining = budget.saturating_sub(estimate_tokens(&system));
+
+    // Walk newest → oldest; the first (newest) message always fits, older
+    // messages are dropped once the budget is exhausted.
+    let mut kept: Vec<ChatMessage> = Vec::with_capacity(messages.len());
+    for message in messages.iter().rev() {
+        let cost = estimate_tokens(&message.content).saturating_add(4);
+        if kept.is_empty() {
+            let room = remaining.saturating_sub(4);
+            let mut content = if cost > room {
+                truncate_to_budget(message.content.clone(), room)
+            } else {
+                message.content.clone()
+            };
+            if content.len() < message.content.len() {
+                truncated = true;
+                content.push_str(TRUNCATION_NOTICE);
+            }
+            kept.push(ChatMessage {
+                role: message.role.clone(),
+                content,
+            });
+            remaining =
+                remaining.saturating_sub(estimate_tokens(&kept[0].content).saturating_add(4));
+        } else if cost <= remaining {
+            kept.push(message.clone());
+            remaining -= cost;
+        } else {
+            truncated = true;
+        }
+    }
+    kept.reverse();
+
+    if truncated {
+        system.push_str(TRUNCATION_NOTICE);
+    }
+    PreparedInput {
+        system_prompt: system,
+        messages: kept,
+        truncated,
+    }
+}
+
+/// Keep the longest head of `text` whose estimated token count fits `budget`.
+fn truncate_to_budget(text: String, budget: usize) -> String {
+    if estimate_tokens(&text) <= budget {
+        return text;
+    }
+    let mut points = 0usize; // 4 points ≈ 1 token
+    let mut cut = text.len();
+    for (index, character) in text.char_indices() {
+        points += if character.is_ascii() { 1 } else { 4 };
+        if points.div_ceil(4) > budget {
+            cut = index;
+            break;
+        }
+    }
+    text[..cut].to_owned()
+}
+
 pub type ProviderEventSink<'a> = &'a mut (dyn FnMut(ProviderEvent) -> AppResult<()> + Send);
 pub type StreamFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 
@@ -122,9 +236,28 @@ pub(crate) async fn upstream_error(provider: &str, response: Response) -> AppErr
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => AppError::AiAuthentication(message),
         StatusCode::TOO_MANY_REQUESTS => AppError::AiRateLimited(message),
+        StatusCode::BAD_REQUEST if is_context_length_error(&detail) => {
+            AppError::AiContext(message)
+        }
         status if status.is_server_error() => AppError::AiUpstream(message),
         _ => AppError::Ai(message),
     }
+}
+
+/// Detect upstream "context window exceeded" 400s (e.g. DeepSeek's
+/// "maximum context length ... reduce the length of the messages") so users
+/// get an actionable error instead of a raw HTTP status.
+fn is_context_length_error(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    [
+        "maximum context length",
+        "context length",
+        "reduce the length of the messages",
+        "prompt is too long",
+        "context window",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 async fn read_body_limited(response: Response, limit: usize) -> AppResult<Vec<u8>> {
@@ -304,6 +437,110 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn estimates_tokens_like_the_frontend() {
+        assert_eq!(estimate_tokens(""), 0);
+        assert_eq!(estimate_tokens("abcd"), 1);
+        assert_eq!(estimate_tokens("abc"), 1);
+        assert_eq!(estimate_tokens("世界"), 2);
+        assert_eq!(estimate_tokens("ab世界"), 3); // 1 (ascii) + 2 (cjk)
+    }
+
+    #[test]
+    fn prepare_input_passes_small_inputs_through_unchanged() {
+        let messages = vec![
+            ChatMessage {
+                role: "user".into(),
+                content: "hello".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "hi".into(),
+            },
+        ];
+        let prepared = prepare_input("system", &messages, &AiProviderConfig::default());
+        assert!(!prepared.truncated);
+        assert_eq!(prepared.system_prompt, "system");
+        assert_eq!(prepared.messages[0].role, "user");
+        assert_eq!(prepared.messages[0].content, "hello");
+        assert_eq!(prepared.messages.len(), 2);
+    }
+
+    #[test]
+    fn prepare_input_truncates_a_single_oversized_message() {
+        let config = AiProviderConfig {
+            max_context_tokens: 4096,
+            max_tokens: 512,
+            ..AiProviderConfig::default()
+        };
+        let budget = context_budget(&config); // (4096 - 512) * 95 / 100 = 3405
+        let oversized = vec![ChatMessage {
+            role: "user".into(),
+            content: "x".repeat(100_000), // ≈ 25_000 tokens
+        }];
+        let prepared = prepare_input("sys", &oversized, &config);
+        assert!(prepared.truncated);
+        let total =
+            estimate_tokens(&prepared.system_prompt) + estimate_tokens(&prepared.messages[0].content);
+        assert!(total <= budget);
+        // The cut point and the system prompt both carry the notice.
+        assert!(prepared.messages[0].content.contains("已被自动截断"));
+        assert!(prepared.system_prompt.contains("已被自动截断"));
+        assert_eq!(prepared.messages.len(), 1);
+    }
+
+    #[test]
+    fn prepare_input_drops_old_messages_but_keeps_the_newest_question() {
+        let config = AiProviderConfig {
+            max_context_tokens: 4096,
+            max_tokens: 512,
+            ..AiProviderConfig::default()
+        };
+        let mut messages = Vec::new();
+        for index in 0..200 {
+            messages.push(ChatMessage {
+                role: "user".into(),
+                content: format!("message {index} {}", "a".repeat(96)),
+            });
+        }
+        let prepared = prepare_input("sys", &messages, &config);
+        assert!(prepared.truncated);
+        // Messages stay in chronological order; the newest question survives
+        // intact at the end of the list.
+        assert_eq!(
+            prepared.messages.last().unwrap().content,
+            messages.last().unwrap().content
+        );
+        assert!(prepared.messages.len() < messages.len());
+        assert!(prepared.system_prompt.contains("已被自动截断"));
+    }
+
+    #[test]
+    fn prepare_input_truncates_an_oversized_system_prompt() {
+        let config = AiProviderConfig {
+            max_context_tokens: 4096,
+            max_tokens: 512,
+            ..AiProviderConfig::default()
+        };
+        let huge_prompt = "x".repeat(50_000);
+        let prepared = prepare_input(&huge_prompt, &[], &config);
+        assert!(prepared.truncated);
+        assert!(estimate_tokens(&prepared.system_prompt) <= 3405);
+        assert!(prepared.messages.is_empty());
+    }
+
+    #[test]
+    fn detects_upstream_context_length_errors() {
+        let deepseek = "This model's maximum context length is 1048576 tokens. However, you \
+            requested 1511911 tokens (1503719 in the messages,8192 in the completion). Please \
+            reduce the length of the messages or completion.";
+        assert!(is_context_length_error(deepseek));
+        assert!(is_context_length_error("The prompt is too long"));
+        assert!(is_context_length_error("token count exceeded the model's context window"));
+        assert!(!is_context_length_error("invalid api key"));
+        assert!(!is_context_length_error("rate limit exceeded"));
+    }
 
     #[test]
     fn redacts_credentials_in_headers_fields_and_urls() {

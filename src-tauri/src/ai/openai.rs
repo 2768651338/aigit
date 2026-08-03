@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::ai::stream::SseDecoder;
 use crate::ai::{
-    http_client, read_json_limited, upstream_error, AiProvider, CancellationToken, ChatMessage,
-    ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
+    http_client, prepare_input, read_json_limited, upstream_error, AiProvider, CancellationToken,
+    ChatMessage, ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
 };
 use crate::config::AiProviderConfig;
 use crate::error::{AppError, AppResult};
@@ -48,6 +48,9 @@ impl AiProvider for OpenAiProvider {
                     config.active_provider
                 ))
             })?;
+        let prepared = prepare_input(system_prompt, messages, config);
+        let system_prompt = &prepared.system_prompt;
+        let messages = &prepared.messages;
         let (model, base_url) = if config.active_provider == "deepseek" {
             (&config.deepseek_model, &config.deepseek_base_url)
         } else {
@@ -102,6 +105,9 @@ impl AiProvider for OpenAiProvider {
                         config.active_provider
                     ))
                 })?;
+            let prepared = prepare_input(system_prompt, messages, config);
+            let system_prompt = &prepared.system_prompt;
+            let messages = &prepared.messages;
             let (model, base_url) = if config.active_provider == "deepseek" {
                 (&config.deepseek_model, &config.deepseek_base_url)
             } else {

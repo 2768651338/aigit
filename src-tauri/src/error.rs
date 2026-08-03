@@ -43,6 +43,9 @@ pub enum AppError {
     #[error("AI upstream error: {0}")]
     AiUpstream(String),
 
+    #[error("AI input exceeds the model context limit: {0}")]
+    AiContext(String),
+
     #[error("AI response could not be parsed: {0}")]
     AiResponse(String),
 
@@ -67,6 +70,7 @@ impl AppError {
             Self::Ai(_) => ("ai_error", false),
             Self::AiAuthentication(_) => ("ai_authentication", false),
             Self::AiRateLimited(_) => ("ai_rate_limited", true),
+            Self::AiContext(_) => ("ai_context_exceeded", false),
             Self::AiUpstream(_) => ("ai_upstream", true),
             Self::NotARepo(_) => ("not_a_repository", false),
             Self::General(_) => ("general_error", false),
@@ -105,5 +109,14 @@ mod tests {
         assert_eq!(value["message"], "AI authentication failed: check API key");
         assert_eq!(value["retryable"], false);
         assert!(value["diagnostic_id"].as_str().is_some());
+    }
+
+    #[test]
+    fn maps_context_exceeded_to_a_non_retryable_code() {
+        let value = serde_json::to_value(AppError::AiContext("input too long".into()))
+            .expect("serialize error");
+
+        assert_eq!(value["code"], "ai_context_exceeded");
+        assert_eq!(value["retryable"], false);
     }
 }

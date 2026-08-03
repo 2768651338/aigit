@@ -382,6 +382,8 @@ export interface AiProviderConfig {
   ollama_model: string;
   temperature: number;
   max_tokens: number;
+  /** Model context window in tokens; oversized inputs are truncated to this. */
+  max_context_tokens: number;
   credential_status: CredentialStatus;
 }
 

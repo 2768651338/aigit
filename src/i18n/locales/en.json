@@ -540,6 +540,8 @@
     "balanced": "Balanced",
     "creative": "Creative",
     "maxTokens": "Max Tokens: {{value}}",
+    "maxContextTokens": "Max Context Tokens: {{value}}",
+    "maxContextHint": "Inputs exceeding this limit (e.g. oversized diffs or attachments) are automatically truncated before sending.",
     "interface": "Interface",
     "language": "Language",
     "theme": "Theme",

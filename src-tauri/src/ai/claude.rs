@@ -4,8 +4,8 @@ use serde_json::{json, Value};
 
 use crate::ai::stream::SseDecoder;
 use crate::ai::{
-    http_client, read_json_limited, upstream_error, AiProvider, CancellationToken, ChatMessage,
-    ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
+    http_client, prepare_input, read_json_limited, upstream_error, AiProvider, CancellationToken,
+    ChatMessage, ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
 };
 use crate::config::AiProviderConfig;
 use crate::error::{AppError, AppResult};
@@ -45,6 +45,9 @@ impl AiProvider for ClaudeProvider {
             .ok_or_else(|| {
                 AppError::AiAuthentication("API key not configured for claude provider".to_string())
             })?;
+        let prepared = prepare_input(system_prompt, messages, config);
+        let system_prompt = &prepared.system_prompt;
+        let messages = &prepared.messages;
         let api_messages: Vec<_> = messages
             .iter()
             .map(|message| json!({ "role": message.role, "content": message.content }))
@@ -91,6 +94,9 @@ impl AiProvider for ClaudeProvider {
                 .ok_or_else(|| {
                     AppError::AiAuthentication("API key not configured for claude provider".into())
                 })?;
+            let prepared = prepare_input(system_prompt, messages, config);
+            let system_prompt = &prepared.system_prompt;
+            let messages = &prepared.messages;
             let api_messages: Vec<_> = messages
                 .iter()
                 .map(|message| json!({ "role": message.role, "content": message.content }))

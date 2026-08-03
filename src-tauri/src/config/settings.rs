@@ -104,6 +104,10 @@ pub struct AiProviderConfig {
     pub ollama_model: String,
     pub temperature: f64,
     pub max_tokens: u32,
+    /// Model context window in tokens. Inputs (system prompt + messages) are
+    /// automatically truncated to this minus `max_tokens` before sending, so
+    /// oversized diffs/attachments no longer fail upstream with HTTP 400.
+    pub max_context_tokens: u32,
     #[serde(default)]
     pub credential_status: CredentialStatus,
 }
@@ -151,6 +155,7 @@ impl Default for AiProviderConfig {
             ollama_model: "qwen2.5-coder:7b".to_string(),
             temperature: 0.7,
             max_tokens: 2048,
+            max_context_tokens: 131_072,
             credential_status: CredentialStatus::default(),
         }
     }
@@ -232,6 +237,11 @@ impl AppConfig {
             ),
         ] {
             validate_endpoint(endpoint, name)?;
+        }
+        if !(4_096..=2_097_152).contains(&self.ai.max_context_tokens) {
+            return Err(AppError::Config(
+                "max_context_tokens must be between 4096 and 2097152".into(),
+            ));
         }
         Ok(())
     }
@@ -521,6 +531,22 @@ openai_api_key = "must-remain"
         assert_eq!(status["claude"], false);
         assert_eq!(status["deepseek"], true);
         assert_eq!(status["embedding_openai"], false);
+    }
+
+    #[test]
+    fn defaults_context_window_and_validates_its_range() {
+        let config = AppConfig::default();
+        assert_eq!(config.ai.max_context_tokens, 131_072);
+
+        let mut below = AppConfig::default();
+        below.ai.max_context_tokens = 1_000;
+        assert!(below.validate().is_err());
+
+        let mut above = AppConfig::default();
+        above.ai.max_context_tokens = 3_000_000;
+        assert!(above.validate().is_err());
+
+        config.validate().expect("default context window must validate");
     }
 
     #[test]

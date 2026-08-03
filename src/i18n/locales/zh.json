@@ -540,6 +540,8 @@
     "balanced": "均衡",
     "creative": "创意",
     "maxTokens": "最大 Token 数：{{value}}",
+    "maxContextTokens": "最大上下文 Token 数：{{value}}",
+    "maxContextHint": "超出此上限的输入（如过大的 diff 或附件）会被自动截断后再发送。",
     "interface": "界面",
     "language": "语言",
     "theme": "主题",

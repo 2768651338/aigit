@@ -22,6 +22,7 @@ function configWithStatus(deepseek: boolean): AppConfig {
       ollama_model: "qwen2.5-coder:7b",
       temperature: 0.7,
       max_tokens: 2048,
+      max_context_tokens: 131072,
       credential_status: {
         openai: false,
         claude: false,

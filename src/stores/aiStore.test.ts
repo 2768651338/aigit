@@ -40,6 +40,7 @@ const config: AppConfig = {
     ollama_model: "qwen2.5-coder:7b",
     temperature: 0.7,
     max_tokens: 2048,
+    max_context_tokens: 131072,
     credential_status: { openai: false, claude: false, deepseek: false, embedding_openai: false },
   },
   ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh" },
