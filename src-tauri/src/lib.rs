@@ -141,6 +141,7 @@ pub fn run() {
             ai_cmd::repo_chat_stream,
             ai_cmd::cancel_ai_request,
             ai_cmd::get_default_prompts,
+            ai_cmd::analyze_git_error,
             // Local code index
             index_cmd::get_code_index_status,
             index_cmd::rebuild_code_index,

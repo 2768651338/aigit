@@ -1,5 +1,5 @@
 import { invoke, Channel } from "@tauri-apps/api/core";
-import type { ChatAttachment, ChatMessage, CommitPlan, FindingStatus, ReviewReport } from "@/types";
+import type { ChatAttachment, ChatMessage, CommitPlan, FindingStatus, GitErrorAnalysis, ReviewReport } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
 export type AiRequestKind = "chat" | "review" | "commit";
@@ -74,6 +74,11 @@ export const aiService = {
   generateSmartCommitPlan: (repoPath: string) => {
     ensureTauri();
     return invoke<CommitPlan>("generate_smart_commit_plan", { repoPath });
+  },
+
+  analyzeGitError: (repoPath: string, errorText: string) => {
+    ensureTauri();
+    return invoke<GitErrorAnalysis>("analyze_git_error", { repoPath, errorText });
   },
 
   generateCommitMessage: (repoPath: string) => {

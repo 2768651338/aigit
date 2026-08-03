@@ -5,6 +5,8 @@ import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
 import { gitService } from "@/services/git";
+import { aiService } from "@/services/ai";
+import type { GitErrorAnalysis } from "@/types";
 import {
   CheckIcon,
   PlusIcon,
@@ -83,7 +85,18 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
   const [history, setHistory] = useState<string[]>([]);
   const [amendMode, setAmendMode] = useState(false);
   const [includeStagedInAmend, setIncludeStagedInAmend] = useState(false);
+  // AI analysis of a failed push — transient UI state scoped to the panel.
+  const [pushAnalysis, setPushAnalysis] = useState<GitErrorAnalysis | null>(null);
+  const [pushAnalyzing, setPushAnalyzing] = useState(false);
+  const [pushAnalyzeFailed, setPushAnalyzeFailed] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset the push analysis whenever the repo or the push error changes so
+  // stale advice never lingers after a different failure.
+  useEffect(() => {
+    setPushAnalysis(null);
+    setPushAnalyzeFailed(null);
+  }, [currentPath, pushError]);
 
   // Load history when the active repo changes.
   useEffect(() => {
@@ -233,6 +246,24 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
     }
   };
 
+  // Ask the AI to explain the failed push and suggest next steps. The raw git
+  // error stays on screen; this only adds advice on top of it.
+  const handleAnalyzePushError = async () => {
+    if (!currentPath || !pushError || !config) return;
+    setPushAnalyzing(true);
+    setPushAnalyzeFailed(null);
+    try {
+      const result = await aiService.analyzeGitError(currentPath, pushError);
+      setPushAnalysis(result);
+    } catch (e) {
+      const msg = formatError(e);
+      setPushAnalyzeFailed(msg);
+      toast.error(msg, t("commit.analyzeErrorFailed"));
+    } finally {
+      setPushAnalyzing(false);
+    }
+  };
+
   const handleUnstageAll = () => {
     const stagedFiles = fileStatuses.filter((f) => f.staged).map((f) => f.path);
     if (stagedFiles.length > 0) {
@@ -313,11 +344,54 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       {/* Push/Pull error display (kept inline so users can read full git stderr) */}
       {pushError && (
         <div className="flex items-start gap-2 px-4 py-2.5 bg-danger/10 text-danger text-xs border-b border-danger/20">
-          <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
           <span className="flex-1 break-words whitespace-pre-wrap">{pushError}</span>
+          <button
+            onClick={handleAnalyzePushError}
+            disabled={!config || pushAnalyzing || busy}
+            aria-busy={pushAnalyzing}
+            className="shrink-0 btn-ghost text-2xs"
+            title={t("commit.analyzeError")}
+          >
+            {pushAnalyzing ? <SpinnerIcon size={12} className="animate-spin" /> : <PlusIcon size={12} />}
+            {pushAnalyzing ? t("commit.analyzingError") : t("commit.analyzeError")}
+          </button>
           <button onClick={() => setPushError(null)} className="shrink-0 hover:underline">
             {t("changes.dismiss")}
           </button>
+        </div>
+      )}
+      {pushAnalyzeFailed && (
+        <div className="flex items-start gap-2 px-4 py-2.5 bg-danger/10 text-danger text-xs border-b border-danger/20">
+          <AlertCircleIcon size={14} className="shrink-0 mt-0.5" />
+          <span className="flex-1 break-words">{pushAnalyzeFailed}</span>
+          <button onClick={() => setPushAnalyzeFailed(null)} className="shrink-0 hover:underline">
+            {t("changes.dismiss")}
+          </button>
+        </div>
+      )}
+      {pushAnalysis && (
+        <div className="flex flex-col gap-2 px-4 py-2.5 bg-bg-elevated text-xs border-b border-border">
+          <div className="flex items-center gap-2">
+            <span className="font-medium text-text-primary">{t("commit.analyzeResult")}</span>
+            <div className="flex-1" />
+            {pushAnalysis.safe_action === "pull" && currentPath && (
+              <button
+                onClick={handlePull}
+                disabled={busy}
+                aria-busy={pulling}
+                className="btn-secondary text-2xs"
+              >
+                {pulling ? <SpinnerIcon size={12} /> : <DownloadIcon size={12} />}
+                {pulling ? t("commit.pulling") : t("commit.pullMerge")}
+              </button>
+            )}
+            <button onClick={() => setPushAnalysis(null)} className="shrink-0 hover:underline">
+              {t("changes.dismiss")}
+            </button>
+          </div>
+          <p className="text-text-secondary whitespace-pre-wrap leading-relaxed">
+            {pushAnalysis.analysis}
+          </p>
         </div>
       )}
 

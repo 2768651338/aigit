@@ -82,6 +82,13 @@ export interface CommitPlan {
   warning: string | null;
 }
 
+/** AI analysis of a failed `git push`, plus a locally-detected safe action. */
+export interface GitErrorAnalysis {
+  analysis: string;
+  /** e.g. "pull" for non-fast-forward rejections; null when no safe action. */
+  safe_action: string | null;
+}
+
 export interface StageGroupResult {
   group_id: string;
   staged_tree: string;
