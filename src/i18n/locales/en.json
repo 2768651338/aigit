@@ -11,6 +11,7 @@
     "ok": "OK",
     "cancel": "Cancel",
     "dismiss": "Dismiss",
+    "close": "Close",
     "search": "Search",
     "loading": "Loading...",
     "noResults": "No results found"
@@ -191,7 +192,14 @@
     "batchDiscarded": "Discarded changes in {{count}} files",
     "batchDiscardFailed": "Failed to discard selected changes",
     "batchStageFailed": "Failed to stage selected files",
-    "batchUnstageFailed": "Failed to unstage selected files"
+    "batchUnstageFailed": "Failed to unstage selected files",
+    "ignoreFile": "Ignore this file · {{path}}",
+    "ignoreDir": "Ignore its directory · {{path}}",
+    "ignoreParentDir": "Ignore parent directory · {{path}}",
+    "ignoreSuccess": "Written to .gitignore — matching content will disappear from the changes list after refresh",
+    "ignoreAlready": "This rule already exists in .gitignore; nothing changed",
+    "ignoreTrackedHint": "Rule written to .gitignore. Note: this file is already tracked by Git — untrack it first (e.g. git rm --cached) for the ignore rule to take effect",
+    "ignoreFailed": "Failed to write .gitignore"
   },
   "diff": {
     "noChanges": "No changes to display",

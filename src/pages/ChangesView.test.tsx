@@ -273,4 +273,18 @@ describe("ChangesView diff presentation", () => {
     expect(getByLabelText("返回改动列表")).toBeInTheDocument();
     expect(container.querySelector('[role="separator"]')).toBeNull();
   });
+
+  // Regression: in inline mode the list stays visible and no back button was
+  // rendered, leaving users with no way to close the opened diff.
+  it("closes the diff via a close button in inline mode", () => {
+    const selectFile = vi.fn(() => Promise.resolve());
+    mockRepoState.selectFile = selectFile;
+    mockRepoState.selectedFile = diff.path;
+    mockRepoState.workdirDiff = [diff];
+    const { getByLabelText, queryByLabelText } = renderView();
+
+    expect(queryByLabelText("返回改动列表")).toBeNull();
+    fireEvent.click(getByLabelText("关闭"));
+    expect(selectFile).toHaveBeenCalledWith(null);
+  });
 });

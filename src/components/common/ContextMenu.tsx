@@ -12,6 +12,8 @@ import clsx from "clsx";
 export interface MenuItem {
   type?: "item" | "separator";
   label?: string;
+  /** Hover tooltip, e.g. to reveal the exact path a truncated label stands for. */
+  title?: string;
   icon?: React.ReactNode;
   disabled?: boolean;
   danger?: boolean;
@@ -150,6 +152,7 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
                   key={`item-${idx}`}
                   type="button"
                   role="menuitem"
+                  title={item.title}
                   disabled={item.disabled}
                   onClick={() => {
                     hide();

@@ -148,6 +148,12 @@ pub fn unstage_files(path: String, files: Vec<String>) -> AppResult<()> {
 }
 
 #[tauri::command]
+pub fn add_gitignore_entries(path: String, entries: Vec<String>) -> AppResult<Vec<String>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::ignore::add_gitignore_entries(&repo, &entries)
+}
+
+#[tauri::command]
 pub fn commit(path: String, message: String) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
     git::commit::commit(&repo, &message)

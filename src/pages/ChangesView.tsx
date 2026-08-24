@@ -6,7 +6,7 @@ import { DiffViewer } from "@/components/git/DiffViewer";
 import { CommitPanel } from "@/components/git/CommitPanel";
 import { SmartCommitPanel } from "@/components/git/SmartCommitPanel";
 import { useRepoEntry } from "@/components/git/RepoEntryDialog";
-import { RefreshIcon, AlertCircleIcon, SpinnerIcon, FolderIcon, ChevronRightIcon } from "@/components/common/Icons";
+import { RefreshIcon, AlertCircleIcon, SpinnerIcon, FolderIcon, ChevronRightIcon, XIcon } from "@/components/common/Icons";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useEffect, useRef, useState } from "react";
 import type { FileDiff } from "@/types";
@@ -219,7 +219,18 @@ export function ChangesView() {
         {selectedFile && (
           <div className="flex-1 overflow-hidden flex flex-col">
             <div className="flex items-center gap-2 px-5 h-12 border-b border-border">
-              {!showDiffInline && (
+              {showDiffInline ? (
+                /* 内联模式下文件列表仍显示在左侧，用图标按钮收起 diff 即可。 */
+                <button
+                  type="button"
+                  onClick={() => useRepoStore.getState().selectFile(null)}
+                  className="shrink-0 w-6 h-6 flex items-center justify-center rounded text-text-muted hover:text-text-primary hover:bg-bg-hover"
+                  aria-label={t("common.close")}
+                  title={t("common.close")}
+                >
+                  <XIcon size={14} />
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() => useRepoStore.getState().selectFile(null)}

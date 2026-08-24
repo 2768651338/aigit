@@ -41,6 +41,7 @@ pub fn run() {
             git_cmd::stage_files,
             git_cmd::stage_all,
             git_cmd::unstage_files,
+            git_cmd::add_gitignore_entries,
             git_cmd::commit,
             git_cmd::amend,
             git_cmd::is_head_pushed,

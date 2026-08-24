@@ -11,9 +11,12 @@ import {
   CheckIcon,
   XIcon,
   RefreshIcon,
+  EyeOffIcon,
 } from "@/components/common/Icons";
 import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import { confirmDialog } from "@/utils/dialog";
+import { buildIgnoreTargets } from "@/utils/gitignore";
+import { gitService } from "@/services/git";
 import clsx from "clsx";
 
 const STATUS_COLORS: Record<string, string> = {
@@ -144,6 +147,10 @@ export function FileStatusList({ staged }: FileStatusListProps) {
       });
     }
 
+    // 忽略规则（写入根 .gitignore）：文件 / 所在目录 / 上一级目录
+    items.push({ type: "separator" });
+    items.push(...buildIgnoreMenuItems(file));
+
     if (currentPath) {
       items.push({ type: "separator" });
       items.push({
@@ -173,6 +180,62 @@ export function FileStatusList({ staged }: FileStatusListProps) {
       console.error(e);
       toast.error(formatError(e), t("fileList.discardFailed"));
     }
+  };
+
+  // 将忽略规则追加到仓库根 .gitignore 并刷新状态。
+  // 已跟踪的文件不受 .gitignore 影响——用 info 提示兜底，避免"点了没效果"的困惑。
+  const handleIgnore = async (patterns: string[], file: FileStatus) => {
+    if (!currentPath || patterns.length === 0) return;
+    try {
+      const added = await gitService.addGitignoreEntries(currentPath, patterns);
+      await refreshStatus();
+      if (added.length === 0) {
+        toast.info(t("fileList.ignoreAlready"));
+        return;
+      }
+      if (!staged && file.status === "untracked") {
+        toast.success(t("fileList.ignoreSuccess"));
+      } else {
+        toast.info(t("fileList.ignoreTrackedHint"));
+      }
+    } catch (e) {
+      console.error(e);
+      toast.error(formatError(e), t("fileList.ignoreFailed"));
+    }
+  };
+
+  // 忽略菜单项：文件本身 / 所在目录 / 所在目录的上一级。
+  // label 展示相对路径，title 展示将写入 .gitignore 的精确规则（根锚定）。
+  const buildIgnoreMenuItems = (file: FileStatus): MenuItem[] => {
+    const targets = buildIgnoreTargets(file.path);
+    const display = (pattern: string) => pattern.replace(/^\//, "");
+    const items: MenuItem[] = [
+      {
+        label: t("fileList.ignoreFile", { path: display(targets.file) }),
+        title: targets.file,
+        icon: <EyeOffIcon size={14} />,
+        onClick: () => handleIgnore([targets.file], file),
+      },
+    ];
+    if (targets.dir) {
+      const dirPattern = targets.dir;
+      items.push({
+        label: t("fileList.ignoreDir", { path: display(dirPattern) }),
+        title: dirPattern,
+        icon: <EyeOffIcon size={14} />,
+        onClick: () => handleIgnore([dirPattern], file),
+      });
+    }
+    if (targets.parentDir) {
+      const parentPattern = targets.parentDir;
+      items.push({
+        label: t("fileList.ignoreParentDir", { path: display(parentPattern) }),
+        title: parentPattern,
+        icon: <EyeOffIcon size={14} />,
+        onClick: () => handleIgnore([parentPattern], file),
+      });
+    }
+    return items;
   };
 
   // Batch operations — act on the current selection.

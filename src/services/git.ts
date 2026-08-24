@@ -54,6 +54,12 @@ export const gitService = {
     return invoke<FileStatus[]>("get_status", { path });
   },
 
+  /** Append ignore rules to the repo root `.gitignore`; returns the rules actually added. */
+  addGitignoreEntries: (path: string, entries: string[]) => {
+    ensureTauri();
+    return invoke<string[]>("add_gitignore_entries", { path, entries });
+  },
+
   getWorkdirDiff: (path: string, filePath?: string) => {
     ensureTauri();
     return invoke<FileDiff[]>("get_workdir_diff", { path, filePath });

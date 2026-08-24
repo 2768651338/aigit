@@ -11,6 +11,7 @@
     "ok": "确定",
     "cancel": "取消",
     "dismiss": "关闭",
+    "close": "关闭",
     "search": "搜索",
     "loading": "加载中...",
     "noResults": "无匹配结果"
@@ -191,7 +192,14 @@
     "batchDiscarded": "已丢弃 {{count}} 个文件的修改",
     "batchDiscardFailed": "批量丢弃修改失败",
     "batchStageFailed": "批量暂存失败",
-    "batchUnstageFailed": "批量取消暂存失败"
+    "batchUnstageFailed": "批量取消暂存失败",
+    "ignoreFile": "忽略此文件 · {{path}}",
+    "ignoreDir": "忽略所在目录 · {{path}}",
+    "ignoreParentDir": "忽略上一级目录 · {{path}}",
+    "ignoreSuccess": "已写入 .gitignore，刷新后对应内容将不再出现在改动列表",
+    "ignoreAlready": "该规则已存在于 .gitignore 中，未做修改",
+    "ignoreTrackedHint": "规则已写入 .gitignore。注意：该文件已被 Git 跟踪，需先取消跟踪（如 git rm --cached）忽略才会生效",
+    "ignoreFailed": "写入 .gitignore 失败"
   },
   "diff": {
     "noChanges": "无可显示的改动",

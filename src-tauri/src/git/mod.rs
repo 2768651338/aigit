@@ -4,6 +4,7 @@ pub mod commit;
 pub mod conflict;
 pub mod diff;
 pub mod history;
+pub mod ignore;
 pub mod insights;
 pub mod merge;
 pub mod remote;
