@@ -266,6 +266,12 @@ pub fn get_commit_diff(path: String, hash: String) -> AppResult<String> {
 }
 
 #[tauri::command]
+pub fn get_commit_diff_files(path: String, hash: String) -> AppResult<Vec<git::FileDiff>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::diff::get_commit_diff_files(&repo, &hash)
+}
+
+#[tauri::command]
 pub fn list_files(path: String) -> AppResult<Vec<String>> {
     let repo = git::repo::open_repo(&path)?;
     git::branch::list_files(&repo)

@@ -173,9 +173,10 @@ export const gitService = {
     return invoke<RepositoryInsights>("get_repository_insights", { path, startDate, endDate });
   },
 
-  getCommitDiff: (path: string, hash: string) => {
+  /** Structured per-file diff of a commit against its first parent. */
+  getCommitFiles: (path: string, hash: string) => {
     ensureTauri();
-    return invoke<string>("get_commit_diff", { path, hash });
+    return invoke<FileDiff[]>("get_commit_diff_files", { path, hash });
   },
 
   /** List all tracked files in the repository (for the AI chat @file picker). */

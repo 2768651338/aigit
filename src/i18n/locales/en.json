@@ -72,7 +72,9 @@
     "notSet": "not set",
     "shortcutPrefix": "⌘",
     "changesCount": "{{count}} changes",
-    "recentRepos": "Recent"
+    "recentRepos": "Recent",
+    "openRepos": "Open repositories",
+    "closeRepo": "Close repository"
   },
   "tabs": {
     "close": "Close tab",

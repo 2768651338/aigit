@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import type { FileDiff } from "@/types";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
@@ -26,6 +26,12 @@ interface DiffViewerProps {
    *  Defaults to "view" for backward compatibility.
    */
   mode?: DiffMode;
+  /** When true, all files start collapsed each time a new `diffs` array
+   *  arrives, so the file headers double as the changed-file list (used by
+   *  the history / stash / tag panels). The user can still expand freely
+   *  afterwards. Defaults to false (all expanded).
+   */
+  defaultCollapsed?: boolean;
 }
 
 export function buildHunkPatch(
@@ -94,7 +100,12 @@ export function buildHunkPatch(
  * The patch is constructed client-side from the diff data — no extra backend
  * round-trip needed until the actual `apply` call.
  */
-export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps) {
+export function DiffViewer({
+  diffs,
+  className,
+  mode = "view",
+  defaultCollapsed = false,
+}: DiffViewerProps) {
   const { t } = useTranslation();
   // Track which files are collapsed (by path). Default: all expanded.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -106,6 +117,12 @@ export function DiffViewer({ diffs, className, mode = "view" }: DiffViewerProps)
 
   const { applyPatchToIndex, applyPatchToIndexReverse } = useRepoStore();
   const toast = useToastStore();
+
+  // Re-collapse everything whenever a fresh `diffs` array arrives so the
+  // collapsed headers act as the changed-file list (see defaultCollapsed).
+  useEffect(() => {
+    if (defaultCollapsed) setCollapsed(new Set(diffs.map((d) => d.path)));
+  }, [defaultCollapsed, diffs]);
 
   const totalAdditions = useMemo(
     () => diffs.reduce((sum, d) => sum + d.additions, 0),

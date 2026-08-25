@@ -5,7 +5,8 @@ import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
-import type { StashInfo } from "@/types";
+import type { FileDiff, StashInfo } from "@/types";
+import { DiffViewer } from "@/components/git/DiffViewer";
 import {
   ArchiveIcon,
   RefreshIcon,
@@ -30,7 +31,7 @@ import clsx from "clsx";
  * `--include-untracked` / `--keep-index` flags.
  *
  * Selecting a stash expands an inline diff preview (fetched via the existing
- * `get_commit_diff` command — a stash is just a commit).
+ * `get_commit_diff_files` command — a stash is just a commit).
  */
 export function StashPanel() {
   const { t } = useTranslation();
@@ -52,7 +53,7 @@ export function StashPanel() {
   const [keepIndex, setKeepIndex] = useState(false);
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<StashInfo | null>(null);
-  const [diffText, setDiffText] = useState<string>("");
+  const [files, setFiles] = useState<FileDiff[]>([]);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
 
@@ -69,7 +70,7 @@ export function StashPanel() {
       const stillExists = stashes?.some((s) => s.index === selected.index);
       if (!stillExists) {
         setSelected(null);
-        setDiffText("");
+        setFiles([]);
         setDiffError(null);
       }
     }
@@ -131,19 +132,19 @@ export function StashPanel() {
   const handleSelect = async (s: StashInfo) => {
     if (selected?.index === s.index) {
       setSelected(null);
-      setDiffText("");
+      setFiles([]);
       setDiffError(null);
       return;
     }
     setSelected(s);
-    setDiffText("");
+    setFiles([]);
     setDiffError(null);
     if (!currentPath) return;
     setDiffLoading(true);
     try {
-      // A stash is a commit — its hash can be passed to get_commit_diff.
-      const diff = await gitService.getCommitDiff(currentPath, s.hash);
-      setDiffText(diff);
+      // A stash is a commit — its hash can be passed to get_commit_diff_files.
+      const fileDiffs = await gitService.getCommitFiles(currentPath, s.hash);
+      setFiles(fileDiffs);
     } catch (e) {
       setDiffError(formatError(e));
     } finally {
@@ -345,7 +346,7 @@ export function StashPanel() {
                 <button
                   onClick={() => {
                     setSelected(null);
-                    setDiffText("");
+                    setFiles([]);
                     setDiffError(null);
                   }}
                   className="btn-ghost"
@@ -368,12 +369,12 @@ export function StashPanel() {
                     {t("stashes.loadingDiff")}
                   </div>
                 )}
-                {!diffLoading && !diffError && diffText && (
-                  <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed select-text">
-                    {colorizePatch(diffText)}
-                  </pre>
+                {!diffLoading && !diffError && files.length > 0 && (
+                  <div className="p-3">
+                    <DiffViewer diffs={files} mode="view" defaultCollapsed />
+                  </div>
                 )}
-                {!diffLoading && !diffError && !diffText && (
+                {!diffLoading && !diffError && files.length === 0 && (
                   <div className="flex items-center justify-center py-12 text-text-muted text-sm">
                     {t("stashes.noDiff")}
                   </div>
@@ -389,29 +390,6 @@ export function StashPanel() {
       </div>
     </div>
   );
-}
-
-/** Render a unified-diff patch string with line-level coloring. */
-function colorizePatch(patch: string): React.ReactNode[] {
-  return patch.split("\n").map((line, i) => {
-    let className = "text-text-secondary";
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      className = "text-text-primary font-semibold";
-    } else if (line.startsWith("@@")) {
-      className = "text-info";
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      className = "text-success";
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      className = "text-danger";
-    } else if (line.startsWith("diff ") || line.startsWith("index ")) {
-      className = "text-info font-semibold";
-    }
-    return (
-      <div key={i} className={className}>
-        {line || " "}
-      </div>
-    );
-  });
 }
 
 function formatDate(timestamp: number): string {

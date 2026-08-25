@@ -5,7 +5,8 @@ import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
-import type { TagInfo } from "@/types";
+import type { FileDiff, TagInfo } from "@/types";
+import { DiffViewer } from "@/components/git/DiffViewer";
 import {
   TagIcon,
   RefreshIcon,
@@ -47,7 +48,7 @@ export function TagPanel() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<TagInfo | null>(null);
-  const [diffText, setDiffText] = useState<string>("");
+  const [files, setFiles] = useState<FileDiff[]>([]);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
   const [remotes, setRemotes] = useState<string[]>([]);
@@ -71,7 +72,7 @@ export function TagPanel() {
       const stillExists = tags?.some((t) => t.name === selected.name);
       if (!stillExists) {
         setSelected(null);
-        setDiffText("");
+        setFiles([]);
         setDiffError(null);
       }
     }
@@ -130,18 +131,18 @@ export function TagPanel() {
   const handleSelect = async (tag: TagInfo) => {
     if (selected?.name === tag.name) {
       setSelected(null);
-      setDiffText("");
+      setFiles([]);
       setDiffError(null);
       return;
     }
     setSelected(tag);
-    setDiffText("");
+    setFiles([]);
     setDiffError(null);
     if (!currentPath) return;
     setDiffLoading(true);
     try {
-      const diff = await gitService.getCommitDiff(currentPath, tag.target_hash);
-      setDiffText(diff);
+      const fileDiffs = await gitService.getCommitFiles(currentPath, tag.target_hash);
+      setFiles(fileDiffs);
     } catch (e) {
       setDiffError(formatError(e));
     } finally {
@@ -333,7 +334,7 @@ export function TagPanel() {
                 <button
                   onClick={() => {
                     setSelected(null);
-                    setDiffText("");
+                    setFiles([]);
                     setDiffError(null);
                   }}
                   className="btn-ghost"
@@ -410,12 +411,12 @@ export function TagPanel() {
                     {t("branches.loadingDiff")}
                   </div>
                 )}
-                {!diffLoading && !diffError && diffText && (
-                  <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed select-text">
-                    {colorizePatch(diffText)}
-                  </pre>
+                {!diffLoading && !diffError && files.length > 0 && (
+                  <div className="p-3">
+                    <DiffViewer diffs={files} mode="view" defaultCollapsed />
+                  </div>
                 )}
-                {!diffLoading && !diffError && !diffText && (
+                {!diffLoading && !diffError && files.length === 0 && (
                   <div className="flex items-center justify-center py-12 text-text-muted text-sm">
                     {t("branches.noDiff")}
                   </div>
@@ -433,24 +434,3 @@ export function TagPanel() {
   );
 }
 
-function colorizePatch(patch: string): React.ReactNode[] {
-  return patch.split("\n").map((line, i) => {
-    let className = "text-text-secondary";
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      className = "text-text-primary font-semibold";
-    } else if (line.startsWith("@@")) {
-      className = "text-info";
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      className = "text-success";
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      className = "text-danger";
-    } else if (line.startsWith("diff ") || line.startsWith("index ")) {
-      className = "text-info font-semibold";
-    }
-    return (
-      <div key={i} className={className}>
-        {line || " "}
-      </div>
-    );
-  });
-}

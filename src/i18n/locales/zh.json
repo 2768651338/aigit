@@ -72,7 +72,9 @@
     "notSet": "未配置",
     "shortcutPrefix": "⌘",
     "changesCount": "{{count}} 个改动",
-    "recentRepos": "最近仓库"
+    "recentRepos": "最近仓库",
+    "openRepos": "打开的仓库",
+    "closeRepo": "关闭仓库"
   },
   "tabs": {
     "close": "关闭标签",

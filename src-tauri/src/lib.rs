@@ -58,6 +58,7 @@ pub fn run() {
             git_cmd::delete_branch,
             git_cmd::get_log,
             git_cmd::get_commit_diff,
+            git_cmd::get_commit_diff_files,
             git_cmd::list_files,
             // Git commands — remote
             git_cmd::list_remotes,

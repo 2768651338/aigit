@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import "@/i18n";
 import { useTranslation } from "react-i18next";
 import { Sidebar } from "@/components/layout/Sidebar";
-import { TabBar } from "@/components/layout/TabBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
 import { RepoEntryProvider } from "@/components/git/RepoEntryDialog";
@@ -176,7 +175,6 @@ function AppShell() {
         <div className="flex flex-1 overflow-hidden">
           <Sidebar activeView={activeView} onViewChange={setActiveView} />
           <main className="flex-1 flex flex-col overflow-hidden">
-            <TabBar />
             <div className="flex-1 overflow-hidden">
               <ErrorBoundary>
                 {activeView === "changes" && <ChangesView />}

@@ -64,7 +64,7 @@ interface RepoStoreState extends ActiveTabProjection {
   tabs: Record<string, RepoTabState>;
   /** Path of the currently active tab. `null` when no tab is open. */
   activePath: string | null;
-  /** Ordered list of open tab paths (for the TabBar). */
+  /** Ordered list of open repo paths (shown in the sidebar). */
   tabOrder: string[];
 
   // Tab-level actions

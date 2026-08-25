@@ -6,7 +6,8 @@ import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
 import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
-import type { LogEntry } from "@/types";
+import { DiffViewer } from "@/components/git/DiffViewer";
+import type { FileDiff, LogEntry } from "@/types";
 import {
   GitBranchIcon,
   GitCommitIcon,
@@ -37,7 +38,7 @@ export function BranchGraph() {
   const { show: showMenu } = useContextMenu();
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<LogEntry | null>(null);
-  const [diffText, setDiffText] = useState<string>("");
+  const [files, setFiles] = useState<FileDiff[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -69,18 +70,18 @@ export function BranchGraph() {
     if (selectedHash === entry.hash) {
       setSelectedHash(null);
       setSelectedEntry(null);
-      setDiffText("");
+      setFiles([]);
       setError(null);
       return;
     }
     setSelectedHash(entry.hash);
     setSelectedEntry(entry);
-    setDiffText("");
+    setFiles([]);
     setError(null);
     setLoading(true);
     try {
-      const diff = await gitService.getCommitDiff(currentPath, entry.hash);
-      setDiffText(diff);
+      const fileDiffs = await gitService.getCommitFiles(currentPath, entry.hash);
+      setFiles(fileDiffs);
     } catch (e) {
       setError(formatError(e));
     } finally {
@@ -96,7 +97,7 @@ export function BranchGraph() {
   const clearSelection = () => {
     setSelectedHash(null);
     setSelectedEntry(null);
-    setDiffText("");
+    setFiles([]);
     setError(null);
   };
 
@@ -383,7 +384,7 @@ export function BranchGraph() {
               onClick={() => {
                 setSelectedHash(null);
                 setSelectedEntry(null);
-                setDiffText("");
+                setFiles([]);
                 setError(null);
               }}
               className="btn-ghost text-xs"
@@ -400,7 +401,8 @@ export function BranchGraph() {
             {new Date(selectedEntry.timestamp * 1000).toLocaleString()}
           </div>
 
-          {/* Diff content */}
+          {/* Diff content: collapsed file headers double as the complete
+              changed-file list; click a file to expand its diff. */}
           <div className="flex-1 overflow-auto">
             {error && (
               <div className="flex items-start gap-2 p-3.5 m-3 bg-danger/10 text-danger text-sm rounded border border-danger/20">
@@ -414,12 +416,12 @@ export function BranchGraph() {
                 {t("branches.loadingDiff")}
               </div>
             )}
-            {!loading && !error && diffText && (
-              <pre className="font-mono text-xs text-text-primary p-4 whitespace-pre-wrap break-all leading-relaxed select-text">
-                {colorizePatch(diffText)}
-              </pre>
+            {!loading && !error && files.length > 0 && (
+              <div className="p-3">
+                <DiffViewer diffs={files} mode="view" defaultCollapsed />
+              </div>
             )}
-            {!loading && !error && !diffText && (
+            {!loading && !error && files.length === 0 && (
               <div className="flex items-center justify-center py-12 text-text-muted text-sm">
                 {t("branches.noDiff")}
               </div>
@@ -430,33 +432,6 @@ export function BranchGraph() {
       </div>
     </div>
   );
-}
-
-/**
- * Render a unified-diff patch string with simple line-level coloring.
- * Returns an array of React nodes — one per line — so the parent <pre>
- * can lay them out without us re-implementing a full diff viewer.
- */
-function colorizePatch(patch: string): React.ReactNode[] {
-  return patch.split("\n").map((line, i) => {
-    let className = "text-text-secondary";
-    if (line.startsWith("+++") || line.startsWith("---")) {
-      className = "text-text-primary font-semibold";
-    } else if (line.startsWith("@@")) {
-      className = "text-info";
-    } else if (line.startsWith("+") && !line.startsWith("+++")) {
-      className = "text-success";
-    } else if (line.startsWith("-") && !line.startsWith("---")) {
-      className = "text-danger";
-    } else if (line.startsWith("diff ") || line.startsWith("index ")) {
-      className = "text-info font-semibold";
-    }
-    return (
-      <div key={i} className={className}>
-        {line || " "}
-      </div>
-    );
-  });
 }
 
 function formatDate(timestamp: number): string {
