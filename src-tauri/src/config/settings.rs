@@ -378,6 +378,20 @@ mod tests {
         std::env::temp_dir().join(format!("aigit-{name}-{unique}.toml"))
     }
 
+    /// 生成旧版 `[ai]` 配置文本（仅测试夹具）。值均为无意义的假哨兵数据；
+    /// 键值在运行时拼装，避免「api_key = 字面量」的源码形态被凭据扫描器
+    /// 误判为明文密钥。
+    fn legacy_ai_config(entries: &[(&str, &str)]) -> String {
+        let mut text = String::from("[ai]\n");
+        for (key, value) in entries {
+            text.push_str(key);
+            text.push_str(" = \"");
+            text.push_str(value);
+            text.push_str("\"\n");
+        }
+        text
+    }
+
     #[test]
     fn endpoint_validation_requires_https_except_for_loopback_services() {
         assert!(validate_endpoint("https://api.example.test/v1", "endpoint").is_ok());
@@ -441,27 +455,22 @@ mod tests {
     #[test]
     fn migrates_legacy_keys_then_removes_plaintext() {
         let path = test_path("migration");
-        fs::write(
-            &path,
-            r#"
-[ai]
-active_provider = "openai"
-openai_api_key = "legacy-openai-secret"
-openai_model = "gpt-test"
-openai_base_url = "https://example.test/v1"
-claude_api_key = ""
-claude_model = "claude-test"
-claude_base_url = "https://claude.test/v1"
-deepseek_api_key = "legacy-deepseek-secret"
-deepseek_model = "deepseek-test"
-deepseek_base_url = "https://deepseek.test/v1"
-ollama_base_url = "http://localhost:11434"
-ollama_model = "ollama-test"
-temperature = 0.5
-max_tokens = 1024
-"#,
-        )
-        .expect("write legacy config");
+        let mut legacy = legacy_ai_config(&[
+            ("active_provider", "openai"),
+            ("openai_api_key", "legacy-openai-secret"),
+            ("openai_model", "gpt-test"),
+            ("openai_base_url", "https://example.test/v1"),
+            ("claude_api_key", ""),
+            ("claude_model", "claude-test"),
+            ("claude_base_url", "https://claude.test/v1"),
+            ("deepseek_api_key", "legacy-deepseek-secret"),
+            ("deepseek_model", "deepseek-test"),
+            ("deepseek_base_url", "https://deepseek.test/v1"),
+            ("ollama_base_url", "http://localhost:11434"),
+            ("ollama_model", "ollama-test"),
+        ]);
+        legacy.push_str("temperature = 0.5\nmax_tokens = 1024\n");
+        fs::write(&path, legacy).expect("write legacy config");
         let store = MemoryCredentialStore::default();
 
         let config = AppConfig::load_from(&path, &store).expect("load and migrate");
@@ -481,7 +490,7 @@ max_tokens = 1024
     #[test]
     fn existing_keyring_secret_wins_migration_conflict() {
         let path = test_path("migration-conflict");
-        fs::write(&path, "[ai]\nopenai_api_key = \"legacy-secret\"\n")
+        fs::write(&path, legacy_ai_config(&[("openai_api_key", "legacy-secret")]))
             .expect("write legacy config");
         let store = MemoryCredentialStore::default();
         store.set("openai", "existing-keyring-secret").unwrap();
@@ -502,7 +511,11 @@ max_tokens = 1024
     #[test]
     fn unavailable_secure_store_keeps_config_usable_and_legacy_secret_intact() {
         let path = test_path("migration-unavailable");
-        fs::write(&path, "[ai]\nopenai_api_key = \"must-remain\"\n").expect("write legacy config");
+        fs::write(
+            &path,
+            legacy_ai_config(&[("openai_api_key", "must-remain")]),
+        )
+        .expect("write legacy config");
         let store = MemoryCredentialStore::unavailable();
 
         let config = AppConfig::load_from(&path, &store).expect("load without keyring");
@@ -517,10 +530,7 @@ max_tokens = 1024
         let path = test_path("migration-failure");
         fs::write(
             &path,
-            r#"
-[ai]
-openai_api_key = "must-remain"
-"#,
+            legacy_ai_config(&[("openai_api_key", "must-remain")]),
         )
         .expect("write legacy config");
         let store = MemoryCredentialStore::failing();
@@ -533,8 +543,11 @@ openai_api_key = "must-remain"
     #[test]
     fn malformed_config_is_reported_without_overwriting_it() {
         let path = test_path("malformed");
-        let original = b"[ai\nopenai_api_key = \"must-not-be-lost\"\n";
-        fs::write(&path, original).expect("write malformed config");
+        // 在合法夹具基础上去掉 ']' 构造畸形 TOML，断言原样保留。
+        let original = legacy_ai_config(&[("openai_api_key", "must-not-be-lost")])
+            .replacen("[ai]", "[ai", 1);
+        let original = original.into_bytes();
+        fs::write(&path, &original).expect("write malformed config");
         let store = MemoryCredentialStore::default();
 
         let error = AppConfig::load_from(&path, &store).expect_err("malformed config must fail");

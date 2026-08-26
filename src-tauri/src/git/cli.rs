@@ -5,6 +5,7 @@ use std::process::{Command, ExitStatus, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -18,6 +19,11 @@ pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_STREAM_BYTES: usize = 1024 * 1024;
 const MAX_DISPLAY_BYTES: usize = 16 * 1024;
 const MAX_PATHSPEC_BYTES: usize = 4096;
+// 子进程退出后等待管道收尾的上限：git 派生的辅助进程（凭据管理器、传输
+// helper 等）若在 git 退出后仍持有继承的管道写端，EOF 永远不会到来，
+// 无限等待会让调用方（如前端推送按钮）永久悬挂。
+const STREAM_DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
+const READER_CHUNK_BYTES: usize = 64 * 1024;
 
 // GUI 子系统进程派生控制台程序时，Windows 会为其分配新的控制台窗口；
 // CREATE_NO_WINDOW 抑制该窗口，避免 git 操作时反复弹出黑色命令框。
@@ -116,8 +122,10 @@ where
         .stderr
         .take()
         .ok_or_else(|| AppError::General("无法捕获 git 标准错误".to_string()))?;
-    let stdout_reader = thread::spawn(move || read_limited(stdout));
-    let stderr_reader = thread::spawn(move || read_limited(stderr));
+    let (stdout_tx, stdout_rx) = mpsc::channel();
+    let (stderr_tx, stderr_rx) = mpsc::channel();
+    spawn_pipe_reader(stdout, stdout_tx);
+    spawn_pipe_reader(stderr, stderr_tx);
 
     let started = Instant::now();
     let status = loop {
@@ -130,17 +138,20 @@ where
             {
                 let _ = child.kill();
                 let _ = child.wait();
-                let _ = join_reader(stdout_reader, "stdout")?;
-                let _ = join_reader(stderr_reader, "stderr")?;
+                drain_stream(stdout_rx, MAX_STREAM_BYTES);
+                drain_stream(stderr_rx, MAX_STREAM_BYTES);
                 return Err(AppError::General("Git 操作已取消".to_string()));
             }
             Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(25)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                let stdout = join_reader(stdout_reader, "stdout")?;
-                let stderr = join_reader(stderr_reader, "stderr")?;
-                let detail = combine_output(&bounded_display(&stdout), &bounded_display(&stderr));
+                let stdout = drain_stream(stdout_rx, MAX_STREAM_BYTES);
+                let stderr = drain_stream(stderr_rx, MAX_STREAM_BYTES);
+                let detail = combine_output(
+                    &bounded_display(&stdout),
+                    &bounded_display(&stderr),
+                );
                 let suffix = if detail.is_empty() {
                     String::new()
                 } else {
@@ -154,16 +165,19 @@ where
             Err(error) => {
                 let _ = child.kill();
                 let _ = child.wait();
+                drain_stream(stdout_rx, MAX_STREAM_BYTES);
+                drain_stream(stderr_rx, MAX_STREAM_BYTES);
                 return Err(AppError::General(format!("等待 git 命令失败：{error}")));
             }
         }
     };
 
-    Ok(GitOutput {
-        status,
-        stdout: join_reader(stdout_reader, "stdout")?,
-        stderr: join_reader(stderr_reader, "stderr")?,
-    })
+    // 进程已退出：限时收尾。若仍有辅助进程攥着继承的管道写端，超时后带
+    // 已收到的输出直接返回，绝不因等不到 EOF 而悬挂调用方。
+    let stdout = drain_stream(stdout_rx, MAX_STREAM_BYTES);
+    let stderr = drain_stream(stderr_rx, MAX_STREAM_BYTES);
+
+    Ok(GitOutput { status, stdout, stderr })
 }
 
 pub fn run_checked<I, S>(
@@ -277,26 +291,49 @@ fn bounded_display(bytes: &[u8]) -> String {
     }
 }
 
-fn read_limited(mut reader: impl Read) -> std::io::Result<Vec<u8>> {
-    let mut bytes = Vec::new();
-    reader
-        .by_ref()
-        .take((MAX_STREAM_BYTES + 1) as u64)
-        .read_to_end(&mut bytes)?;
-    if bytes.len() > MAX_STREAM_BYTES {
-        bytes.truncate(MAX_STREAM_BYTES);
-    }
-    Ok(bytes)
+/// Incrementally forward a pipe into a channel so the collector can bound its
+/// wait. The thread blocks in `read` until EOF; if a lingering helper process
+/// keeps the write end open, the thread stays parked until every holder exits
+/// (or the app exits) while `drain_stream` has already moved on.
+pub(crate) fn spawn_pipe_reader(
+    mut reader: impl Read + Send + 'static,
+    tx: mpsc::Sender<Vec<u8>>,
+) {
+    thread::spawn(move || {
+        let mut buf = vec![0u8; READER_CHUNK_BYTES];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    });
 }
 
-fn join_reader(
-    reader: thread::JoinHandle<std::io::Result<Vec<u8>>>,
-    stream: &str,
-) -> AppResult<Vec<u8>> {
-    reader
-        .join()
-        .map_err(|_| AppError::General(format!("读取 git {stream} 的线程异常退出")))?
-        .map_err(|error| AppError::General(format!("读取 git {stream} 失败：{error}")))
+/// Collect piped output, giving up after `STREAM_DRAIN_TIMEOUT` once the
+/// producer stalls. Never blocks indefinitely on EOF.
+pub(crate) fn drain_stream(rx: Receiver<Vec<u8>>, cap: usize) -> Vec<u8> {
+    let mut out = Vec::new();
+    let deadline = Instant::now() + STREAM_DRAIN_TIMEOUT;
+    loop {
+        let now = Instant::now();
+        if now >= deadline || out.len() >= cap {
+            break;
+        }
+        match rx.recv_timeout(deadline - now) {
+            Ok(chunk) => {
+                let room = cap - out.len();
+                out.extend(chunk.into_iter().take(room));
+            }
+            Err(RecvTimeoutError::Timeout) | Err(RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    out
 }
 
 fn combine_output(stdout: &str, stderr: &str) -> String {
@@ -368,5 +405,39 @@ mod tests {
         assert_eq!(combine_output("ok\n", ""), "ok");
         assert_eq!(combine_output("", "progress\n"), "progress");
         assert_eq!(combine_output("ok\n", "progress\n"), "ok\nprogress");
+    }
+
+    #[test]
+    fn drains_all_chunks_then_stops_on_disconnect() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(b"hello ".to_vec()).unwrap();
+        tx.send(b"world".to_vec()).unwrap();
+        drop(tx);
+        assert_eq!(drain_stream(rx, 1024), b"hello world");
+    }
+
+    #[test]
+    fn drain_respects_capacity() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(vec![7u8; 32]).unwrap();
+        assert_eq!(drain_stream(rx, 8).len(), 8);
+    }
+
+    #[test]
+    fn drain_returns_partial_after_timeout_without_sender_eof() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(b"partial".to_vec()).unwrap();
+        // 发送端不关闭（模拟辅助进程长期持有管道写端）：应在超时后返回已有数据。
+        let out = drain_stream(rx, 1024);
+        assert_eq!(out, b"partial");
+        drop(tx);
+    }
+
+    #[test]
+    fn pipe_reader_forwards_written_bytes() {
+        use std::io::Cursor;
+        let (tx, rx) = mpsc::channel();
+        spawn_pipe_reader(Cursor::new(b"abc".to_vec()), tx);
+        assert_eq!(drain_stream(rx, 1024), b"abc");
     }
 }

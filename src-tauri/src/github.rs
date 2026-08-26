@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -27,16 +26,6 @@ fn sanitize_external_output(value: &str) -> String {
     let value = url_credentials.replace_all(value, "$1[REDACTED]@");
     let safe = sensitive.replace_all(&value, "$1=[REDACTED]");
     safe.chars().take(MAX_ERROR_OUTPUT).collect()
-}
-
-fn read_process_output(mut reader: impl Read) -> Vec<u8> {
-    let mut bytes = Vec::new();
-    let _ = reader
-        .by_ref()
-        .take((MAX_PROCESS_OUTPUT + 1) as u64)
-        .read_to_end(&mut bytes);
-    bytes.truncate(MAX_PROCESS_OUTPUT);
-    bytes
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -352,8 +341,12 @@ fn run_gh_process(
         .stderr
         .take()
         .ok_or_else(|| AppError::General("Cannot capture command error".into()))?;
-    let out = thread::spawn(move || read_process_output(stdout));
-    let err = thread::spawn(move || read_process_output(stderr));
+    // 限时收集：gh 派生的辅助进程若在 gh 退出后仍持有继承的管道写端，
+    // 等 EOF 会永久悬挂，超时后带已有输出返回。
+    let (out_tx, out_rx) = std::sync::mpsc::channel();
+    let (err_tx, err_rx) = std::sync::mpsc::channel();
+    crate::git::cli::spawn_pipe_reader(stdout, out_tx);
+    crate::git::cli::spawn_pipe_reader(stderr, err_tx);
     let start = Instant::now();
     let status = loop {
         match child.try_wait()? {
@@ -362,14 +355,18 @@ fn run_gh_process(
             None => {
                 let _ = child.kill();
                 let _ = child.wait();
+                crate::git::cli::drain_stream(out_rx, MAX_PROCESS_OUTPUT);
+                crate::git::cli::drain_stream(err_rx, MAX_PROCESS_OUTPUT);
                 return Err(AppError::General("gh command timed out".to_string()));
             }
         }
     };
+    let out = crate::git::cli::drain_stream(out_rx, MAX_PROCESS_OUTPUT);
+    let err = crate::git::cli::drain_stream(err_rx, MAX_PROCESS_OUTPUT);
     Ok((
         status.success(),
-        sanitize_external_output(&String::from_utf8_lossy(&out.join().unwrap_or_default())),
-        sanitize_external_output(&String::from_utf8_lossy(&err.join().unwrap_or_default())),
+        sanitize_external_output(&String::from_utf8_lossy(&out)),
+        sanitize_external_output(&String::from_utf8_lossy(&err)),
     ))
 }
 
