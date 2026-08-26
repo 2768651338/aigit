@@ -2,6 +2,8 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::Path;
 use std::process::{Command, ExitStatus, Stdio};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -16,6 +18,11 @@ pub const REMOTE_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_STREAM_BYTES: usize = 1024 * 1024;
 const MAX_DISPLAY_BYTES: usize = 16 * 1024;
 const MAX_PATHSPEC_BYTES: usize = 4096;
+
+// GUI 子系统进程派生控制台程序时，Windows 会为其分配新的控制台窗口；
+// CREATE_NO_WINDOW 抑制该窗口，避免 git 操作时反复弹出黑色命令框。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[derive(Debug)]
 pub struct GitOutput {
@@ -80,7 +87,8 @@ where
 {
     let args: Vec<OsString> = args.into_iter().map(Into::into).collect();
 
-    let mut child = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(&args)
         .current_dir(workdir)
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -91,13 +99,14 @@ where
         .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| {
-            AppError::General(format!(
-                "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{error}"
-            ))
-        })?;
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let mut child = command.spawn().map_err(|error| {
+        AppError::General(format!(
+            "无法调用 git 命令，请确认系统已安装 Git 并加入 PATH。错误：{error}"
+        ))
+    })?;
 
     let stdout = child
         .stdout

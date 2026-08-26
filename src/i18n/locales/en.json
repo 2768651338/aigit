@@ -64,7 +64,16 @@
   },
   "contextMenu": {
     "refreshStatus": "Refresh repository status",
-    "copy": "Copy"
+    "copy": "Copy",
+    "openInTerminal": "Open repository in Terminal",
+    "openOnGitHub": "Open repository on GitHub",
+    "openFailed": "Open failed"
+  },
+  "titleBar": {
+    "minimize": "Minimize",
+    "maximize": "Maximize",
+    "restore": "Restore",
+    "close": "Close"
   },
   "sidebar": {
     "openRepo": "Open repository",
@@ -565,6 +574,7 @@
     "themeSystem": "System",
     "fontSize": "Font Size: {{value}}px",
     "showDiffInline": "Show diff inline",
+    "rememberOpenRepos": "Remember open repositories and restore them on launch",
     "recentRepos": "Recent Repositories",
     "recentRepoOpen": "Click to open in a new tab",
     "recentRepoAlreadyOpen": "Open",

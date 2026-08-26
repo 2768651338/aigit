@@ -19,6 +19,11 @@ export const githubService = {
     ensureTauri();
     return invoke<GitHubRemote>("github_remote", { path, remote });
   },
+  /** Open the repository's web page (owner/repo root) in the browser. */
+  openRepo(path: string, remote?: string) {
+    ensureTauri();
+    return invoke<string>("github_open_repo", { path, remote });
+  },
   ghStatus(path: string, remote?: string) {
     ensureTauri();
     return invoke<GhStatus>("github_gh_status", { path, remote });

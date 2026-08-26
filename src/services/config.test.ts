@@ -30,7 +30,7 @@ function configWithStatus(deepseek: boolean): AppConfig {
         embedding_openai: false,
       },
     },
-    ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh" },
+    ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh", remember_open_repos: true },
     prompts: { commit_message: "", code_review: "", repo_chat: "" },
     index: {
       enabled: true,

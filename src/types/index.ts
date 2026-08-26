@@ -440,6 +440,8 @@ export interface UiConfig {
   font_size: number;
   show_diff_inline: boolean;
   language: string;
+  /** Persist open repository tabs and restore them on the next launch. */
+  remember_open_repos: boolean;
 }
 
 /**

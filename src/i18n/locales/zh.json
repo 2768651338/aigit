@@ -64,7 +64,16 @@
   },
   "contextMenu": {
     "refreshStatus": "刷新仓库状态",
-    "copy": "复制"
+    "copy": "复制",
+    "openInTerminal": "在终端中打开仓库",
+    "openOnGitHub": "在 GitHub 上打开仓库",
+    "openFailed": "打开失败"
+  },
+  "titleBar": {
+    "minimize": "最小化",
+    "maximize": "最大化",
+    "restore": "还原",
+    "close": "关闭"
   },
   "sidebar": {
     "openRepo": "打开仓库",
@@ -565,6 +574,7 @@
     "themeSystem": "跟随系统",
     "fontSize": "字体大小：{{value}}px",
     "showDiffInline": "内联显示 diff",
+    "rememberOpenRepos": "记住已打开的仓库，下次启动自动恢复",
     "recentRepos": "最近仓库",
     "recentRepoOpen": "点击在新标签中打开",
     "recentRepoAlreadyOpen": "已打开",

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoEntry } from "@/components/git/RepoEntryDialog";
+import { pathLeaf } from "@/utils/path";
 import type { ViewType } from "@/types";
 import {
   FileEditIcon,
@@ -39,12 +40,6 @@ const NAV_ITEMS: {
   { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "6" },
 ];
 
-/** Extract a human-readable repo name from an absolute path. */
-function repoName(path: string): string {
-  const parts = path.replace(/\\/g, "/").replace(/\/+$/, "").split("/");
-  return parts[parts.length - 1] || path;
-}
-
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const { t } = useTranslation();
   const {
@@ -68,11 +63,6 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
   return (
     <aside className="flex flex-col w-64 bg-bg-surface border-r border-border h-full">
-      {/* Logo */}
-      <div className="flex items-center gap-2 px-4 h-14 border-b border-border">
-        <span className="font-semibold text-base tracking-tight">aigit</span>
-      </div>
-
       {/* Scrollable middle region so many open repos don't clip the
           footer off-screen. */}
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -143,7 +133,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
             {tabOrder.map((path) => {
               const tab = tabs[path];
               const isActive = path === activePath;
-              const label = tab?.repoInfo?.name ?? repoName(path);
+              const label = tab?.repoInfo?.name ?? pathLeaf(path);
               const branch = tab?.repoInfo?.current_branch ?? null;
               return (
                 <div key={path} className="group relative">
@@ -225,7 +215,7 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
                     )}
                   >
                     <FolderIcon size={14} className="shrink-0 text-text-muted" />
-                    <span className="flex-1 truncate">{repoName(repo)}</span>
+                    <span className="flex-1 truncate">{pathLeaf(repo)}</span>
                     {isOpen && (
                       <CheckIcon size={12} className="shrink-0 text-accent" />
                     )}

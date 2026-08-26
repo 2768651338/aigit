@@ -25,9 +25,12 @@ pub fn github_remote(path: String, remote: Option<String>) -> AppResult<GitHubRe
 }
 
 #[tauri::command]
-pub fn github_gh_status(path: String, remote: Option<String>) -> AppResult<GhStatus> {
+pub async fn github_gh_status(path: String, remote: Option<String>) -> AppResult<GhStatus> {
     let (repo, remote) = context(&path, remote.as_deref())?;
-    Ok(github::gh_status(git::cli::workdir(&repo)?, &remote.host))
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    tokio::task::spawn_blocking(move || Ok(github::gh_status(&workdir, &remote.host)))
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -43,6 +46,20 @@ pub fn github_open_compare(
     app.opener()
         .open_url(&url, None::<&str>)
         .map_err(|e| AppError::General(format!("Cannot open GitHub compare URL: {e}")))?;
+    Ok(url)
+}
+
+#[tauri::command]
+pub fn github_open_repo(
+    app: AppHandle,
+    path: String,
+    remote: Option<String>,
+) -> AppResult<String> {
+    let (_, remote) = context(&path, remote.as_deref())?;
+    let url = remote.web_url();
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|e| AppError::General(format!("Cannot open repository URL: {e}")))?;
     Ok(url)
 }
 

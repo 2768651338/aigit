@@ -5,6 +5,7 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import type { AppConfig, AiProviderConfig, CredentialProvider, PromptsConfig, IndexStatus } from "@/types";
 import { codeIndexService } from "@/services/codeIndex";
+import { configService } from "@/services/config";
 import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon, GithubIcon, TrashIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
@@ -167,6 +168,16 @@ export function SettingsView() {
       if (!configSaved) {
         toast.error(useSettingsStore.getState().error ?? t("settings.saveFailed"), t("settings.saveFailed"));
         return;
+      }
+
+      // Disabling "remember open repos" also clears the remembered list so a
+      // later re-enable doesn't resurrect stale repos from previous sessions.
+      if (!local.ui.remember_open_repos) {
+        try {
+          await configService.setOpenRepos([], null);
+        } catch {
+          // Best-effort cleanup; the startup restore is skipped regardless.
+        }
       }
 
       for (const provider of ["openai", "claude", "deepseek"] as const) {
@@ -522,6 +533,17 @@ export function SettingsView() {
               />
               <span className="text-sm text-text-secondary">
                 {t("settings.showDiffInline")}
+              </span>
+            </label>
+            <label className="flex items-center gap-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={local.ui.remember_open_repos}
+                onChange={(e) => updateUi({ remember_open_repos: e.target.checked })}
+                className="accent-accent w-4 h-4"
+              />
+              <span className="text-sm text-text-secondary">
+                {t("settings.rememberOpenRepos")}
               </span>
             </label>
           </div>

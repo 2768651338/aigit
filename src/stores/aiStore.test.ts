@@ -43,7 +43,7 @@ const config: AppConfig = {
     max_context_tokens: 131072,
     credential_status: { openai: false, claude: false, deepseek: false, embedding_openai: false },
   },
-  ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh" },
+  ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh", remember_open_repos: true },
   prompts: { commit_message: "", code_review: "", repo_chat: "" },
   index: {
     enabled: true, never_upload_index: true, embedding_provider: "ollama",

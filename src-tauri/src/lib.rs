@@ -11,7 +11,7 @@ mod review;
 use chat_history::{
     clear_chat_history, delete_chat_session, load_chat_sessions, save_chat_session,
 };
-use commands::{ai_cmd, config_cmd, git_cmd, github_cmd, index_cmd, updater_cmd};
+use commands::{ai_cmd, config_cmd, git_cmd, github_cmd, index_cmd, system_cmd, updater_cmd};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -79,10 +79,13 @@ pub fn run() {
             git_cmd::create_tracking_branch,
             git_cmd::push_tag,
             git_cmd::delete_remote_tag,
+            // System integration
+            system_cmd::open_repo_in_terminal,
             // GitHub pull request workflow
             github_cmd::github_remote,
             github_cmd::github_gh_status,
             github_cmd::github_open_compare,
+            github_cmd::github_open_repo,
             github_cmd::github_pr_list,
             github_cmd::github_pr_view,
             github_cmd::github_pr_create,

@@ -16,6 +16,7 @@ import type {
 } from "@/types";
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
+import { appFlags } from "@/utils/appFlags";
 import { formatError } from "@/utils/error";
 
 /**
@@ -346,7 +347,13 @@ async function persistTabs(
   activePath: string | null,
 ): Promise<void> {
   try {
-    await configService.setOpenRepos(tabOrder, activePath);
+    // When "remember open repos" is off, persist an empty set so the next
+    // launch starts with no tabs. Defaults to remembering until App mirrors
+    // the loaded config into appFlags (matches the backend default).
+    await configService.setOpenRepos(
+      appFlags.rememberOpenRepos ? tabOrder : [],
+      appFlags.rememberOpenRepos ? activePath : null,
+    );
   } catch (e) {
     // Persistence is best-effort — don't block UI on config write failures.
     console.warn("[repoStore] Failed to persist open tabs:", e);

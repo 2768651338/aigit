@@ -81,6 +81,26 @@ export const MinusIcon = (p: IconProps) => (
   </Icon>
 );
 
+export const SquareIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect width="13" height="13" x="5.5" y="5.5" />
+  </Icon>
+);
+
+export const RestoreIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="8" y="8" width="13" height="13" rx="1.5" />
+    <path d="M4 16V5.5A1.5 1.5 0 0 1 5.5 4H16" />
+  </Icon>
+);
+
+export const TerminalIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <polyline points="4 17 10 11 4 5" />
+    <line x1="12" x2="20" y1="19" y2="19" />
+  </Icon>
+);
+
 export const CheckIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="M20 6 9 17l-5-5" />

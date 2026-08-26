@@ -49,15 +49,32 @@ impl GitTaskRegistry {
     }
 }
 
-fn run_remote_task<T>(
+/// 在阻塞线程池执行 git 操作，避免长任务阻塞 Tauri 主线程导致窗口卡死。
+async fn run_git_blocking<T, F>(action: F) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> AppResult<T> + Send + 'static,
+{
+    tokio::task::spawn_blocking(action)
+        .await
+        .map_err(|e| AppError::General(format!("Git 后台任务线程异常退出：{e}")))?
+}
+
+async fn run_remote_task<T, F>(
     registry: &GitTaskRegistry,
     task_id: &str,
-    action: impl FnOnce(Arc<AtomicBool>) -> AppResult<T>,
-) -> AppResult<T> {
+    action: F,
+) -> AppResult<T>
+where
+    T: Send + 'static,
+    F: FnOnce(Arc<AtomicBool>) -> AppResult<T> + Send + 'static,
+{
     let cancellation = registry.start(task_id)?;
-    let result = action(cancellation);
+    let joined = tokio::task::spawn_blocking(move || action(cancellation))
+        .await
+        .map_err(|e| AppError::General(format!("Git 后台任务线程异常退出：{e}")));
     registry.finish(task_id);
-    result
+    joined?
 }
 
 fn parse_insights_date(value: Option<String>, field: &str) -> AppResult<Option<NaiveDate>> {
@@ -101,8 +118,8 @@ pub fn init_repo(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn clone_repo(url: String, target_path: String) -> AppResult<()> {
-    git::repo::clone_repo(&url, &target_path)
+pub async fn clone_repo(url: String, target_path: String) -> AppResult<()> {
+    run_git_blocking(move || git::repo::clone_repo(&url, &target_path)).await
 }
 
 #[tauri::command]
@@ -335,39 +352,48 @@ pub fn set_upstream(
 }
 
 #[tauri::command]
-pub fn fetch(
+pub async fn fetch(
     path: String,
     remote: Option<String>,
     prune: Option<bool>,
     tags: Option<bool>,
 ) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::remote::fetch(
-        &repo,
-        remote.as_deref(),
-        prune.unwrap_or(false),
-        tags.unwrap_or(false),
-    )
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::fetch(
+            &repo,
+            remote.as_deref(),
+            prune.unwrap_or(false),
+            tags.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn push(
+pub async fn push(
     path: String,
     remote: Option<String>,
     remote_branch: Option<String>,
 ) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::remote::push_current_branch(&repo, remote.as_deref(), remote_branch.as_deref())
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::push_current_branch(&repo, remote.as_deref(), remote_branch.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn pull(path: String) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::remote::pull_current_branch(&repo)
+pub async fn pull(path: String) -> AppResult<String> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::pull_current_branch(&repo)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn fetch_task(
+pub async fn fetch_task(
     path: String,
     remote: Option<String>,
     prune: Option<bool>,
@@ -375,7 +401,7 @@ pub fn fetch_task(
     task_id: String,
     registry: tauri::State<'_, GitTaskRegistry>,
 ) -> AppResult<String> {
-    run_remote_task(&registry, &task_id, move |cancellation| {
+    run_remote_task(registry.inner(), &task_id, move |cancellation| {
         let repo = git::repo::open_repo(&path)?;
         git::remote::fetch_cancellable(
             &repo,
@@ -385,17 +411,18 @@ pub fn fetch_task(
             Some(cancellation),
         )
     })
+    .await
 }
 
 #[tauri::command]
-pub fn push_task(
+pub async fn push_task(
     path: String,
     remote: Option<String>,
     remote_branch: Option<String>,
     task_id: String,
     registry: tauri::State<'_, GitTaskRegistry>,
 ) -> AppResult<String> {
-    run_remote_task(&registry, &task_id, move |cancellation| {
+    run_remote_task(registry.inner(), &task_id, move |cancellation| {
         let repo = git::repo::open_repo(&path)?;
         git::remote::push_current_branch_cancellable(
             &repo,
@@ -404,18 +431,20 @@ pub fn push_task(
             Some(cancellation),
         )
     })
+    .await
 }
 
 #[tauri::command]
-pub fn pull_task(
+pub async fn pull_task(
     path: String,
     task_id: String,
     registry: tauri::State<'_, GitTaskRegistry>,
 ) -> AppResult<String> {
-    run_remote_task(&registry, &task_id, move |cancellation| {
+    run_remote_task(registry.inner(), &task_id, move |cancellation| {
         let repo = git::repo::open_repo(&path)?;
         git::remote::pull_current_branch_cancellable(&repo, Some(cancellation))
     })
+    .await
 }
 
 #[tauri::command]
@@ -437,15 +466,21 @@ pub fn create_tracking_branch(
 }
 
 #[tauri::command]
-pub fn push_tag(path: String, remote: String, tag: String) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::remote::push_tag(&repo, &remote, &tag)
+pub async fn push_tag(path: String, remote: String, tag: String) -> AppResult<String> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::push_tag(&repo, &remote, &tag)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn delete_remote_tag(path: String, remote: String, tag: String) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::remote::delete_remote_tag(&repo, &remote, &tag)
+pub async fn delete_remote_tag(path: String, remote: String, tag: String) -> AppResult<String> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::remote::delete_remote_tag(&repo, &remote, &tag)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -525,20 +560,26 @@ pub fn list_submodules(path: String) -> AppResult<Vec<git::SubmoduleInfo>> {
 }
 
 #[tauri::command]
-pub fn update_submodule(path: String, name: Option<String>) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::submodule::update_submodule(&repo, name.as_deref())
+pub async fn update_submodule(path: String, name: Option<String>) -> AppResult<String> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::submodule::update_submodule(&repo, name.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn add_submodule(
+pub async fn add_submodule(
     path: String,
     url: String,
     target_path: String,
     branch: Option<String>,
 ) -> AppResult<String> {
-    let repo = git::repo::open_repo(&path)?;
-    git::submodule::add_submodule(&repo, &url, &target_path, branch.as_deref())
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        git::submodule::add_submodule(&repo, &url, &target_path, branch.as_deref())
+    })
+    .await
 }
 
 #[tauri::command]

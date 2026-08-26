@@ -320,20 +320,30 @@ pub fn discover(repo: &Repository, preferred: Option<&str>) -> AppResult<GitHubR
     Err(last_error.unwrap_or_else(|| AppError::General("No GitHub remote found".into())))
 }
 
-fn run_process(
-    program: &str,
+fn run_gh_process(
     workdir: &Path,
     args: &[String],
     timeout: Duration,
 ) -> AppResult<(bool, String, String)> {
-    let mut child = Command::new(program)
+    // 安全边界：只执行编译期字面量二进制 "gh"，参数以 argv 数组逐个传递，
+    // 全程不经过 shell，仓库内容无法注入或篡改命令。
+    // CREATE_NO_WINDOW（仅 Windows）：抑制 GUI 进程派生 CLI 时的控制台窗口闪烁。
+    let mut command = Command::new("gh");
+    command
         .args(args)
         .current_dir(workdir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command
         .spawn()
-        .map_err(|e| AppError::General(format!("{program} is not available: {e}")))?;
+        .map_err(|e| AppError::General(format!("gh is not available: {e}")))?;
     let stdout = child
         .stdout
         .take()
@@ -352,7 +362,7 @@ fn run_process(
             None => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(AppError::General(format!("{program} command timed out")));
+                return Err(AppError::General("gh command timed out".to_string()));
             }
         }
     };
@@ -365,7 +375,7 @@ fn run_process(
 
 pub fn gh_status(workdir: &Path, host: &str) -> GhStatus {
     let version_args = vec!["--version".into()];
-    let Ok((ok, version, _)) = run_process("gh", workdir, &version_args, Duration::from_secs(10))
+    let Ok((ok, version, _)) = run_gh_process(workdir, &version_args, Duration::from_secs(10))
     else {
         return GhStatus {
             installed: false,
@@ -388,7 +398,7 @@ pub fn gh_status(workdir: &Path, host: &str) -> GhStatus {
         "--hostname".into(),
         host.into(),
     ];
-    match run_process("gh", workdir, &auth_args, Duration::from_secs(15)) {
+    match run_gh_process(workdir, &auth_args, Duration::from_secs(15)) {
         Ok((true, _, _)) => GhStatus {
             installed: true,
             authenticated: true,
@@ -411,7 +421,7 @@ pub fn gh_status(workdir: &Path, host: &str) -> GhStatus {
 }
 
 fn gh_json<T: DeserializeOwned>(workdir: &Path, args: Vec<String>) -> AppResult<T> {
-    let (ok, stdout, stderr) = run_process("gh", workdir, &args, GH_TIMEOUT)?;
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
     if !ok {
         return Err(AppError::General(format!(
             "GitHub CLI failed: {}",
@@ -539,7 +549,7 @@ pub fn gh_checks(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResul
         "--json".into(),
         "name,state,link".into(),
     ];
-    let (ok, stdout, stderr) = run_process("gh", workdir, &args, GH_TIMEOUT)?;
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
     // `gh pr checks` exits non-zero when a completed check failed, while its
     // JSON output is still complete and useful to the UI.
     let rows: Vec<GhCheck> = serde_json::from_str(&stdout).map_err(|error| {
@@ -592,7 +602,7 @@ pub fn gh_create(
     if input.draft {
         args.push("--draft".into())
     }
-    let (ok, stdout, stderr) = run_process("gh", workdir, &args, GH_TIMEOUT)?;
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
     if !ok {
         return Err(AppError::General(format!(
             "GitHub CLI failed: {}",
@@ -632,7 +642,7 @@ pub fn gh_checkout(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppRes
         remote.repository(),
         "--force".into(),
     ];
-    let (ok, out, err) = run_process("gh", workdir, &args, GH_TIMEOUT)?;
+    let (ok, out, err) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
     if ok {
         Ok(if out.trim().is_empty() { err } else { out })
     } else {

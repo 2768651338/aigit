@@ -119,6 +119,10 @@ pub struct UiConfig {
     pub show_diff_inline: bool,
     #[serde(default = "default_language")]
     pub language: String,
+    /// Remember open repository tabs across restarts. Defaults to true for
+    /// configs written before this switch existed.
+    #[serde(default = "default_true")]
+    pub remember_open_repos: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -139,6 +143,10 @@ struct LegacyConfigSecrets {
 
 fn default_language() -> String {
     "zh".to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for AiProviderConfig {
@@ -168,6 +176,7 @@ impl Default for UiConfig {
             font_size: 14,
             show_diff_inline: true,
             language: default_language(),
+            remember_open_repos: true,
         }
     }
 }
@@ -393,6 +402,39 @@ mod tests {
         assert!(fs::read_to_string(&path)
             .unwrap()
             .contains("http://api.example.test/v1"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn remember_open_repos_defaults_true_for_older_configs() {
+        let path = test_path("remember-open-repos-default");
+        fs::write(
+            &path,
+            "[ui]\ntheme = \"dark\"\nfont_size = 14\nshow_diff_inline = true\n",
+        )
+        .expect("write legacy config");
+        let store = MemoryCredentialStore::default();
+
+        let config = AppConfig::load_from(&path, &store).expect("load legacy config");
+        assert!(config.ui.remember_open_repos);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn remember_open_repos_round_trips_explicit_false() {
+        let path = test_path("remember-open-repos-off");
+        fs::write(
+            &path,
+            "[ui]\ntheme = \"dark\"\nfont_size = 14\nshow_diff_inline = true\nremember_open_repos = false\n",
+        )
+        .expect("write config");
+        let store = MemoryCredentialStore::default();
+
+        let config = AppConfig::load_from(&path, &store).expect("load config");
+        assert!(!config.ui.remember_open_repos);
+        config.save_to(&path).expect("save config");
+        let reloaded = AppConfig::load_from(&path, &store).expect("reload config");
+        assert!(!reloaded.ui.remember_open_repos);
         let _ = fs::remove_file(path);
     }
 

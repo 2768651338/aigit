@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import "@/i18n";
 import { useTranslation } from "react-i18next";
 import { Sidebar } from "@/components/layout/Sidebar";
+import { TitleBar } from "@/components/layout/TitleBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
 import { RepoEntryProvider } from "@/components/git/RepoEntryDialog";
@@ -11,7 +12,7 @@ import {
   useContextMenu,
   type MenuItem,
 } from "@/components/common/ContextMenu";
-import { RefreshIcon, CopyIcon } from "@/components/common/Icons";
+import { RefreshIcon, CopyIcon, GithubIcon, TerminalIcon } from "@/components/common/Icons";
 import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
 import { ReviewView } from "@/pages/ReviewView";
@@ -21,7 +22,12 @@ import { SettingsView } from "@/pages/SettingsView";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { gitService } from "@/services/git";
+import { githubService } from "@/services/github";
+import { systemService } from "@/services/system";
+import { useToastStore } from "@/stores/toastStore";
+import { formatError } from "@/utils/error";
 import { applyTheme, type ThemeMode } from "@/utils/theme";
+import { appFlags } from "@/utils/appFlags";
 import type { ViewType } from "@/types";
 
 export default function App() {
@@ -40,6 +46,7 @@ function AppShell() {
   const { config, loadConfig } = useSettingsStore();
   const { openRepo, setActiveRepo, currentPath, refreshStatus } = useRepoStore();
   const { show: showMenu } = useContextMenu();
+  const toast = useToastStore();
   // Guard against re-opening tabs on every config change.
   const hasRestoredRef = useRef(false);
 
@@ -47,10 +54,12 @@ function AppShell() {
     loadConfig();
   }, [loadConfig]);
 
-  // Apply font size from config
+  // Apply font size from config, and mirror the "remember open repos"
+  // setting for repoStore's persistence layer (see utils/appFlags).
   useEffect(() => {
     if (config) {
       document.documentElement.style.fontSize = `${config.ui.font_size}px`;
+      appFlags.rememberOpenRepos = config.ui.remember_open_repos;
     }
   }, [config]);
 
@@ -98,12 +107,19 @@ function AppShell() {
 
   // Restore the set of open tabs from the previous session.
   // Falls back to recent_repos[0] for older configs that predate open_repos.
+  // Must wait until config has loaded: on first mount `config` is still
+  // null (loadConfig is async), and restoring from that empty snapshot
+  // would silently skip the saved tabs.
   useEffect(() => {
-    if (hasRestoredRef.current) return;
-    const openRepos = config?.open_repos ?? [];
-    const activeRepo = config?.active_repo ?? null;
-    const recentFirst = config?.recent_repos?.[0];
+    if (!config || hasRestoredRef.current) return;
     hasRestoredRef.current = true;
+
+    // Respect the "remember open repos" setting.
+    if (!config.ui.remember_open_repos) return;
+
+    const openRepos = config.open_repos ?? [];
+    const activeRepo = config.active_repo ?? null;
+    const recentFirst = config.recent_repos?.[0];
 
     (async () => {
       // Prefer the saved tab list; otherwise restore just the last repo.
@@ -149,6 +165,25 @@ function AppShell() {
         icon: <RefreshIcon size={14} />,
         onClick: () => refreshStatus(),
       });
+      // Repo-wide integrations available anywhere in the shell.
+      items.push({
+        label: t("contextMenu.openInTerminal"),
+        icon: <TerminalIcon size={14} />,
+        onClick: () => {
+          void systemService
+            .openInTerminal(currentPath)
+            .catch((e) => toast.error(formatError(e), t("contextMenu.openFailed")));
+        },
+      });
+      items.push({
+        label: t("contextMenu.openOnGitHub"),
+        icon: <GithubIcon size={14} />,
+        onClick: () => {
+          void githubService
+            .openRepo(currentPath)
+            .catch((e) => toast.error(formatError(e), t("contextMenu.openFailed")));
+        },
+      });
     }
     // 文本选中时提供「复制」
     const selection = window.getSelection?.();
@@ -172,6 +207,7 @@ function AppShell() {
         className="flex flex-col h-screen bg-bg-base text-text-primary"
         onContextMenu={handleContextMenu}
       >
+        <TitleBar />
         <div className="flex flex-1 overflow-hidden">
           <Sidebar activeView={activeView} onViewChange={setActiveView} />
           <main className="flex-1 flex flex-col overflow-hidden">
