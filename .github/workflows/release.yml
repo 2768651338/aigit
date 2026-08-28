@@ -53,7 +53,11 @@ jobs:
             throw "Tag ${{ github.ref_name }} does not match project version v$version"
           }
 
+      # 更新器签名是可选能力：仓库未配置 TAURI_UPDATER_ENDPOINT 等变量时跳过
+      # 以下两步，发布不带更新器清单的安装包（与历史版本行为一致）。
+      # 配置了 endpoint 但缺少 pubkey/私钥时，configure-updater.mjs 仍会报错拦截。
       - name: Configure signed updater artifacts
+        if: vars.TAURI_UPDATER_ENDPOINT != ''
         shell: pwsh
         env:
           UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
@@ -86,6 +90,7 @@ jobs:
           $lines | Set-Content -Encoding ascii release-assets/SHA256SUMS.txt
 
       - name: Generate signed updater manifest
+        if: vars.TAURI_UPDATER_ENDPOINT != ''
         shell: pwsh
         env:
           UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
