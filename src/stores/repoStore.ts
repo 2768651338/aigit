@@ -214,6 +214,25 @@ function getTab(
 }
 
 /**
+ * Latest status-request sequence number per repo path. `refreshStatus(true)`
+ * bypasses the `refreshing` guard and can overlap an in-flight poll, so the
+ * older request's response would otherwise land *after* the newer one and
+ * overwrite fresh data with stale data ("edits made but UI shows no changes").
+ * Responses are only applied when their sequence is still the newest.
+ */
+const statusRequestSeq = new Map<string, number>();
+
+function nextStatusSeq(path: string): number {
+  const next = (statusRequestSeq.get(path) ?? 0) + 1;
+  statusRequestSeq.set(path, next);
+  return next;
+}
+
+function isLatestStatusSeq(path: string, seq: number): boolean {
+  return statusRequestSeq.get(path) === seq;
+}
+
+/**
  * Shallow-compare two file-status arrays. Used by `refreshStatus` to skip
  * state updates when the 5-second polling returns identical data, which
  * prevents unnecessary re-renders (UI thrash).
@@ -538,8 +557,12 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     )
       return;
     updateTab(set, get, activePath, { refreshing: true });
+    const seq = nextStatusSeq(activePath);
     try {
       const statuses = await gitService.getStatus(activePath);
+      // A newer refresh superseded this one — drop the stale response instead
+      // of overwriting fresher state.
+      if (!isLatestStatusSeq(activePath, seq)) return;
       // Shallow-compare with current data — skip the state update if nothing
       // changed so the polling doesn't trigger unnecessary re-renders.
       const current = get().tabs[activePath]?.fileStatuses ?? [];
@@ -547,9 +570,15 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
         updateTab(set, get, activePath, { fileStatuses: statuses });
       }
     } catch (e) {
+      if (!isLatestStatusSeq(activePath, seq)) return;
       updateTab(set, get, activePath, { error: formatError(e) });
     } finally {
-      updateTab(set, get, activePath, { refreshing: false });
+      // Only the newest request may clear `refreshing`; an older request
+      // finishing late must not unlock polling while a newer one is in
+      // flight.
+      if (isLatestStatusSeq(activePath, seq)) {
+        updateTab(set, get, activePath, { refreshing: false });
+      }
     }
   },
 

@@ -47,6 +47,9 @@ export function ChangesView() {
 
   useEffect(() => {
     if (currentPath) {
+      // Refresh immediately on mount/tab switch — the interval alone leaves
+      // the previous tab snapshot visible for up to 5 seconds.
+      void refreshStatus(true);
       const interval = setInterval(refreshStatus, 5000);
       return () => clearInterval(interval);
     }
@@ -154,7 +157,7 @@ export function ChangesView() {
         <h2 className="text-base font-semibold">{t("changes.title")}</h2>
         <div className="flex-1" />
         <button
-          onClick={() => refreshStatus()}
+          onClick={() => refreshStatus(true)}
           disabled={refreshing}
           aria-busy={refreshing}
           className="btn-ghost"

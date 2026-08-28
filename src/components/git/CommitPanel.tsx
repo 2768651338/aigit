@@ -148,6 +148,9 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
 
   const handleCommit = async () => {
     if (!message.trim()) return;
+    // Capture before setAmendMode(false) below — the success toast must
+    // reflect the operation that actually ran, not the post-reset state.
+    const wasAmend = amendMode;
     setCommitting(true);
     try {
       if (amendMode) {
@@ -171,7 +174,7 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       setAmendMode(false);
       setIncludeStagedInAmend(false);
       // commit()/amend() already refresh status and log internally.
-      toast.success(t(amendMode ? "commit.amendSuccess" : "commit.commitSuccess"));
+      toast.success(t(wasAmend ? "commit.amendSuccess" : "commit.commitSuccess"));
     } catch (e) {
       const msg = formatError(e);
       console.error("[aigit] commit failed:", e);
@@ -208,7 +211,10 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
         setPushError(msg);
         toast.error(msg, t("commit.pushFailed"));
       }
-      await refreshStatus();
+      // Force: commit() already refreshed internally, but the push above may
+      // have taken a while — make sure the final status refresh can't be
+      // swallowed by an in-flight poll guard.
+      await refreshStatus(true);
     } catch (e) {
       // commit failed (push was not attempted)
       const msg = formatError(e);

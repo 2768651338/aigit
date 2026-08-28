@@ -98,11 +98,35 @@ function AppShell() {
         }
       } else if (e.key === "r" || e.key === "R") {
         e.preventDefault();
-        useRepoStore.getState().refreshStatus();
+        // Force: a non-forced call can be silently swallowed while another
+        // refresh (or a commit/push) is in flight, and a manual refresh must
+        // never be a no-op.
+        useRepoStore.getState().refreshStatus(true);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Refresh repo status when the window regains focus or becomes visible
+  // again. External file edits produce no in-app event, and WebView2
+  // throttles background timers, so without this the changes list can keep
+  // showing a stale "no changes" snapshot after the user switches back.
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        useRepoStore.getState().refreshStatus(true);
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   // Restore the set of open tabs from the previous session.
@@ -163,7 +187,7 @@ function AppShell() {
       items.push({
         label: t("contextMenu.refreshStatus"),
         icon: <RefreshIcon size={14} />,
-        onClick: () => refreshStatus(),
+        onClick: () => refreshStatus(true),
       });
       // Repo-wide integrations available anywhere in the shell.
       items.push({

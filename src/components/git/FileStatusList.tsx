@@ -156,7 +156,7 @@ export function FileStatusList({ staged }: FileStatusListProps) {
       items.push({
         label: t("contextMenu.refreshStatus"),
         icon: <RefreshIcon size={14} />,
-        onClick: () => refreshStatus(),
+        onClick: () => refreshStatus(true),
       });
     }
 
@@ -188,7 +188,9 @@ export function FileStatusList({ staged }: FileStatusListProps) {
     if (!currentPath || patterns.length === 0) return;
     try {
       const added = await gitService.addGitignoreEntries(currentPath, patterns);
-      await refreshStatus();
+      // Force: a poll may be in flight; its pre-gitignore response must not
+      // silently swallow this refresh.
+      await refreshStatus(true);
       if (added.length === 0) {
         toast.info(t("fileList.ignoreAlready"));
         return;
