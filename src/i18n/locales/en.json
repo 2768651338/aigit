@@ -83,7 +83,8 @@
     "changesCount": "{{count}} changes",
     "recentRepos": "Recent",
     "openRepos": "Open repositories",
-    "closeRepo": "Close repository"
+    "closeRepo": "Close repository",
+    "dragReorderHint": "Drag to reorder"
   },
   "tabs": {
     "close": "Close tab",

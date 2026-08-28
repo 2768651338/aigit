@@ -50,11 +50,26 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     activePath,
     setActiveRepo,
     closeRepoTab,
+    moveRepoTab,
   } = useRepoStore();
   const { config } = useSettingsStore();
   const { showRepoEntry } = useRepoEntry();
   const changedCount = fileStatuses.length;
   const [recentCollapsed, setRecentCollapsed] = useState(false);
+  // Drag-to-reorder state for the open-repo list. `draggingPath` is the row
+  // being dragged; `dropHint` only drives the insertion indicator — the drop
+  // position itself is recomputed from the event so a stale hint can't
+  // misplace a repo.
+  const [draggingPath, setDraggingPath] = useState<string | null>(null);
+  const [dropHint, setDropHint] = useState<{
+    path: string;
+    before: boolean;
+  } | null>(null);
+
+  const clearDragState = () => {
+    setDraggingPath(null);
+    setDropHint(null);
+  };
 
   // Show up to 5 recent repos. Already-open repos are still listed (with a
   // visual marker) so the user can see their status at a glance.
@@ -105,7 +120,10 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
           the list is empty. */}
       <div className="px-3 pb-2" aria-label={t("sidebar.openRepos")}>
         <div className="flex items-center justify-between pl-3 pr-1 py-1">
-          <span className="text-2xs font-semibold uppercase tracking-wider text-text-muted">
+          <span
+            className="text-2xs font-semibold uppercase tracking-wider text-text-muted"
+            title={tabOrder.length > 1 ? t("sidebar.dragReorderHint") : undefined}
+          >
             {t("sidebar.openRepos")}
           </span>
           <button
@@ -135,8 +153,66 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
               const isActive = path === activePath;
               const label = tab?.repoInfo?.name ?? pathLeaf(path);
               const branch = tab?.repoInfo?.current_branch ?? null;
+              const isDragging = draggingPath === path;
+              const showHintBefore = dropHint?.path === path && dropHint.before;
+              const showHintAfter = dropHint?.path === path && !dropHint.before;
               return (
-                <div key={path} className="group relative">
+                <div
+                  key={path}
+                  className={clsx("group relative", isDragging && "opacity-50")}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.setData("text/plain", path);
+                    e.dataTransfer.effectAllowed = "move";
+                    setDraggingPath(path);
+                  }}
+                  onDragOver={(e) => {
+                    // The dragged row itself is not a drop target; without
+                    // preventDefault the browser shows a "no drop" cursor.
+                    if (draggingPath === null || draggingPath === path) return;
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const before =
+                      e.clientY < rect.top + rect.height / 2;
+                    setDropHint((prev) =>
+                      prev?.path === path && prev.before === before
+                        ? prev
+                        : { path, before },
+                    );
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDragLeave={() => {
+                    // Sibling transitions fire leave for the old row after
+                    // the new row's over — only clear our own hint.
+                    setDropHint((prev) => (prev?.path === path ? null : prev));
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    if (draggingPath !== null && draggingPath !== path) {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const before = e.clientY < rect.top + rect.height / 2;
+                      moveRepoTab(
+                        draggingPath,
+                        path,
+                        before ? "before" : "after"
+                      );
+                    }
+                    clearDragState();
+                  }}
+                  onDragEnd={clearDragState}
+                >
+                  {showHintBefore && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute -top-px left-2 right-2 z-10 h-0.5 rounded bg-accent"
+                    />
+                  )}
+                  {showHintAfter && (
+                    <span
+                      aria-hidden
+                      className="pointer-events-none absolute -bottom-px left-2 right-2 z-10 h-0.5 rounded bg-accent"
+                    />
+                  )}
                   <button
                     type="button"
                     onClick={() => setActiveRepo(path)}

@@ -75,6 +75,12 @@ interface RepoStoreState extends ActiveTabProjection {
   closeRepoTab: (path: string) => Promise<void>;
   /** Switch the active tab. */
   setActiveRepo: (path: string) => void;
+  /**
+   * Reorder the open-repo list by moving `draggedPath` before/after
+   * `targetPath`. No-op when either path is unknown, both match, or the
+   * resulting order is unchanged.
+   */
+  moveRepoTab: (draggedPath: string, targetPath: string, position: "before" | "after") => void;
 
   // Per-tab state setters (operate on the active tab)
   setCommitMessage: (message: string) => void;
@@ -483,6 +489,28 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
       ...projectActiveTab(tabs, path),
     });
     void persistTabs(get().tabOrder, path);
+  },
+
+  moveRepoTab: (draggedPath, targetPath, position) => {
+    const { tabOrder, activePath } = get();
+    if (draggedPath === targetPath) return;
+    if (!tabOrder.includes(draggedPath) || !tabOrder.includes(targetPath))
+      return;
+    const withoutDragged = tabOrder.filter((p) => p !== draggedPath);
+    const targetIdx = withoutDragged.indexOf(targetPath);
+    if (targetIdx === -1) return;
+    const insertAt = position === "after" ? targetIdx + 1 : targetIdx;
+    // Re-attaching at the dragged item's original slot is not a reorder —
+    // skip the state update and the config write entirely.
+    const nextTabOrder = [...withoutDragged];
+    nextTabOrder.splice(insertAt, 0, draggedPath);
+    if (
+      nextTabOrder.length === tabOrder.length &&
+      nextTabOrder.every((p, i) => p === tabOrder[i])
+    )
+      return;
+    set({ tabOrder: nextTabOrder });
+    void persistTabs(nextTabOrder, activePath);
   },
 
   setCommitMessage: (message: string) => {

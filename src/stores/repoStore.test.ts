@@ -145,3 +145,52 @@ describe("repoStore cross-tab async isolation", () => {
     expect(git.getStatus).not.toHaveBeenCalledWith("/closed");
   });
 });
+
+describe("repoStore moveRepoTab", () => {
+  function seed(tabOrder: string[], activePath: string | null) {
+    useRepoStore.setState({ tabOrder, activePath });
+  }
+
+  it("moves a repo before the target and persists the new order", () => {
+    seed(["/a", "/b", "/c"], "/a");
+    useRepoStore.getState().moveRepoTab("/c", "/a", "before");
+    expect(useRepoStore.getState().tabOrder).toEqual(["/c", "/a", "/b"]);
+    expect(config.setOpenRepos).toHaveBeenCalledWith(["/c", "/a", "/b"], "/a");
+  });
+
+  it("moves a repo after the target (lower half drop)", () => {
+    seed(["/a", "/b", "/c"], "/c");
+    useRepoStore.getState().moveRepoTab("/a", "/b", "after");
+    expect(useRepoStore.getState().tabOrder).toEqual(["/b", "/a", "/c"]);
+    expect(config.setOpenRepos).toHaveBeenCalledWith(["/b", "/a", "/c"], "/c");
+  });
+
+  it("keeps the active tab active after reordering", () => {
+    seed(["/a", "/b"], "/b");
+    useRepoStore.getState().moveRepoTab("/b", "/a", "before");
+    expect(useRepoStore.getState().activePath).toBe("/b");
+  });
+
+  it("ignores dropping a repo onto itself", () => {
+    seed(["/a", "/b"], "/a");
+    useRepoStore.getState().moveRepoTab("/a", "/a", "before");
+    expect(useRepoStore.getState().tabOrder).toEqual(["/a", "/b"]);
+    expect(config.setOpenRepos).not.toHaveBeenCalled();
+  });
+
+  it("ignores a drop that restores the original position", () => {
+    seed(["/a", "/b", "/c"], "/a");
+    useRepoStore.getState().moveRepoTab("/a", "/b", "before");
+    useRepoStore.getState().moveRepoTab("/b", "/a", "after");
+    expect(useRepoStore.getState().tabOrder).toEqual(["/a", "/b", "/c"]);
+    expect(config.setOpenRepos).not.toHaveBeenCalled();
+  });
+
+  it("ignores unknown repo paths", () => {
+    seed(["/a", "/b"], "/a");
+    useRepoStore.getState().moveRepoTab("/missing", "/a", "before");
+    useRepoStore.getState().moveRepoTab("/a", "/missing", "after");
+    expect(useRepoStore.getState().tabOrder).toEqual(["/a", "/b"]);
+    expect(config.setOpenRepos).not.toHaveBeenCalled();
+  });
+});
