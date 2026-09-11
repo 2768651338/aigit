@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use git2::Repository;
 
@@ -66,6 +66,7 @@ fn append_entries(file: &Path, entries: &[String]) -> AppResult<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     struct TempDir(PathBuf);
 
