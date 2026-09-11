@@ -27,6 +27,14 @@
 
 - 侧边栏"打开的仓库"列表支持鼠标拖动调整排序：拖动中显示半透明行与插入位置指示线，顺序随打开仓库配置一并持久化；同时为窗口内 HTML5 拖放启用 Tauri `dragDropEnabled: false` 并全局兜底拦截外部文件拖入，防止 WebView 误导航。
 
+## [1.0.10] - 2026-09-11
+
+### Fixed
+
+- 关于页版本号改为构建期注入（`check:version` 保证与 tauri.conf/Cargo 同源），修复始终显示 v1.0.4、不随发版更新的问题。
+- 依赖安全修复：升级 h2 至 0.4.19（RUSTSEC-2026-0258，经 reqwest 引入）；npm 侧非破坏性升级 browserslist、nanoid（高危）与 postcss、baseline-browser-mapping；vitest 链的 2 个 moderate 需大版本升级，暂保留。
+- 恢复 CI 的 rustfmt/clippy 检查通过：全量 `cargo fmt` 格式化，`PathBuf` 导入移入测试模块。
+
 ## [1.0.9] - 2026-09-11
 
 ### Fixed
@@ -62,6 +70,7 @@
 - AI 与 GitHub 凭据保存在 Windows Credential Manager；支持迁移旧明文 API Key。
 - 对命令参数、remote/ref、审查输出、索引大小与敏感文件执行校验和限制。
 
-[Unreleased]: https://github.com/2768651338/aigit/compare/v1.0.9...HEAD
+[Unreleased]: https://github.com/2768651338/aigit/compare/v1.0.10...HEAD
+[1.0.10]: https://github.com/2768651338/aigit/releases/tag/v1.0.10
 [1.0.9]: https://github.com/2768651338/aigit/releases/tag/v1.0.9
 [1.0.4]: https://github.com/2768651338/aigit/releases/tag/v1.0.4
