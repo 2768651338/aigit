@@ -27,6 +27,14 @@
 
 - 侧边栏"打开的仓库"列表支持鼠标拖动调整排序：拖动中显示半透明行与插入位置指示线，顺序随打开仓库配置一并持久化；同时为窗口内 HTML5 拖放启用 Tauri `dragDropEnabled: false` 并全局兜底拦截外部文件拖入，防止 WebView 误导航。
 
+## [1.0.9] - 2026-09-11
+
+### Fixed
+
+- 历史详情面板展示提交的完整信息：主题完整换行显示，多行提交的正文不再被省略（此前仅显示首行截断）；历史搜索同时匹配正文内容。
+- 修复标题栏品牌区无法从 "aigit" 标签上发起窗口拖动的问题，并补齐 start-dragging 窗口权限。
+- 修复提交/amend/提交并推送流程中切换仓库标签导致忙碌与错误状态错位：状态现钉定在发起操作的仓库上。
+
 ## [Unreleased]
 
 ### Added
@@ -54,5 +62,6 @@
 - AI 与 GitHub 凭据保存在 Windows Credential Manager；支持迁移旧明文 API Key。
 - 对命令参数、remote/ref、审查输出、索引大小与敏感文件执行校验和限制。
 
-[Unreleased]: https://github.com/2768651338/aigit/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/2768651338/aigit/compare/v1.0.9...HEAD
+[1.0.9]: https://github.com/2768651338/aigit/releases/tag/v1.0.9
 [1.0.4]: https://github.com/2768651338/aigit/releases/tag/v1.0.4
