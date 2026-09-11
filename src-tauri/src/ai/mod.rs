@@ -67,7 +67,8 @@ pub fn prepare_input(
     messages: &[ChatMessage],
     config: &AiProviderConfig,
 ) -> PreparedInput {
-    const TRUNCATION_NOTICE: &str = "\n\n[注意] 输入内容因超出模型上下文限制已被自动截断，请仅基于当前提供的部分内容作答。";
+    const TRUNCATION_NOTICE: &str =
+        "\n\n[注意] 输入内容因超出模型上下文限制已被自动截断，请仅基于当前提供的部分内容作答。";
 
     // Reserve the notice cost up front (worst case: appended to both the
     // system prompt and the truncated message) so the final input still fits.
@@ -236,9 +237,7 @@ pub(crate) async fn upstream_error(provider: &str, response: Response) -> AppErr
     match status {
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => AppError::AiAuthentication(message),
         StatusCode::TOO_MANY_REQUESTS => AppError::AiRateLimited(message),
-        StatusCode::BAD_REQUEST if is_context_length_error(&detail) => {
-            AppError::AiContext(message)
-        }
+        StatusCode::BAD_REQUEST if is_context_length_error(&detail) => AppError::AiContext(message),
         status if status.is_server_error() => AppError::AiUpstream(message),
         _ => AppError::Ai(message),
     }
@@ -481,8 +480,8 @@ mod tests {
         }];
         let prepared = prepare_input("sys", &oversized, &config);
         assert!(prepared.truncated);
-        let total =
-            estimate_tokens(&prepared.system_prompt) + estimate_tokens(&prepared.messages[0].content);
+        let total = estimate_tokens(&prepared.system_prompt)
+            + estimate_tokens(&prepared.messages[0].content);
         assert!(total <= budget);
         // The cut point and the system prompt both carry the notice.
         assert!(prepared.messages[0].content.contains("已被自动截断"));
@@ -537,7 +536,9 @@ mod tests {
             reduce the length of the messages or completion.";
         assert!(is_context_length_error(deepseek));
         assert!(is_context_length_error("The prompt is too long"));
-        assert!(is_context_length_error("token count exceeded the model's context window"));
+        assert!(is_context_length_error(
+            "token count exceeded the model's context window"
+        ));
         assert!(!is_context_length_error("invalid api key"));
         assert!(!is_context_length_error("rate limit exceeded"));
     }

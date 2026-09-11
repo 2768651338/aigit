@@ -103,7 +103,10 @@ pub struct GitErrorAnalysis {
 /// Analyze a failed `git push` with AI, returning a Chinese explanation plus
 /// a locally-detected safe follow-up action (e.g. "pull" on non-fast-forward).
 #[tauri::command]
-pub async fn analyze_git_error(repo_path: String, error_text: String) -> AppResult<GitErrorAnalysis> {
+pub async fn analyze_git_error(
+    repo_path: String,
+    error_text: String,
+) -> AppResult<GitErrorAnalysis> {
     const MAX_ERROR_TEXT_CHARS: usize = 16 * 1024;
     if error_text.is_empty() || error_text.chars().count() > MAX_ERROR_TEXT_CHARS {
         return Err(AppError::Ai("错误文本为空或过长，无法分析".into()));

@@ -1,9 +1,9 @@
 use std::ffi::OsString;
 use std::io::Read;
-use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::Path;
+use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::Arc;
@@ -148,10 +148,7 @@ where
                 let _ = child.wait();
                 let stdout = drain_stream(stdout_rx, MAX_STREAM_BYTES);
                 let stderr = drain_stream(stderr_rx, MAX_STREAM_BYTES);
-                let detail = combine_output(
-                    &bounded_display(&stdout),
-                    &bounded_display(&stderr),
-                );
+                let detail = combine_output(&bounded_display(&stdout), &bounded_display(&stderr));
                 let suffix = if detail.is_empty() {
                     String::new()
                 } else {
@@ -177,7 +174,11 @@ where
     let stdout = drain_stream(stdout_rx, MAX_STREAM_BYTES);
     let stderr = drain_stream(stderr_rx, MAX_STREAM_BYTES);
 
-    Ok(GitOutput { status, stdout, stderr })
+    Ok(GitOutput {
+        status,
+        stdout,
+        stderr,
+    })
 }
 
 pub fn run_checked<I, S>(
@@ -295,10 +296,7 @@ fn bounded_display(bytes: &[u8]) -> String {
 /// wait. The thread blocks in `read` until EOF; if a lingering helper process
 /// keeps the write end open, the thread stays parked until every holder exits
 /// (or the app exits) while `drain_stream` has already moved on.
-pub(crate) fn spawn_pipe_reader(
-    mut reader: impl Read + Send + 'static,
-    tx: mpsc::Sender<Vec<u8>>,
-) {
+pub(crate) fn spawn_pipe_reader(mut reader: impl Read + Send + 'static, tx: mpsc::Sender<Vec<u8>>) {
     thread::spawn(move || {
         let mut buf = vec![0u8; READER_CHUNK_BYTES];
         loop {

@@ -490,8 +490,11 @@ mod tests {
     #[test]
     fn existing_keyring_secret_wins_migration_conflict() {
         let path = test_path("migration-conflict");
-        fs::write(&path, legacy_ai_config(&[("openai_api_key", "legacy-secret")]))
-            .expect("write legacy config");
+        fs::write(
+            &path,
+            legacy_ai_config(&[("openai_api_key", "legacy-secret")]),
+        )
+        .expect("write legacy config");
         let store = MemoryCredentialStore::default();
         store.set("openai", "existing-keyring-secret").unwrap();
 
@@ -544,8 +547,8 @@ mod tests {
     fn malformed_config_is_reported_without_overwriting_it() {
         let path = test_path("malformed");
         // 在合法夹具基础上去掉 ']' 构造畸形 TOML，断言原样保留。
-        let original = legacy_ai_config(&[("openai_api_key", "must-not-be-lost")])
-            .replacen("[ai]", "[ai", 1);
+        let original =
+            legacy_ai_config(&[("openai_api_key", "must-not-be-lost")]).replacen("[ai]", "[ai", 1);
         let original = original.into_bytes();
         fs::write(&path, &original).expect("write malformed config");
         let store = MemoryCredentialStore::default();
@@ -601,7 +604,9 @@ mod tests {
         above.ai.max_context_tokens = 3_000_000;
         assert!(above.validate().is_err());
 
-        config.validate().expect("default context window must validate");
+        config
+            .validate()
+            .expect("default context window must validate");
     }
 
     #[test]

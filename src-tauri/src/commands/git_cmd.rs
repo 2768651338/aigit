@@ -60,11 +60,7 @@ where
         .map_err(|e| AppError::General(format!("Git 后台任务线程异常退出：{e}")))?
 }
 
-async fn run_remote_task<T, F>(
-    registry: &GitTaskRegistry,
-    task_id: &str,
-    action: F,
-) -> AppResult<T>
+async fn run_remote_task<T, F>(registry: &GitTaskRegistry, task_id: &str, action: F) -> AppResult<T>
 where
     T: Send + 'static,
     F: FnOnce(Arc<AtomicBool>) -> AppResult<T> + Send + 'static,

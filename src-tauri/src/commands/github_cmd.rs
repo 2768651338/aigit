@@ -50,11 +50,7 @@ pub fn github_open_compare(
 }
 
 #[tauri::command]
-pub fn github_open_repo(
-    app: AppHandle,
-    path: String,
-    remote: Option<String>,
-) -> AppResult<String> {
+pub fn github_open_repo(app: AppHandle, path: String, remote: Option<String>) -> AppResult<String> {
     let (_, remote) = context(&path, remote.as_deref())?;
     let url = remote.web_url();
     app.opener()

@@ -46,10 +46,7 @@ fn append_entries(file: &Path, entries: &[String]) -> AppResult<Vec<String>> {
     };
 
     let known: HashSet<String> = existing.lines().map(|l| l.trim().to_string()).collect();
-    let added: Vec<String> = wanted
-        .into_iter()
-        .filter(|e| !known.contains(e))
-        .collect();
+    let added: Vec<String> = wanted.into_iter().filter(|e| !known.contains(e)).collect();
     if added.is_empty() {
         return Ok(added);
     }
