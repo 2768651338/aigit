@@ -18,7 +18,6 @@ const AUTHOR = "田小橙";
 const QQ = "2768651338";
 const EMAIL = "2768651338@qq.com";
 const GITHUB_REPO = "https://github.com/2768651338/aigit";
-const APP_VERSION = "1.0.4";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
@@ -681,7 +680,7 @@ export function SettingsView() {
               {t("settings.about")}
             </h3>
             <span className="text-xs text-text-muted">
-              {t("settings.version")} <span className="font-mono">v{APP_VERSION}</span>
+              {t("settings.version")} <span className="font-mono">v{__APP_VERSION__}</span>
             </span>
           </div>
           <div className="space-y-3 text-sm">
