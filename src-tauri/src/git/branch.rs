@@ -94,12 +94,15 @@ pub fn get_log(repo: &Repository, limit: usize) -> AppResult<Vec<LogEntry>> {
 
         let refs = ref_map.get(&hash).cloned().unwrap_or_default();
 
+        let body = extract_message_body(commit.message().unwrap_or(""));
+
         entries.push(LogEntry {
             hash,
             short_hash,
             author: commit.author().name().unwrap_or("").to_string(),
             email: commit.author().email().unwrap_or("").to_string(),
             message: commit.summary().unwrap_or("").to_string(),
+            body,
             timestamp: commit.time().seconds(),
             parents,
             refs,
@@ -107,6 +110,15 @@ pub fn get_log(repo: &Repository, limit: usize) -> AppResult<Vec<LogEntry>> {
     }
 
     Ok(entries)
+}
+
+/// 从完整提交信息中提取正文：去掉首行（主题）与随后的空行，剩余部分即为正文。
+/// 单行信息或仅主题加空行时返回空字符串。
+fn extract_message_body(full_message: &str) -> String {
+    match full_message.split_once('\n') {
+        Some((_, rest)) => rest.trim().to_string(),
+        None => String::new(),
+    }
 }
 
 fn build_ref_map(repo: &Repository) -> AppResult<std::collections::HashMap<String, Vec<String>>> {
@@ -161,4 +173,28 @@ pub fn get_commit_diff(repo: &Repository, hash: &str) -> AppResult<String> {
     })?;
 
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_message_body;
+
+    #[test]
+    fn extracts_body_after_subject_and_blank_line() {
+        let full = "feat(sidebar): 支持排序\n\n正文第一段。\n正文第二行。\n";
+        assert_eq!(extract_message_body(full), "正文第一段。\n正文第二行。");
+    }
+
+    #[test]
+    fn returns_empty_for_single_line_message() {
+        assert_eq!(extract_message_body("chore(release): 发布 1.0.8"), "");
+        assert_eq!(extract_message_body("chore(release): 发布 1.0.8\n"), "");
+        assert_eq!(extract_message_body(""), "");
+    }
+
+    #[test]
+    fn trims_surrounding_whitespace_of_body() {
+        let full = "subject\n\r\n  缩进的正文  \n\r\n";
+        assert_eq!(extract_message_body(full), "缩进的正文");
+    }
 }

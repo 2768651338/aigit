@@ -93,7 +93,10 @@ pub struct LogEntry {
     pub short_hash: String,
     pub author: String,
     pub email: String,
+    /// 提交主题（首行），供列表等紧凑场景展示。
     pub message: String,
+    /// 提交正文（首行之后的其余内容），可能为空；供详情面板完整展示。
+    pub body: String,
     pub timestamp: i64,
     pub parents: Vec<String>,
     pub refs: Vec<String>,

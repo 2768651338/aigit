@@ -57,6 +57,7 @@ export function BranchGraph() {
     if (!q) return true;
     return (
       e.message.toLowerCase().includes(q) ||
+      (e.body ?? "").toLowerCase().includes(q) ||
       e.author.toLowerCase().includes(q) ||
       e.short_hash.toLowerCase().includes(q)
     );
@@ -395,10 +396,21 @@ export function BranchGraph() {
             </button>
           </div>
 
-          {/* Meta */}
-          <div className="px-4 py-2.5 border-b border-border text-xs text-text-muted shrink-0">
-            {selectedEntry.author} &lt;{selectedEntry.email}&gt; ·{" "}
-            {new Date(selectedEntry.timestamp * 1000).toLocaleString()}
+          {/* Full commit message: subject + body, both wrapped. The header bar
+              above truncates the subject, so the complete text lives here. */}
+          <div className="px-4 py-2.5 border-b border-border shrink-0">
+            <div className="text-sm font-medium text-text-primary whitespace-pre-wrap break-words select-text">
+              {selectedEntry.message}
+            </div>
+            {selectedEntry.body && (
+              <div className="mt-1.5 text-xs text-text-secondary whitespace-pre-wrap break-words select-text">
+                {selectedEntry.body}
+              </div>
+            )}
+            <div className="mt-2 text-xs text-text-muted">
+              {selectedEntry.author} &lt;{selectedEntry.email}&gt; ·{" "}
+              {new Date(selectedEntry.timestamp * 1000).toLocaleString()}
+            </div>
           </div>
 
           {/* Diff content: collapsed file headers double as the complete

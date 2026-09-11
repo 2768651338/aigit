@@ -202,7 +202,10 @@ export interface LogEntry {
   short_hash: string;
   author: string;
   email: string;
+  /** 提交主题（首行），供列表等紧凑场景展示 */
   message: string;
+  /** 提交正文（首行之后的内容），可能为空 */
+  body: string;
   timestamp: number;
   parents: string[];
   refs: string[];
