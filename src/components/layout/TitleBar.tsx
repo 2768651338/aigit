@@ -75,8 +75,12 @@ export function TitleBar() {
 
   return (
     <header className="flex items-stretch h-10 shrink-0 select-none">
-      {/* Brand segment — visually continues the sidebar below it */}
-      <div className="flex items-center w-64 shrink-0 px-4 bg-bg-surface border-r border-border">
+      {/* Brand segment — visually continues the sidebar below it.
+          "deep" so drags starting on the inner label also move the window. */}
+      <div
+        className="flex items-center w-64 shrink-0 px-4 bg-bg-surface border-r border-border"
+        data-tauri-drag-region="deep"
+      >
         <span className="font-semibold text-sm tracking-tight">aigit</span>
       </div>
 
