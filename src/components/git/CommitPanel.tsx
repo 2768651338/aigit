@@ -68,13 +68,14 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
     aiError,
     commitMessage: message,
     setCommitMessage: setMessage,
-    setCommitting,
-    setCommitAndPushing,
     setPushError,
     setAiError,
     setCommitMessageFor,
     setAiErrorFor,
     setAiLoadingFor,
+    setCommittingFor,
+    setCommitAndPushingFor,
+    setPushErrorFor,
   } = useRepoStore();
   const { generateCommitMessage, cancelTask } = useAiStore();
   const aiRequestActive = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000commit`]) : false);
@@ -148,29 +149,34 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
 
   const handleCommit = async () => {
     if (!message.trim()) return;
+    // Pin the whole flow to the repo that was active when the button was
+    // clicked: the awaits below (isHeadPushed / commit / amend) can straddle
+    // a tab switch, so the busy flag, the error and the message reset must
+    // land on this repo — not on whichever repo is active when the promise
+    // settles (otherwise this repo's "committing" state sticks forever).
+    const targetPath = currentPath;
+    if (!targetPath) return;
     // Capture before setAmendMode(false) below — the success toast must
     // reflect the operation that actually ran, not the post-reset state.
     const wasAmend = amendMode;
-    setCommitting(true);
+    setCommittingFor(targetPath, true);
     try {
       if (amendMode) {
         let confirmPushed = false;
-        if (currentPath && await gitService.isHeadPushed(currentPath)) {
+        if (await gitService.isHeadPushed(targetPath)) {
           confirmPushed = window.confirm(t("commit.amendPushedConfirm"));
           if (!confirmPushed) return;
         }
-        await amend(message, includeStagedInAmend, confirmPushed);
+        await amend(targetPath, message, includeStagedInAmend, confirmPushed);
       } else {
         if (stagedCount === 0) throw new Error(t("commit.explicitStageRequired"));
-        await commit(message);
+        await commit(targetPath, message);
       }
       // Persist this message into per-repo history (deduped, most-recent first).
-      if (currentPath) {
-        const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
-        setHistory(next);
-        saveHistory(currentPath, next);
-      }
-      setMessage("");
+      const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
+      setHistory(next);
+      saveHistory(targetPath, next);
+      setCommitMessageFor(targetPath, "");
       setAmendMode(false);
       setIncludeStagedInAmend(false);
       // commit()/amend() already refresh status and log internally.
@@ -180,74 +186,86 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       console.error("[aigit] commit failed:", e);
       toast.error(msg, t(amendMode ? "commit.amendFailed" : "commit.commitFailed"));
     } finally {
-      setCommitting(false);
+      setCommittingFor(targetPath, false);
     }
   };
 
   const handleCommitAndPush = async () => {
     if (!message.trim()) return;
-    setCommitAndPushing(true);
-    setPushError(null);
+    // Pin to the originating repo (see handleCommit). Without this, a tab
+    // switch mid-flow would leave this repo's commitAndPushing stuck on true
+    // ("pushing" never clears), and push() used to resolve the repo at call
+    // time — i.e. it could push whichever repo the user switched to.
+    const targetPath = currentPath;
+    if (!targetPath) return;
+    setCommitAndPushingFor(targetPath, true);
+    setPushErrorFor(targetPath, null);
     try {
       if (stagedCount === 0) throw new Error(t("commit.explicitStageRequired"));
-      await commit(message);
+      await commit(targetPath, message);
       // Persist this message into per-repo history (deduped, most-recent first).
-      if (currentPath) {
-        const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
-        setHistory(next);
-        saveHistory(currentPath, next);
-      }
-      setMessage("");
+      const next = [message, ...history.filter((m) => m !== message)].slice(0, HISTORY_MAX);
+      setHistory(next);
+      saveHistory(targetPath, next);
+      setCommitMessageFor(targetPath, "");
       // Push only to the branch's configured upstream. Branches without an
       // upstream are configured explicitly from the Remotes panel.
       try {
-        await push();
+        await push(targetPath);
         const body = branch
           ? t("commit.pushSuccessBody", { branch })
           : t("commit.pushSuccessBodyGeneric");
         toast.success(body, t("commit.pushSuccessTitle"));
       } catch (e) {
         const msg = formatError(e);
-        setPushError(msg);
+        setPushErrorFor(targetPath, msg);
         toast.error(msg, t("commit.pushFailed"));
       }
       // Force: commit() already refreshed internally, but the push above may
       // have taken a while — make sure the final status refresh can't be
-      // swallowed by an in-flight poll guard.
-      await refreshStatus(true);
+      // swallowed by an in-flight poll guard. Only when this repo is still
+      // active: refreshStatus targets the active tab, and this repo's status
+      // is refreshed by the poll once the user returns to it.
+      if (useRepoStore.getState().activePath === targetPath) {
+        await refreshStatus(true);
+      }
     } catch (e) {
       // commit failed (push was not attempted)
       const msg = formatError(e);
       console.error("[aigit] commit&push failed at commit stage:", e);
       toast.error(msg, t("commit.commitFailed"));
     } finally {
-      setCommitAndPushing(false);
+      setCommitAndPushingFor(targetPath, false);
     }
   };
 
   const handlePushOnly = async () => {
-    setPushError(null);
+    const targetPath = currentPath;
+    if (!targetPath) return;
+    setPushErrorFor(targetPath, null);
     try {
-      await push();
+      await push(targetPath);
       const body = branch
         ? t("commit.pushSuccessBody", { branch })
         : t("commit.pushSuccessBodyGeneric");
       toast.success(body, t("commit.pushSuccessTitle"));
     } catch (e) {
       const msg = formatError(e);
-      setPushError(msg);
+      setPushErrorFor(targetPath, msg);
       toast.error(msg, t("commit.pushFailed"));
     }
   };
 
   const handlePull = async () => {
-    setPushError(null);
+    const targetPath = currentPath;
+    if (!targetPath) return;
+    setPushErrorFor(targetPath, null);
     try {
-      await pull();
+      await pull(targetPath);
       toast.success(t("commit.pullSuccessBody"), t("commit.pullSuccessTitle"));
     } catch (e) {
       const msg = formatError(e);
-      setPushError(msg);
+      setPushErrorFor(targetPath, msg);
       toast.error(msg, t("commit.pullFailed"));
     }
   };

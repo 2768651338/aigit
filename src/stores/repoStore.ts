@@ -99,8 +99,13 @@ interface RepoStoreState extends ActiveTabProjection {
   setCommitMessageFor: (path: string, message: string) => void;
   setAiErrorFor: (path: string, error: string | null) => void;
   setAiLoadingFor: (path: string, loading: boolean) => void;
+  setPushErrorFor: (path: string, error: string | null) => void;
+  setCommittingFor: (path: string, v: boolean) => void;
+  setCommitAndPushingFor: (path: string, v: boolean) => void;
 
-  // Git operations (operate on the active tab)
+  // Git operations. The path is passed explicitly (pinned by the caller when
+  // the flow starts) so an `await` straddling a tab switch can never redirect
+  // the operation to another repo.
   refreshStatus: (force?: boolean) => Promise<void>;
   refreshRepoInfo: () => Promise<void>;
   selectFile: (path: string | null) => Promise<void>;
@@ -108,10 +113,10 @@ interface RepoStoreState extends ActiveTabProjection {
   unstageFiles: (files: string[]) => Promise<void>;
   stageAll: () => Promise<void>;
   discardFiles: (files: string[]) => Promise<void>;
-  commit: (message: string) => Promise<string>;
-  amend: (message: string, includeStaged?: boolean, confirmPushed?: boolean) => Promise<string>;
-  push: (remote?: string, remoteBranch?: string) => Promise<string>;
-  pull: () => Promise<string>;
+  commit: (path: string, message: string) => Promise<string>;
+  amend: (path: string, message: string, includeStaged?: boolean, confirmPushed?: boolean) => Promise<string>;
+  push: (path: string, remote?: string, remoteBranch?: string) => Promise<string>;
+  pull: (path: string) => Promise<string>;
   refreshBranches: (force?: boolean) => Promise<void>;
   refreshLog: (force?: boolean) => Promise<void>;
   loadRemoteState: (path?: string, afterFetch?: boolean) => Promise<void>;
@@ -571,6 +576,18 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     updateTab(set, get, path, { aiLoading: loading });
   },
 
+  setPushErrorFor: (path, error) => {
+    updateTab(set, get, path, { pushError: error });
+  },
+
+  setCommittingFor: (path, v) => {
+    updateTab(set, get, path, { committing: v });
+  },
+
+  setCommitAndPushingFor: (path, v) => {
+    updateTab(set, get, path, { commitAndPushing: v });
+  },
+
   refreshStatus: async (force?: boolean) => {
     const { activePath, tabs } = get();
     if (!activePath) return;
@@ -710,76 +727,72 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  commit: async (message: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
+  commit: async (path: string, message: string) => {
+    if (!get().tabs[path]) throw new Error("Repository is not open");
     try {
-      const hash = await gitService.commit(activePath, message);
+      const hash = await gitService.commit(path, message);
       await get().refreshStatus(true);
       await get().refreshLog(true);
       return hash;
     } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
+      updateTab(set, get, path, { error: formatError(e) });
       throw e;
     }
   },
 
-  amend: async (message: string, includeStaged = false, confirmPushed = false) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
+  amend: async (path: string, message: string, includeStaged = false, confirmPushed = false) => {
+    if (!get().tabs[path]) throw new Error("Repository is not open");
     try {
-      const hash = await gitService.amend(activePath, message, includeStaged, confirmPushed);
+      const hash = await gitService.amend(path, message, includeStaged, confirmPushed);
       await get().refreshStatus(true);
       await get().refreshLog(true);
       return hash;
     } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
+      updateTab(set, get, path, { error: formatError(e) });
       throw e;
     }
   },
 
-  push: async (remote?: string, remoteBranch?: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    updateTab(set, get, activePath, { pushing: true, error: null });
+  push: async (path: string, remote?: string, remoteBranch?: string) => {
+    if (!get().tabs[path]) throw new Error("Repository is not open");
+    updateTab(set, get, path, { pushing: true, error: null });
     try {
-      const result = await gitService.push(activePath, remote, remoteBranch);
+      const result = await gitService.push(path, remote, remoteBranch);
       try {
-        const info = await gitService.getRepoInfo(activePath);
-        updateTab(set, get, activePath, { repoInfo: info });
+        const info = await gitService.getRepoInfo(path);
+        updateTab(set, get, path, { repoInfo: info });
       } catch {
         // ignore — push itself succeeded
       }
       return result;
     } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
+      updateTab(set, get, path, { error: formatError(e) });
       throw e;
     } finally {
-      updateTab(set, get, activePath, { pushing: false });
+      updateTab(set, get, path, { pushing: false });
     }
   },
 
-  pull: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    updateTab(set, get, activePath, { pulling: true, error: null });
+  pull: async (path: string) => {
+    if (!get().tabs[path]) throw new Error("Repository is not open");
+    updateTab(set, get, path, { pulling: true, error: null });
     try {
-      const result = await gitService.pull(activePath);
+      const result = await gitService.pull(path);
       try {
         await get().refreshStatus(true);
         await get().refreshBranches(true);
         await get().refreshLog(true);
-        const info = await gitService.getRepoInfo(activePath);
-        updateTab(set, get, activePath, { repoInfo: info });
+        const info = await gitService.getRepoInfo(path);
+        updateTab(set, get, path, { repoInfo: info });
       } catch {
         // ignore — pull itself succeeded
       }
       return result;
     } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
+      updateTab(set, get, path, { error: formatError(e) });
       throw e;
     } finally {
-      updateTab(set, get, activePath, { pulling: false });
+      updateTab(set, get, path, { pulling: false });
     }
   },
 

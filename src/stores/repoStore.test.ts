@@ -9,6 +9,7 @@ const { git, config } = vi.hoisted(() => ({
     getOperationState: vi.fn(),
     listRemotes: vi.fn(),
     getTrackingInfo: vi.fn(),
+    push: vi.fn(),
   },
   config: {
     addRecentRepo: vi.fn(),
@@ -81,7 +82,7 @@ beforeEach(() => {
   config.setOpenRepos.mockResolvedValue(undefined);
   git.getStatus.mockImplementation(async (path: string) => [{ path: `${path}.txt`, status: "modified", staged: false }]);
   git.listBranches.mockImplementation(async (path: string) => [{ name: `${path}-branch`, is_head: true, is_remote: false }]);
-  git.getLog.mockImplementation(async (path: string) => [{ hash: `${path}-hash`, short_hash: "abc", message: path, author: "test", author_email: "test@example.com", timestamp: 1, parents: [] }]);
+  git.getLog.mockImplementation(async (path: string) => [{ hash: `${path}-hash`, short_hash: "abc", message: path, body: "", author: "test", author_email: "test@example.com", timestamp: 1, parents: [] }]);
   git.getOperationState.mockResolvedValue({ kind: null, in_progress: false, conflicts: [] });
   git.listRemotes.mockResolvedValue([{ name: "origin", fetch_url: "https://example.com/repo.git", push_url: "https://example.com/repo.git" }]);
   git.getTrackingInfo.mockResolvedValue({ branch: "main", upstream: "origin/main", remote: "origin", remote_branch: "main", ahead: 0, behind: 0 });
@@ -143,6 +144,50 @@ describe("repoStore cross-tab async isolation", () => {
 
     expect(useRepoStore.getState().tabs["/closed"]).toBeUndefined();
     expect(git.getStatus).not.toHaveBeenCalledWith("/closed");
+  });
+
+  it("pushes the explicitly requested repo while another repo is active", async () => {
+    git.getRepoInfo.mockResolvedValue(repoInfo("a"));
+    await useRepoStore.getState().openRepo("/a");
+    await useRepoStore.getState().openRepo("/b"); // active is now /b
+
+    const pushPending = deferred<string>();
+    git.push.mockReturnValue(pushPending.promise);
+    const pushing = useRepoStore.getState().push("/a");
+
+    // The busy flag lands on /a's own tab; the active tab (/b) stays clean.
+    expect(git.push).toHaveBeenCalledWith("/a", undefined, undefined);
+    expect(useRepoStore.getState().tabs["/a"].pushing).toBe(true);
+    expect(useRepoStore.getState().pushing).toBe(false);
+
+    pushPending.resolve("ok");
+    await pushing;
+
+    expect(useRepoStore.getState().tabs["/a"].pushing).toBe(false);
+    expect(useRepoStore.getState().pushing).toBe(false);
+  });
+
+  it("keeps commit&push busy flags on their originating repo across a tab switch", async () => {
+    git.getRepoInfo.mockResolvedValue(repoInfo("a"));
+    await useRepoStore.getState().openRepo("/a");
+
+    useRepoStore.getState().setCommitAndPushingFor("/a", true);
+    expect(useRepoStore.getState().commitAndPushing).toBe(true);
+
+    // User switches to /b while the commit&push is in flight.
+    await useRepoStore.getState().openRepo("/b");
+    expect(useRepoStore.getState().commitAndPushing).toBe(false);
+
+    // Completion arrives while /b is active: clearing must land on /a…
+    useRepoStore.getState().setCommitAndPushingFor("/a", false);
+    useRepoStore.getState().setPushErrorFor("/a", "boom");
+
+    // …and switching back shows /a unbusy with its own error, /b untouched.
+    useRepoStore.getState().setActiveRepo("/a");
+    expect(useRepoStore.getState().commitAndPushing).toBe(false);
+    expect(useRepoStore.getState().pushError).toBe("boom");
+    expect(useRepoStore.getState().tabs["/b"].commitAndPushing).toBe(false);
+    expect(useRepoStore.getState().tabs["/b"].pushError).toBeNull();
   });
 });
 
