@@ -46,6 +46,11 @@ pub struct Finding {
     pub title: String,
     pub description: String,
     pub suggestion: String,
+    /// Optional unified diff that fixes the finding; empty when the model did
+    /// not (or could not) produce a mechanical fix. Applied via
+    /// `git apply --cached` after an explicit `--check` validation.
+    #[serde(default)]
+    pub patch: Option<String>,
     pub confidence: f32,
     #[serde(default)]
     pub metadata: Map<String, Value>,
@@ -81,6 +86,10 @@ pub struct ReviewReport {
     pub stale: bool,
 }
 
+/// Size cap for a single AI-suggested patch so a runaway model cannot blow up
+/// the report file or the `git apply` invocation.
+const MAX_FINDING_PATCH_BYTES: usize = 64 * 1024;
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AiReviewPayload {
@@ -98,6 +107,8 @@ struct AiFinding {
     title: String,
     description: String,
     suggestion: String,
+    #[serde(default)]
+    patch: Option<String>,
     confidence: f32,
     #[serde(default)]
     metadata: Map<String, Value>,
@@ -119,6 +130,11 @@ impl AiReviewPayload {
                 || finding.suggestion.trim().is_empty()
             {
                 return Err(format!("finding {index} contains an empty required field"));
+            }
+            if let Some(patch) = &finding.patch {
+                if patch.len() > MAX_FINDING_PATCH_BYTES {
+                    return Err(format!("finding {index} patch exceeds the size limit"));
+                }
             }
             if !finding.confidence.is_finite() || !(0.0..=1.0).contains(&finding.confidence) {
                 return Err(format!(
@@ -160,6 +176,7 @@ impl AiReviewPayload {
                     title: finding.title,
                     description: finding.description,
                     suggestion: finding.suggestion,
+                    patch: finding.patch,
                     confidence: finding.confidence,
                     metadata: finding.metadata,
                     status: FindingStatus::Open,
@@ -208,17 +225,19 @@ The JSON schema is:
       "title": "non-empty string",
       "description": "non-empty string",
       "suggestion": "non-empty string",
+      "patch": "optional unified diff that mechanically fixes the finding, or null",
       "confidence": 0.0,
       "metadata": {{}}
     }}
   ]
 }}
-Use null for line only when no changed line can be identified. confidence must be between 0 and 1. Use an empty findings array when there are no findings."#
+Use null for line only when no changed line can be identified. confidence must be between 0 and 1. Use an empty findings array when there are no findings.
+When the fix is mechanical (rename, guard clause, null check, small edit), include a minimal valid unified diff in "patch" with correct a/ b/ prefixes and hunk headers; omit or null it when the fix needs human judgement."#
     )
 }
 
 pub fn repair_system_prompt() -> &'static str {
-    r#"You repair code-review output into strict JSON. Return exactly one JSON object and nothing else. Do not add facts. Required shape: {"summary":"non-empty string","findings":[{"severity":"critical|high|medium|low|info","category":"non-empty string","file":"repository-relative/path","line":1_or_null,"title":"non-empty string","description":"non-empty string","suggestion":"non-empty string","confidence":0_to_1,"metadata":{}}]}. Remove unknown keys."#
+    r#"You repair code-review output into strict JSON. Return exactly one JSON object and nothing else. Do not add facts. Required shape: {"summary":"non-empty string","findings":[{"severity":"critical|high|medium|low|info","category":"non-empty string","file":"repository-relative/path","line":1_or_null,"title":"non-empty string","description":"non-empty string","suggestion":"non-empty string","patch":optional_unified_diff_or_null,"confidence":0_to_1,"metadata":{}}]}. Remove unknown keys."#
 }
 
 fn parse_ai_payload(raw: &str) -> Result<AiReviewPayload, String> {

@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConflictFile } from "@/types";
 import { gitService } from "@/services/git";
+import { aiService } from "@/services/ai";
 import { formatError } from "@/utils/error";
+import { withSecretsConfirmation } from "@/utils/aiGuard";
 import { parseConflictBlocks, resolveConflictBlock } from "@/utils/conflict";
 import { useModalAccessibility } from "@/utils/modalA11y";
 import { useRepoStore } from "@/stores/repoStore";
@@ -13,6 +15,19 @@ import { AlertCircleIcon, SpinnerIcon, XIcon } from "@/components/common/Icons";
 interface ConflictResolverProps {
   open: boolean;
   onClose: () => void;
+}
+
+const FENCE_TOKEN = "```";
+
+/** 剥掉模型偶尔包裹的 Markdown 代码块围栏，只留文件内容。 */
+function stripFences(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(FENCE_TOKEN)) return trimmed;
+  const withoutOpen = trimmed.slice(trimmed.indexOf("\n") + 1);
+  const closed = withoutOpen.endsWith(FENCE_TOKEN)
+    ? withoutOpen.slice(0, withoutOpen.length - FENCE_TOKEN.length)
+    : withoutOpen;
+  return closed.trimEnd();
 }
 
 export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
@@ -28,6 +43,9 @@ export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
   const [result, setResult] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
+  const suggestRequestRef = useRef<string | null>(null);
 
   const load = async () => {
     if (!currentPath) return;
@@ -81,6 +99,48 @@ export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
     } catch (error) {
       toast.error(formatError(error));
     }
+  };
+
+  // AI 合并建议：流式写入结果编辑区，用户检查并修改后仍需手动保存。
+  const suggestAi = async () => {
+    if (!currentPath || !file?.can_edit_text || suggesting) return;
+    setSuggestError(null);
+    setSuggesting(true);
+    const requestId = aiService.createRequestId();
+    suggestRequestRef.current = requestId;
+    try {
+      const send = (confirmSecrets: boolean) => {
+        let acc = "";
+        setResult("");
+        const { done } = aiService.streamConflictResolution(
+          currentPath,
+          file.path,
+          {
+            onEvent: (event) => {
+              if (event.type === "Delta" && event.requestId === requestId) {
+                acc += event.delta;
+                setResult(acc);
+              }
+            },
+          },
+          requestId,
+          confirmSecrets,
+        );
+        return done;
+      };
+      const raw = await withSecretsConfirmation(send);
+      setResult(stripFences(raw));
+    } catch (error) {
+      setSuggestError(formatError(error));
+    } finally {
+      setSuggesting(false);
+      suggestRequestRef.current = null;
+    }
+  };
+
+  const cancelSuggest = () => {
+    const requestId = suggestRequestRef.current;
+    if (requestId) void aiService.cancel(requestId);
   };
 
   const save = async () => {
@@ -144,8 +204,18 @@ export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
                       <Stage title={t("conflictResolver.theirs")} content={file.theirs?.content} />
                     </div>
                     {blocks.length > 0 && <div className="flex flex-wrap gap-2 rounded border border-border bg-bg-surface p-2 text-xs"><span className="py-1 text-text-muted">{t("conflictResolver.blocks", { count: blocks.length })}</span>{blocks.map((_, index) => <div className="flex gap-1" key={index}><span className="py-1">#{index + 1}</span><button className="btn-ghost text-xs" onClick={() => setResult((value) => resolveConflictBlock(value, index, "ours"))}>{t("conflictResolver.takeOurs")}</button><button className="btn-ghost text-xs" onClick={() => setResult((value) => resolveConflictBlock(value, index, "theirs"))}>{t("conflictResolver.takeTheirs")}</button><button className="btn-ghost text-xs" onClick={() => setResult((value) => resolveConflictBlock(value, index, "both"))}>{t("conflictResolver.takeBoth")}</button></div>)}</div>}
-                    <label className="flex min-h-0 flex-1 flex-col text-xs font-medium"><span className="mb-1">{t("conflictResolver.result")}</span><textarea aria-label={t("conflictResolver.result")} value={result} onChange={(event) => setResult(event.target.value)} spellCheck={false} className="input min-h-52 flex-1 resize-none whitespace-pre font-mono text-xs" /></label>
-                    <div className="flex justify-end gap-2"><button className="btn-ghost" disabled={saving} onClick={() => quickResolve(true)}>{t("branches.resolveOurs")}</button><button className="btn-ghost" disabled={saving} onClick={() => quickResolve(false)}>{t("branches.resolveTheirs")}</button><button className="btn-primary" disabled={saving} onClick={save}>{saving && <SpinnerIcon size={14} />}{t("conflictResolver.saveStage")}</button></div>
+                    {suggestError && <div className="rounded border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger break-all">{suggestError}</div>}
+                    <label className="flex min-h-0 flex-1 flex-col text-xs font-medium"><span className="mb-1">{suggesting ? t("conflictResolver.aiSuggesting") : t("conflictResolver.result")}</span><textarea aria-label={t("conflictResolver.result")} value={result} onChange={(event) => setResult(event.target.value)} spellCheck={false} className="input min-h-52 flex-1 resize-none whitespace-pre font-mono text-xs" /></label>
+                    <div className="flex justify-end gap-2">
+                      {suggesting ? (
+                        <button className="btn-secondary" onClick={cancelSuggest}>{t("conflictResolver.cancelAi")}</button>
+                      ) : (
+                        <button className="btn-secondary" disabled={saving} onClick={() => void suggestAi()}>{t("conflictResolver.aiSuggest")}</button>
+                      )}
+                      <button className="btn-ghost" disabled={saving || suggesting} onClick={() => quickResolve(true)}>{t("branches.resolveOurs")}</button>
+                      <button className="btn-ghost" disabled={saving || suggesting} onClick={() => quickResolve(false)}>{t("branches.resolveTheirs")}</button>
+                      <button className="btn-primary" disabled={saving || suggesting} onClick={save}>{saving && <SpinnerIcon size={14} />}{t("conflictResolver.saveStage")}</button>
+                    </div>
                   </>
                 )}
               </div>

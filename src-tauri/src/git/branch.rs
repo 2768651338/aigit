@@ -54,9 +54,17 @@ pub fn list_branches(repo: &Repository) -> AppResult<Vec<BranchInfo>> {
     Ok(branches)
 }
 
-pub fn create_branch(repo: &Repository, name: &str) -> AppResult<()> {
-    let head = repo.head()?;
-    let commit = head.peel_to_commit()?;
+pub fn create_branch(repo: &Repository, name: &str, start_point: Option<&str>) -> AppResult<()> {
+    let commit = match start_point {
+        Some(start) => {
+            super::cli::validate_non_option(start, "起始点")?;
+            repo.revparse_single(start)?.peel_to_commit()?
+        }
+        None => {
+            let head = repo.head()?;
+            head.peel_to_commit()?
+        }
+    };
     repo.branch(name, &commit, false)?;
     Ok(())
 }
@@ -88,7 +96,7 @@ pub fn switch_branch(repo: &Repository, name: &str, force: bool) -> AppResult<()
 /// are deliberately ignored: a safe checkout keeps them, and if one would be
 /// overwritten by the target branch the checkout itself fails with a regular
 /// git error instead of silently deleting the file.
-fn has_uncommitted_changes(repo: &Repository) -> AppResult<bool> {
+pub(crate) fn has_uncommitted_changes(repo: &Repository) -> AppResult<bool> {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(false).include_ignored(false);
     let statuses = repo.statuses(Some(&mut opts))?;
@@ -103,7 +111,7 @@ pub fn delete_branch(repo: &Repository, name: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn get_log(repo: &Repository, limit: usize) -> AppResult<Vec<LogEntry>> {
+pub fn get_log(repo: &Repository, limit: usize, offset: usize) -> AppResult<Vec<LogEntry>> {
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
@@ -112,7 +120,10 @@ pub fn get_log(repo: &Repository, limit: usize) -> AppResult<Vec<LogEntry>> {
 
     let mut entries = Vec::new();
     for (i, oid) in revwalk.enumerate() {
-        if i >= limit {
+        if i < offset {
+            continue;
+        }
+        if entries.len() >= limit {
             break;
         }
         let oid = oid?;
@@ -143,7 +154,7 @@ pub fn get_log(repo: &Repository, limit: usize) -> AppResult<Vec<LogEntry>> {
 
 /// 从完整提交信息中提取正文：去掉首行（主题）与随后的空行，剩余部分即为正文。
 /// 单行信息或仅主题加空行时返回空字符串。
-fn extract_message_body(full_message: &str) -> String {
+pub(crate) fn extract_message_body(full_message: &str) -> String {
     match full_message.split_once('\n') {
         Some((_, rest)) => rest.trim().to_string(),
         None => String::new(),

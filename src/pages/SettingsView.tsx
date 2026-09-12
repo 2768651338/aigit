@@ -22,6 +22,7 @@ const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
   { id: "claude", label: "Claude (Anthropic)", needsKey: true },
   { id: "deepseek", label: "DeepSeek", needsKey: true },
+  { id: "custom", label: "Custom (OpenAI-compatible)", needsKey: true },
   { id: "ollama", label: "Ollama (Local)", needsKey: false },
 ];
 
@@ -41,6 +42,7 @@ export function SettingsView() {
     openai: "",
     claude: "",
     deepseek: "",
+    custom: "",
     embedding_openai: "",
   });
   const [saving, setSaving] = useState(false);
@@ -93,13 +95,13 @@ export function SettingsView() {
         }
       }
 
-      for (const provider of ["openai", "claude", "deepseek"] as const) {
+      for (const provider of ["openai", "claude", "deepseek", "custom"] as const) {
         const apiKey = apiKeys[provider].trim();
         if (apiKey) await setApiKey(provider, apiKey);
       }
       if (embeddingKey.trim()) await setApiKey("embedding_openai", embeddingKey.trim());
       setEmbeddingKey("");
-      setApiKeys({ openai: "", claude: "", deepseek: "", embedding_openai: "" });
+      setApiKeys({ openai: "", claude: "", deepseek: "", custom: "", embedding_openai: "" });
       toast.success(t("settings.saved"));
     } catch (e) {
       toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
@@ -238,6 +240,21 @@ export function SettingsView() {
             onDeleteApiKey={() => handleDeleteApiKey("deepseek")}
             onModel={(v) => update({ deepseek_model: v })}
             onBaseUrl={(v) => update({ deepseek_base_url: v })}
+            labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
+          />
+        )}
+
+        {local.ai.active_provider === "custom" && (
+          <ProviderFields
+            title={t("settings.customConfig")}
+            apiKey={apiKeys.custom}
+            hasApiKey={local.ai.credential_status.custom ?? false}
+            model={local.ai.custom_model ?? ""}
+            baseUrl={local.ai.custom_base_url ?? ""}
+            onApiKey={(v) => updateApiKey("custom", v)}
+            onDeleteApiKey={() => handleDeleteApiKey("custom")}
+            onModel={(v) => update({ custom_model: v })}
+            onBaseUrl={(v) => update({ custom_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
           />
         )}
@@ -426,6 +443,19 @@ export function SettingsView() {
                 onChange={(e) => updateUi({ font_size: parseInt(e.target.value) })}
                 className="w-full accent-accent"
               />
+            </Field>
+
+            <Field label={t("settings.fontFamily")}>
+              <input
+                type="text"
+                value={local.ui.font_family ?? ""}
+                onChange={(e) => updateUi({ font_family: e.target.value })}
+                placeholder={t("settings.fontFamilyPlaceholder")}
+                className="input text-sm w-full font-mono"
+              />
+              <p className="mt-1.5 text-xs text-text-muted">
+                {t("settings.fontFamilyHint")}
+              </p>
             </Field>
             <label className="flex items-center gap-2.5 cursor-pointer">
               <input

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import i18n from "@/i18n";
@@ -9,6 +9,8 @@ import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
 import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import { DiffViewer } from "@/components/git/DiffViewer";
+import { ReflogPanel } from "@/components/git/ReflogPanel";
+import { HistoryRewriteDialog } from "@/components/git/HistoryRewriteDialog";
 import type { FileDiff, LogEntry } from "@/types";
 import {
   GitBranchIcon,
@@ -19,6 +21,7 @@ import {
   SearchIcon,
   FilterIcon,
   CopyIcon,
+  HistoryIcon,
   UndoIcon,
   RotateCcwIcon,
 } from "@/components/common/Icons";
@@ -57,17 +60,47 @@ export function BranchGraph() {
   const [search, setSearch] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [showAuthorFilter, setShowAuthorFilter] = useState(false);
+  // 增量加载：store 的 log 由 refreshLog 全量替换，本地扩展列表在其变化时
+  // 重置，避免刷新后追加出重复或缺口。
+  const [extendedLog, setExtendedLog] = useState<LogEntry[] | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [noMore, setNoMore] = useState(false);
+  const [showReflog, setShowReflog] = useState(false);
+  // 历史整理（reword / squash / drop）：从所选提交到 HEAD。
+  const [rewriteStart, setRewriteStart] = useState<LogEntry | null>(null);
+
+  useEffect(() => {
+    setExtendedLog(null);
+    setNoMore(false);
+  }, [log, currentPath]);
+
+  const displayLog = extendedLog ?? log;
+
+  const loadMore = async () => {
+    if (!currentPath || loadingMore || noMore) return;
+    const base = extendedLog ?? log;
+    setLoadingMore(true);
+    try {
+      const next = await gitService.getLog(currentPath, 100, base.length);
+      setExtendedLog([...base, ...next]);
+      if (next.length < 100) setNoMore(true);
+    } catch (e) {
+      toast.error(formatError(e), t("branches.loadMoreFailed"));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   // Unique authors from the loaded log — used to populate the author dropdown.
   const authors = useMemo(
-    () => Array.from(new Set(log.map((e) => e.author))).sort(),
-    [log]
+    () => Array.from(new Set(displayLog.map((e) => e.author))).sort(),
+    [displayLog]
   );
 
   const q = search.trim().toLowerCase();
   const filteredLog = useMemo(
     () =>
-      log.filter((e) => {
+      displayLog.filter((e) => {
         if (authorFilter && e.author !== authorFilter) return false;
         if (!q) return true;
         return (
@@ -77,7 +110,7 @@ export function BranchGraph() {
           e.short_hash.toLowerCase().includes(q)
         );
       }),
-    [log, authorFilter, q]
+    [displayLog, authorFilter, q]
   );
 
   // 图布局随过滤结果缓存，避免每次输入字符都全量重算。
@@ -156,6 +189,12 @@ export function BranchGraph() {
         danger: true,
         disabled: busy,
         onClick: () => handleResetToCommit(entry),
+      },
+      {
+        label: t("rewrite.menuItem"),
+        icon: <HistoryIcon size={14} />,
+        disabled: busy,
+        onClick: () => setRewriteStart(entry),
       },
     ];
     showMenu(e, items);
@@ -285,8 +324,16 @@ export function BranchGraph() {
           </select>
         )}
         <span className="text-2xs text-text-muted shrink-0">
-          {filteredLog.length}/{log.length}
+          {filteredLog.length}/{displayLog.length}
         </span>
+        <button
+          onClick={() => setShowReflog(true)}
+          className="btn-ghost"
+          title={t("reflog.title")}
+          aria-label={t("reflog.title")}
+        >
+          <HistoryIcon size={16} />
+        </button>
       </div>
       <div className="flex flex-1 overflow-hidden">
       {/* Commit list */}
@@ -385,6 +432,18 @@ export function BranchGraph() {
               </div>
             );
           })}
+          {!noMore && (
+            <button
+              type="button"
+              onClick={() => void loadMore()}
+              disabled={loadingMore}
+              aria-busy={loadingMore}
+              className="w-full flex items-center justify-center gap-2 py-2.5 text-xs text-text-secondary hover:text-text-primary hover:bg-bg-hover transition-colors border-t border-border-subtle"
+            >
+              {loadingMore && <SpinnerIcon size={12} />}
+              {noMore ? t("branches.noMore") : t("branches.loadMore")}
+            </button>
+          )}
         </div>
       </div>
 
@@ -460,6 +519,14 @@ export function BranchGraph() {
         </div>
       )}
       </div>
+      {showReflog && <ReflogPanel onClose={() => setShowReflog(false)} />}
+      {rewriteStart && (
+        <HistoryRewriteDialog
+          startEntry={rewriteStart}
+          loadedLog={displayLog}
+          onClose={() => setRewriteStart(null)}
+        />
+      )}
     </div>
   );
 }

@@ -228,6 +228,16 @@ pub fn apply_patch_to_index_reverse(path: String, patch: String) -> AppResult<()
 }
 
 #[tauri::command]
+pub fn validate_patch_applies(path: String, patch: String) -> AppResult<bool> {
+    let repo = git::repo::open_repo(&path)?;
+    match git::commit::check_patch_applies(&repo, &patch) {
+        Ok(()) => Ok(true),
+        // 校验失败的原因要给到 UI（通常是上下文不匹配），以 Err 透传 git 输出。
+        Err(error) => Err(error),
+    }
+}
+
+#[tauri::command]
 pub fn create_smart_commit_draft(path: String) -> AppResult<git::smart_commit::CommitPlanDraft> {
     let repo = git::repo::open_repo(&path)?;
     git::smart_commit::create_draft(&repo)
@@ -270,12 +280,21 @@ pub fn list_branches(path: String) -> AppResult<Vec<git::BranchInfo>> {
 }
 
 #[tauri::command]
-pub fn create_branch(path: String, name: String) -> AppResult<()> {
+pub fn create_branch(path: String, name: String, start_point: Option<String>) -> AppResult<()> {
     if !git2::Reference::is_valid_name(&format!("refs/heads/{name}")) {
         return Err(AppError::General(format!("Invalid branch name: {name}")));
     }
+    if let Some(start) = start_point.as_deref() {
+        git::cli::validate_non_option(start, "起始点")?;
+    }
     let repo = git::repo::open_repo(&path)?;
-    git::branch::create_branch(&repo, &name)
+    git::branch::create_branch(&repo, &name, start_point.as_deref())
+}
+
+#[tauri::command]
+pub fn list_head_reflog(path: String) -> AppResult<Vec<git::ReflogEntry>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::get_head_reflog(&repo)
 }
 
 #[tauri::command]
@@ -291,11 +310,19 @@ pub fn delete_branch(path: String, name: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn get_log(path: String, limit: Option<usize>) -> AppResult<Vec<git::LogEntry>> {
+pub fn get_log(
+    path: String,
+    limit: Option<usize>,
+    offset: Option<usize>,
+) -> AppResult<Vec<git::LogEntry>> {
     let repo = git::repo::open_repo(&path)?;
     // Clamp the frontend-supplied limit so a bogus value cannot walk the
     // entire commit graph in one call.
-    git::branch::get_log(&repo, limit.unwrap_or(100).min(1000))
+    git::branch::get_log(
+        &repo,
+        limit.unwrap_or(100).min(1000),
+        offset.unwrap_or(0).min(100_000),
+    )
 }
 
 #[tauri::command]
@@ -314,6 +341,137 @@ pub fn get_commit_diff_files(path: String, hash: String) -> AppResult<Vec<git::F
 pub fn list_files(path: String) -> AppResult<Vec<String>> {
     let repo = git::repo::open_repo(&path)?;
     git::branch::list_files(&repo)
+}
+
+#[tauri::command]
+pub fn list_tree(path: String, dir: Option<String>) -> AppResult<Vec<git::FileTreeEntry>> {
+    let repo = git::repo::open_repo(&path)?;
+    if let Some(dir) = dir.as_deref() {
+        if !dir.trim_matches('/').is_empty() {
+            git::cli::validate_pathspec(dir, "目录路径")?;
+        }
+    }
+    git::tree::list_tree(&repo, dir.as_deref())
+}
+
+#[tauri::command]
+pub fn get_file_history(
+    path: String,
+    file_path: String,
+    limit: Option<usize>,
+) -> AppResult<Vec<git::LogEntry>> {
+    git::cli::validate_pathspec(&file_path, "文件路径")?;
+    let repo = git::repo::open_repo(&path)?;
+    git::history::get_file_history(&repo, &file_path, limit.unwrap_or(200).min(1000))
+}
+
+#[tauri::command]
+pub fn get_file_blame(path: String, file_path: String) -> AppResult<Vec<git::BlameLine>> {
+    git::cli::validate_pathspec(&file_path, "文件路径")?;
+    let repo = git::repo::open_repo(&path)?;
+    git::history::get_file_blame(&repo, &file_path)
+}
+
+#[tauri::command]
+pub fn get_file_content(path: String, file_path: String) -> AppResult<git::FileContent> {
+    git::cli::validate_pathspec(&file_path, "文件路径")?;
+    let repo = git::repo::open_repo(&path)?;
+    git::tree::read_worktree_file(&repo, &file_path)
+}
+
+#[tauri::command]
+pub fn list_worktrees(path: String) -> AppResult<Vec<git::worktree::WorktreeInfo>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::worktree::list_worktrees(&repo)
+}
+
+#[tauri::command]
+pub fn add_worktree(
+    path: String,
+    name: String,
+    worktree_path: String,
+    branch: Option<String>,
+) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::worktree::add_worktree(
+        &repo,
+        &name,
+        std::path::Path::new(&worktree_path),
+        branch.as_deref(),
+    )
+}
+
+#[tauri::command]
+pub fn remove_worktree(path: String, name: String, force: bool) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::worktree::remove_worktree(&repo, &name, force)
+}
+
+#[tauri::command]
+pub fn list_hooks(path: String) -> AppResult<Vec<git::hooks::HookInfo>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::hooks::list_hooks(&repo)
+}
+
+#[tauri::command]
+pub fn get_hook_content(path: String, name: String) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::hooks::get_hook_content(&repo, &name)
+}
+
+#[tauri::command]
+pub fn save_hook_content(path: String, name: String, content: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::hooks::save_hook_content(&repo, &name, &content)
+}
+
+#[tauri::command]
+pub fn get_bisect_state(path: String) -> AppResult<git::bisect::BisectState> {
+    let repo = git::repo::open_repo(&path)?;
+    git::bisect::get_state(&repo)
+}
+
+#[tauri::command]
+pub fn bisect_start(
+    path: String,
+    bad: Option<String>,
+    good: Option<String>,
+) -> AppResult<git::bisect::BisectState> {
+    let repo = git::repo::open_repo(&path)?;
+    git::bisect::start(&repo, bad.as_deref(), good.as_deref())
+}
+
+#[tauri::command]
+pub fn bisect_mark(
+    path: String,
+    verdict: String,
+    commit: Option<String>,
+) -> AppResult<git::bisect::BisectState> {
+    let repo = git::repo::open_repo(&path)?;
+    git::bisect::mark(&repo, &verdict, commit.as_deref())
+}
+
+#[tauri::command]
+pub fn bisect_reset(path: String) -> AppResult<()> {
+    let repo = git::repo::open_repo(&path)?;
+    git::bisect::reset(&repo)
+}
+
+#[tauri::command]
+pub fn rewrite_history(path: String, steps: Vec<git::history::RewriteStep>) -> AppResult<String> {
+    let repo = git::repo::open_repo(&path)?;
+    git::history::rewrite_history(&repo, &steps)
+}
+
+#[tauri::command]
+pub fn get_commit_file_diff(
+    path: String,
+    hash: String,
+    file_path: String,
+) -> AppResult<Vec<git::FileDiff>> {
+    git::cli::validate_pathspec(&file_path, "文件路径")?;
+    let repo = git::repo::open_repo(&path)?;
+    git::diff::get_commit_file_diff(&repo, &hash, &file_path)
 }
 
 #[tauri::command]

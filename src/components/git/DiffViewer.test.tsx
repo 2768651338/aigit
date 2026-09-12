@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { DiffViewer } from "./DiffViewer";
+import { ContextMenuProvider } from "@/components/common/ContextMenu";
 import type { FileDiff } from "@/types";
 
 vi.mock("react-i18next", () => ({
@@ -48,14 +49,20 @@ const files: FileDiff[] = [
 
 describe("DiffViewer collapse behavior", () => {
   it("expands every file by default", () => {
-    render(<DiffViewer diffs={files} mode="view" />);
+    render(
+      <ContextMenuProvider>
+        <DiffViewer diffs={files} mode="view" />
+      </ContextMenuProvider>,
+    );
     expect(screen.getByText("export const a = 1;")).not.toBeNull();
     expect(screen.getByText("# hello")).not.toBeNull();
   });
 
   it("starts fully collapsed with defaultCollapsed and re-collapses when diffs change", () => {
     const { rerender } = render(
-      <DiffViewer diffs={files} mode="view" defaultCollapsed />,
+      <ContextMenuProvider>
+        <DiffViewer diffs={files} mode="view" defaultCollapsed />
+      </ContextMenuProvider>,
     );
 
     // Collapsed headers still list every changed file…
@@ -75,7 +82,11 @@ describe("DiffViewer collapse behavior", () => {
     expect(screen.getByText("export const a = 1;")).not.toBeNull();
 
     // A fresh diffs array (e.g. another commit selected) re-collapses all.
-    rerender(<DiffViewer diffs={[...files]} mode="view" defaultCollapsed />);
+    rerender(
+      <ContextMenuProvider>
+        <DiffViewer diffs={[...files]} mode="view" defaultCollapsed />
+      </ContextMenuProvider>,
+    );
     expect(screen.queryByText("export const a = 1;")).toBeNull();
     expect(screen.getAllByRole("button", { name: "diff.expand" })).toHaveLength(2);
   });

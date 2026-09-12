@@ -2,6 +2,32 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
+## [1.0.12] - 2026-09-13
+
+### Added
+
+- 文件浏览器视图（Ctrl+3）：目录懒加载树、文件名 / 本地语义双模式搜索、内容预览（二进制检测、512 KB 上限、LFS 指针识别）、单文件历史与行级 blame。
+- AI 冲突解决助手：冲突解决器内流式生成合并建议，经内容级密钥检测与用户确认后写入。
+- AI 审查一键修复：审查发现可携带补丁，应用前经 `git apply --check` 预校验，成功后自动标记已解决。
+- 聊天会话搜索：按会话标题与消息内容过滤，命中高亮并显示摘要。
+- 恢复面板（HEAD reflog）：找回被 reset / rebase 甩开的提交，支持检出或就地建分支。
+- 提交历史"加载更多"分页加载。
+- 命令面板（Ctrl+K 或 ?）：视图跳转、常用操作与快捷键速查。
+- GitHub Issues 浏览与创建（gh CLI 与 PAT API 双通道）。
+- git worktree 管理：列表、新建（可选检出分支）、移除、一键作为仓库标签打开。
+- git hooks 管理器：白名单内 hook 的查看、编辑与保存（Unix 自动补可执行位）。
+- bisect 二分定位向导：开始 / 标记 / 跳过 / 结束与日志查看。
+- 历史整理：从所选提交到 HEAD 的改写（reword）、相邻合并（squash）与丢弃（drop）；经脏工作区与范围校验，旧历史可从恢复面板找回。
+- 状态栏多仓库聚合弹层：各仓库分支、领先 / 落后、暂存与合并状态一览。
+- diff 行 / 代码块右键"在 AI 对话中解释"。
+- 提交信息草稿按仓库持久化，重启不丢失。
+- 设置页新增界面字体族（`ui.font_family`）。
+- 新增自定义（OpenAI 兼容）AI provider：自定义 base URL、模型与 API Key。
+
+### Changed
+
+- 新增 AI provider（custom）进入凭据服务白名单；Provider 配置结构与既有 openai/deepseek 复用同一通道。
+
 ## [1.0.11] - 2026-09-12
 
 ### Added
@@ -104,6 +130,7 @@
 - AI 与 GitHub 凭据保存在 Windows Credential Manager；支持迁移旧明文 API Key。
 - 对命令参数、remote/ref、审查输出、索引大小与敏感文件执行校验和限制。
 
+[1.0.12]: https://github.com/2768651338/aigit/releases/tag/v1.0.12
 [1.0.11]: https://github.com/2768651338/aigit/releases/tag/v1.0.11
 [1.0.10]: https://github.com/2768651338/aigit/releases/tag/v1.0.10
 [1.0.9]: https://github.com/2768651338/aigit/releases/tag/v1.0.9

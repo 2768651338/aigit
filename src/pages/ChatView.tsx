@@ -21,6 +21,48 @@ import {
 
 type PickerKind = "file" | "commit" | null;
 
+/** 会话搜索的命中高亮：按小写匹配切分，命中片段用强调色标出。 */
+function HighlightText({ text, query }: { text: string; query: string }) {
+  const q = query.trim().toLowerCase();
+  if (!q) return <>{text}</>;
+  const lower = text.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let from = 0;
+  let key = 0;
+  let at = lower.indexOf(q);
+  while (at !== -1) {
+    if (at > from) parts.push(text.slice(from, at));
+    parts.push(
+      <mark
+        key={key++}
+        className="bg-bg-hover text-accent rounded-sm px-0.5"
+      >
+        {text.slice(at, at + q.length)}
+      </mark>,
+    );
+    from = at + q.length;
+    at = lower.indexOf(q, from);
+  }
+  if (from < text.length) parts.push(text.slice(from));
+  return <>{parts}</>;
+}
+
+/** 返回第一条命中查询的消息内容摘要（单行、截断），无命中返回 null。 */
+function findMessageSnippet(
+  messages: { content: string }[],
+  query: string,
+): string | null {
+  const q = query.trim().toLowerCase();
+  if (!q) return null;
+  const hit = messages.find((m) => m.content.toLowerCase().includes(q));
+  if (!hit) return null;
+  const firstLine = hit.content.split("\n").find((l) => l.trim()) ?? "";
+  const at = firstLine.toLowerCase().indexOf(q);
+  const start = Math.max(0, at - 20);
+  const snippet = firstLine.slice(start, start + 80).trim();
+  return (start > 0 ? "…" : "") + snippet + "…";
+}
+
 function CopyButton({ content }: { content: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -104,6 +146,21 @@ export function ChatView() {
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  // 会话侧栏搜索：匹配标题或任意消息内容。
+  const [sessionSearch, setSessionSearch] = useState("");
+
+  // 会话过滤：标题或消息内容命中即保留；标题命中标亮，仅消息命中时显示摘要。
+  const filteredSessions = useMemo(() => {
+    const q = sessionSearch.trim().toLowerCase();
+    if (!q) return sessions.map((session) => ({ session, snippet: null as string | null }));
+    return sessions
+      .map((session) => {
+        const titleHit = session.title.toLowerCase().includes(q);
+        const snippet = titleHit ? null : findMessageSnippet(session.messages, q);
+        return titleHit || snippet !== null ? { session, snippet } : null;
+      })
+      .filter((v): v is { session: (typeof sessions)[number]; snippet: string | null } => v !== null);
+  }, [sessions, sessionSearch]);
   // Session being renamed via the input dialog (replaces window.prompt).
   const [renamingSession, setRenamingSession] = useState<{ id: string; title: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -258,12 +315,37 @@ export function ChatView() {
     <div className="flex flex-col h-full">
       <div className="flex h-full">
         <aside className="w-56 shrink-0 border-r border-border bg-bg-surface flex flex-col">
-          <div className="p-2 border-b border-border">
+          <div className="p-2 border-b border-border space-y-1.5">
             <button className="btn-secondary w-full text-xs" disabled={!currentPath} onClick={() => currentPath && createSession(currentPath)}>{t("chat.newSession")}</button>
+            <div className="relative">
+              <SearchIcon
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none"
+              />
+              <input
+                type="text"
+                value={sessionSearch}
+                onChange={(e) => setSessionSearch(e.target.value)}
+                placeholder={t("chat.searchPlaceholder")}
+                className="input text-xs py-1.5 pl-7 w-full"
+              />
+            </div>
           </div>
           <div className="flex-1 overflow-auto p-2 space-y-1">
-            {sessions.map((session) => <div key={session.id} className={`group flex items-center rounded ${session.id === activeSessionId ? "bg-bg-hover" : "hover:bg-bg-hover"}`}>
-              <button className="flex-1 min-w-0 text-left px-2 py-2 text-xs truncate" onClick={() => currentPath && selectSession(currentPath, session.id)} title={session.title}>{session.title}</button>
+            {filteredSessions.length === 0 && sessionSearch.trim() && (
+              <div className="px-2 py-1.5 text-xs text-text-muted">{t("chat.noSessionMatch")}</div>
+            )}
+            {filteredSessions.map(({ session, snippet }) => <div key={session.id} className={`group flex items-center rounded ${session.id === activeSessionId ? "bg-bg-hover" : "hover:bg-bg-hover"}`}>
+              <button className="flex-1 min-w-0 text-left px-2 py-2 text-xs" onClick={() => currentPath && selectSession(currentPath, session.id)}>
+                <span className="block truncate" title={session.title}>
+                  <HighlightText text={session.title} query={sessionSearch} />
+                </span>
+                {snippet && (
+                  <span className="block truncate text-2xs text-text-muted" title={snippet}>
+                    <HighlightText text={snippet} query={sessionSearch} />
+                  </span>
+                )}
+              </button>
               <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted" aria-label={t("chat.rename")} onClick={() => setRenamingSession({ id: session.id, title: session.title })}>✎</button>
               <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted hover:text-danger" aria-label={t("chat.delete")} onClick={() => { void (async () => { if (!currentPath) return; if (await confirmDialog(t("common.confirmAction"), t("chat.deleteConfirm"))) void deleteSession(currentPath, session.id); })(); }}><XIcon size={12} /></button>
             </div>)}

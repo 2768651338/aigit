@@ -17,6 +17,7 @@ import type {
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
 import { appFlags } from "@/utils/appFlags";
+import { loadCommitDraft, saveCommitDraft } from "@/utils/commitDraft";
 import { formatError, isErrorDto } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
 import i18n from "@/i18n";
@@ -500,6 +501,8 @@ export const useRepoStore = create<RepoStoreState>((set, get) => {
     // Create a fresh tab and mark it as loading immediately so the UI can
     // show a spinner while we fetch repo info.
     const newTab = createEmptyTab(path);
+    // Restore the persisted commit-message draft for this repository.
+    newTab.commitMessage = loadCommitDraft(path);
     newTab.loading = true;
     newTab.error = null;
     const nextTabs = { ...state.tabs, [path]: newTab };
@@ -609,7 +612,10 @@ export const useRepoStore = create<RepoStoreState>((set, get) => {
 
   setCommitMessage: (message: string) => {
     const { activePath } = get();
-    if (activePath) updateTab(set, get, activePath, { commitMessage: message });
+    if (activePath) {
+      updateTab(set, get, activePath, { commitMessage: message });
+      saveCommitDraft(activePath, message);
+    }
   },
 
   setPushError: (error: string | null) => {
@@ -655,6 +661,7 @@ export const useRepoStore = create<RepoStoreState>((set, get) => {
   // to it.
   setCommitMessageFor: (path, message) => {
     updateTab(set, get, path, { commitMessage: message });
+    saveCommitDraft(path, message);
   },
 
   setAiErrorFor: (path, error) => {

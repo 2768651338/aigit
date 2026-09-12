@@ -1,9 +1,11 @@
+pub mod bisect;
 pub mod branch;
 pub(crate) mod cli;
 pub mod commit;
 pub mod conflict;
 pub mod diff;
 pub mod history;
+pub mod hooks;
 pub mod ignore;
 pub mod insights;
 pub mod merge;
@@ -14,6 +16,8 @@ pub mod stash;
 pub mod status;
 pub mod submodule;
 pub mod tag;
+pub mod tree;
+pub mod worktree;
 
 use serde::{Deserialize, Serialize};
 
@@ -161,6 +165,61 @@ pub struct SubmoduleInfo {
     pub url: String,
     /// Status string: "unchanged" / "modified" / "uninitialized" / "deleted".
     pub status: String,
+}
+
+/// One lazily listed entry of the repository tree browser.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileTreeEntry {
+    /// File or directory name (last path component).
+    pub name: String,
+    /// Path relative to the repo root, `/`-separated, no trailing slash.
+    pub path: String,
+    /// `"dir"` or `"file"`.
+    pub kind: String,
+    /// `true` when this listing hit the per-directory entry cap.
+    pub truncated: bool,
+}
+
+/// Text content of a worktree file for the file browser preview.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileContent {
+    /// UTF-8 (lossy) file content; empty for binary files.
+    pub content: String,
+    /// `true` when the file contains NUL bytes (binary).
+    pub is_binary: bool,
+    /// `true` when the file exceeded the read cap and was cut short.
+    pub truncated: bool,
+    pub size_bytes: u64,
+}
+
+/// Per-line blame attribution for a file at HEAD.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlameLine {
+    /// 1-based line number in the current file.
+    pub line: u32,
+    pub commit_hash: String,
+    pub short_hash: String,
+    pub author: String,
+    pub timestamp: i64,
+    /// Commit subject.
+    pub summary: String,
+}
+
+/// One HEAD reflog entry, used by the recovery panel to find commits that
+/// were reset away or lost in a rebase.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReflogEntry {
+    /// Commit the ref pointed to before the move.
+    pub old_hash: String,
+    /// Commit the ref points to after the move.
+    pub new_hash: String,
+    /// Short hash (first 7 chars) of `new_hash`.
+    pub short_hash: String,
+    /// Who performed the move.
+    pub author: String,
+    pub timestamp: i64,
+    /// Reflog action message (e.g. "reset: moving to <hash>").
+    pub message: String,
 }
 
 /// Result of a merge or rebase operation.

@@ -6,6 +6,7 @@ import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { ScanSearchIcon, SpinnerIcon, XIcon } from "@/components/common/Icons";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { githubService } from "@/services/github";
+import { gitService } from "@/services/git";
 import { useToastStore } from "@/stores/toastStore";
 import { confirmDialog } from "@/utils/dialog";
 import { formatError } from "@/utils/error";
@@ -26,6 +27,8 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
   const repoInfo = useRepoStore((s) => s.repoInfo);
   const fileStatuses = useRepoStore((s) => s.fileStatuses);
   const selectFile = useRepoStore((s) => s.selectFile);
+  const applyPatchToIndex = useRepoStore((s) => s.applyPatchToIndex);
+  const refreshStatus = useRepoStore((s) => s.refreshStatus);
   const reviewCode = useAiStore((s) => s.reviewCode);
   const loadReview = useAiStore((s) => s.loadReview);
   const updateFindingStatus = useAiStore((s) => s.updateFindingStatus);
@@ -76,6 +79,24 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
   };
   const copySuggestion = async (suggestion: string) => {
     try { await navigator.clipboard.writeText(suggestion); } catch { /* clipboard permission is optional */ }
+  };
+  // 一键修复：先 `git apply --check` 校验补丁，确认后应用到暂存区并标记已解决。
+  const applyFix = async (finding: ReviewFinding) => {
+    if (!currentPath || !finding.patch) return;
+    const confirmed = await confirmDialog(
+      t("review.applyFixTitle"),
+      t("review.applyFixConfirm", { file: finding.file }),
+    );
+    if (!confirmed) return;
+    try {
+      await gitService.validatePatchApplies(currentPath, finding.patch);
+      await applyPatchToIndex(finding.patch);
+      await refreshStatus(true);
+      toast.success(t("review.fixApplied", { file: finding.file }));
+      updateStatus(finding.id, "resolved");
+    } catch (error) {
+      toast.error(formatError(error), t("review.fixApplyFailed"));
+    }
   };
   const publishFinding = async (finding: ReviewFinding) => {
     if (!currentPath || !report?.head_hash || !finding.line) return;
@@ -135,7 +156,7 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
         <div className="bg-bg-surface border border-border rounded p-4"><p className="text-sm">{report.summary}</p><p className="text-xs text-text-muted mt-2">{report.head_hash ?? "HEAD"} · {report.generated_at}</p></div>
         {report.fallback && report.raw_markdown && <div className="prose prose-invert max-w-none bg-bg-surface border border-border rounded p-4"><p className="text-warning text-sm">{t("review.fallback")}</p><MarkdownRenderer content={report.raw_markdown} /></div>}
         {!report.fallback && findingsByFile.length === 0 && <p className="text-sm text-text-muted">{t("review.noFindings")}</p>}
-        {findingsByFile.map(([file, findings]) => <section key={file} className="border border-border rounded overflow-hidden"><h3 className="px-4 py-2 bg-bg-elevated font-mono text-sm">{file} <span className="text-text-muted">({findings.length})</span></h3><div className="divide-y divide-border">{findings.map((finding) => <article key={finding.id} className="p-4 space-y-2"><div className="flex gap-2 items-start"><span className={clsx("px-2 py-0.5 rounded text-2xs font-semibold uppercase", severityClasses[finding.severity])}>{t(`review.severities.${finding.severity}`)}</span><span className="text-xs text-text-muted">{finding.category} · {Math.round(finding.confidence * 100)}%</span><div className="flex-1" /><button onClick={() => jumpToFinding(finding)} className="btn-ghost text-xs">{finding.line ? `:${finding.line}` : t("review.openDiff")}</button></div><h4 className="font-medium text-sm">{finding.title}</h4><p className="text-sm text-text-secondary">{finding.description}</p><div className="bg-bg-elevated rounded p-3 text-sm"><b>{t("review.suggestion")}</b><p className="mt-1 whitespace-pre-wrap">{finding.suggestion}</p><button onClick={() => copySuggestion(finding.suggestion)} className="btn-ghost text-xs mt-2">{t("review.copySuggestion")}</button></div><div className="flex gap-2"><button onClick={() => publishFinding(finding)} disabled={!finding.line || report.stale} className="btn-ghost text-xs">{t("review.publishInline")}</button><button onClick={() => updateStatus(finding.id, "resolved")} className="btn-ghost text-xs">{t("review.resolve")}</button><button onClick={() => updateStatus(finding.id, "false_positive")} className="btn-ghost text-xs">{t("review.markFalsePositive")}</button></div></article>)}</div></section>)}
+        {findingsByFile.map(([file, findings]) => <section key={file} className="border border-border rounded overflow-hidden"><h3 className="px-4 py-2 bg-bg-elevated font-mono text-sm">{file} <span className="text-text-muted">({findings.length})</span></h3><div className="divide-y divide-border">{findings.map((finding) => <article key={finding.id} className="p-4 space-y-2"><div className="flex gap-2 items-start"><span className={clsx("px-2 py-0.5 rounded text-2xs font-semibold uppercase", severityClasses[finding.severity])}>{t(`review.severities.${finding.severity}`)}</span><span className="text-xs text-text-muted">{finding.category} · {Math.round(finding.confidence * 100)}%</span><div className="flex-1" /><button onClick={() => jumpToFinding(finding)} className="btn-ghost text-xs">{finding.line ? `:${finding.line}` : t("review.openDiff")}</button></div><h4 className="font-medium text-sm">{finding.title}</h4><p className="text-sm text-text-secondary">{finding.description}</p><div className="bg-bg-elevated rounded p-3 text-sm"><b>{t("review.suggestion")}</b><p className="mt-1 whitespace-pre-wrap">{finding.suggestion}</p><button onClick={() => copySuggestion(finding.suggestion)} className="btn-ghost text-xs mt-2">{t("review.copySuggestion")}</button></div><div className="flex gap-2"><button onClick={() => void applyFix(finding)} disabled={!finding.patch || report.stale} className="btn-ghost text-xs">{t("review.applyFix")}</button><button onClick={() => publishFinding(finding)} disabled={!finding.line || report.stale} className="btn-ghost text-xs">{t("review.publishInline")}</button><button onClick={() => updateStatus(finding.id, "resolved")} className="btn-ghost text-xs">{t("review.resolve")}</button><button onClick={() => updateStatus(finding.id, "false_positive")} className="btn-ghost text-xs">{t("review.markFalsePositive")}</button></div></article>)}</div></section>)}
       </section>}
     </div>
   </div>;

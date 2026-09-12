@@ -2,8 +2,10 @@ import { useState, useMemo, useEffect, useCallback, memo } from "react";
 import type { FileDiff, DiffLine } from "@/types";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
+import { useAiStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
+import { useContextMenu } from "@/components/common/ContextMenu";
 import {
   ChevronRightIcon,
   ChevronDownIcon,
@@ -127,6 +129,52 @@ export function DiffViewer({
   const applyPatchToIndex = useRepoStore((s) => s.applyPatchToIndex);
   const applyPatchToIndexReverse = useRepoStore((s) => s.applyPatchToIndexReverse);
   const toast = useToastStore();
+  const { show: showMenu } = useContextMenu();
+
+  // F-22：右键 diff 行 / hunk → “在 AI 对话中解释”。请求路由到聊天会话，
+  // 由流式回答；DiffViewer 自身不承载 AI 状态。
+  const explainInChat = useCallback(
+    (file: string, hunkHeader: string, lines: DiffLine[], label: string) => {
+      const currentPath = useRepoStore.getState().currentPath;
+      if (!currentPath) return;
+      const busy = useAiStore.getState().activeRequestByScope[`${currentPath}\u0000chat`];
+      if (busy) {
+        toast.info(t("diff.explainBusy"));
+        return;
+      }
+      const lineNo = lines[0]?.new_line_no ?? lines[0]?.old_line_no ?? "";
+      const content = lines
+        .map((l) => (l.line_type === "add" ? "+" : l.line_type === "delete" ? "-" : " ") + l.content)
+        .join("\n");
+      const message =
+        `${t("diff.explainPromptIntro")}\n\n` +
+        `${t("diff.explainPromptFile", { file, line: String(lineNo), hunk: hunkHeader })}\n` +
+        "```diff\n" + content + "\n```";
+      void useAiStore
+        .getState()
+        .sendChatMessage(message, currentPath)
+        .then(() => toast.info(t(label)))
+        .catch((e) => toast.error(formatError(e)));
+    },
+    [t, toast],
+  );
+
+  const handleLineContextMenu = useCallback(
+    (e: React.MouseEvent, file: string, hunkHeader: string, hunkLines: DiffLine[], line: DiffLine) => {
+      e.stopPropagation();
+      showMenu(e, [
+        {
+          label: t("diff.explainLine"),
+          onClick: () => explainInChat(file, hunkHeader, [line], "diff.explainSent"),
+        },
+        {
+          label: t("diff.explainHunk"),
+          onClick: () => explainInChat(file, hunkHeader, hunkLines, "diff.explainSent"),
+        },
+      ]);
+    },
+    [showMenu, t, explainInChat],
+  );
 
   // Re-collapse everything whenever a fresh `diffs` array arrives so the
   // collapsed headers act as the changed-file list (see defaultCollapsed).
@@ -357,6 +405,9 @@ export function DiffViewer({
                             }
                             onToggle={toggleLine}
                             selectHint={t("diffStage.selectLinesHint")}
+                            onContextMenu={(e) =>
+                              handleLineContextMenu(e, diff.path, hunk.header, hunk.lines, line)
+                            }
                           />
                         );
                       })}
@@ -404,6 +455,7 @@ const DiffRow = memo(function DiffRow({
   isSelectable,
   onToggle,
   selectHint,
+  onContextMenu,
 }: {
   line: DiffLine;
   lineKey: string;
@@ -411,10 +463,12 @@ const DiffRow = memo(function DiffRow({
   isSelectable: boolean;
   onToggle: (key: string) => void;
   selectHint: string;
+  onContextMenu?: (e: React.MouseEvent) => void;
 }) {
   return (
     <div
       data-diff-line={line.new_line_no ?? line.old_line_no ?? undefined}
+      onContextMenu={onContextMenu}
       className={clsx(
         "flex items-start px-3 py-0.5 hover:bg-bg-hover/30 group",
         line.line_type === "add" && "diff-add",

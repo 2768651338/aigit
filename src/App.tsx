@@ -8,6 +8,7 @@ import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
 import { RepoEntryProvider } from "@/components/git/RepoEntryDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { CommandPalette } from "@/components/common/CommandPalette";
 import {
   ContextMenuProvider,
   useContextMenu,
@@ -16,6 +17,7 @@ import {
 import { RefreshIcon, CopyIcon, GithubIcon, TerminalIcon } from "@/components/common/Icons";
 import { ChangesView } from "@/pages/ChangesView";
 import { BranchesView } from "@/pages/BranchesView";
+import { FilesView } from "@/pages/FilesView";
 import { ReviewView } from "@/pages/ReviewView";
 import { ChatView } from "@/pages/ChatView";
 import { InsightsView } from "@/pages/InsightsView";
@@ -71,6 +73,9 @@ function AppShell() {
   useEffect(() => {
     if (config) {
       document.documentElement.style.fontSize = `${config.ui.font_size}px`;
+      // 可选字体族覆盖：空值回落到内置字体栈。
+      document.documentElement.style.fontFamily =
+        config.ui.font_family?.trim() ? config.ui.font_family : "";
       appFlags.rememberOpenRepos = config.ui.remember_open_repos;
     }
   }, [config]);
@@ -101,8 +106,8 @@ function AppShell() {
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key >= "1" && e.key <= "6") {
-        const views: ViewType[] = ["changes", "branches", "review", "chat", "insights", "settings"];
+      if (e.key >= "1" && e.key <= "7") {
+        const views: ViewType[] = ["changes", "branches", "files", "review", "chat", "insights", "settings"];
         const idx = Number(e.key) - 1;
         if (idx < views.length) {
           e.preventDefault();
@@ -259,6 +264,7 @@ function AppShell() {
               <ErrorBoundary>
                 {activeView === "changes" && <ChangesView />}
                 {activeView === "branches" && <BranchesView />}
+                {activeView === "files" && <FilesView />}
                 {activeView === "review" && <ReviewView onNavigateChanges={() => setActiveView("changes")} />}
                 {activeView === "chat" && <ChatView />}
                 {activeView === "insights" && <InsightsView />}
@@ -269,6 +275,7 @@ function AppShell() {
         </div>
         <StatusBar />
         <Toaster />
+        <CommandPalette onViewChange={setActiveView} />
       </div>
     </ErrorBoundary>
   );

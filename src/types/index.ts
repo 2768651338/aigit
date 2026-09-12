@@ -211,8 +211,88 @@ export interface LogEntry {
   refs: string[];
 }
 
+/** 文件浏览器：单个目录条目（dir 优先于 file 排列，由后端保证） */
+export interface FileTreeEntry {
+  name: string;
+  path: string;
+  kind: "dir" | "file";
+  truncated: boolean;
+}
+
+/** 文件浏览器：工作区文件预览内容 */
+export interface FileContent {
+  content: string;
+  is_binary: boolean;
+  truncated: boolean;
+  size_bytes: number;
+}
+
+/** 行级 blame 归属（基于 HEAD） */
+export interface BlameLine {
+  line: number;
+  commit_hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: number;
+  summary: string;
+}
+
+/** HEAD reflog 单条记录（恢复面板用） */
+export interface ReflogEntry {
+  old_hash: string;
+  new_hash: string;
+  short_hash: string;
+  author: string;
+  timestamp: number;
+  message: string;
+}
+
+/** 链接的 git worktree 条目 */
+export interface WorktreeInfo {
+  name: string;
+  path: string;
+  is_current: boolean;
+  is_bare: boolean;
+  is_locked: boolean;
+}
+
+/** git hook 槽位（hooks 管理面板用） */
+export interface HookInfo {
+  name: string;
+  path: string;
+  exists: boolean;
+  executable: boolean;
+}
+
+/** git bisect 会话状态 */
+export interface BisectState {
+  in_progress: boolean;
+  current_commit: string;
+  log: string;
+}
+
+/** 历史整理步骤（最老在前；squash = 并入上一步） */
+export interface RewriteStep {
+  hash: string;
+  message: string;
+  squash: boolean;
+}
+
 export type ReviewSeverity = "critical" | "high" | "medium" | "low" | "info";
 export type FindingStatus = "open" | "resolved" | "false_positive";
+
+/** GitHub Issue（Issues 面板用） */
+export interface GitHubIssue {
+  number: number;
+  title: string;
+  body: string;
+  state: string;
+  url: string;
+  author: string;
+  labels: string[];
+  created_at: string;
+  updated_at: string;
+}
 
 export interface ReviewFinding {
   id: string;
@@ -223,6 +303,8 @@ export interface ReviewFinding {
   title: string;
   description: string;
   suggestion: string;
+  /** AI 给出的 unified diff 修复补丁；可为空（需要人工判断的发现没有补丁）。 */
+  patch?: string | null;
   confidence: number;
   metadata: Record<string, unknown>;
   status: FindingStatus;
@@ -375,6 +457,8 @@ export interface CredentialStatus {
   openai: boolean;
   claude: boolean;
   deepseek: boolean;
+  /** 自定义 OpenAI 兼容 provider 的 key 是否已存入凭据库。 */
+  custom?: boolean;
   embedding_openai: boolean;
 }
 
@@ -390,6 +474,9 @@ export interface AiProviderConfig {
   deepseek_base_url: string;
   ollama_base_url: string;
   ollama_model: string;
+  /** 自定义 OpenAI 兼容端点（active_provider = "custom"）。 */
+  custom_base_url?: string;
+  custom_model?: string;
   temperature: number;
   max_tokens: number;
   /** Model context window in tokens; oversized inputs are truncated to this. */
@@ -445,6 +532,8 @@ export interface UiConfig {
   language: string;
   /** Persist open repository tabs and restore them on the next launch. */
   remember_open_repos: boolean;
+  /** 可选的界面字体族覆盖（CSS font-family 值）；空/缺省 = 内置默认。 */
+  font_family?: string;
 }
 
 /**
@@ -583,7 +672,7 @@ export interface InsightExportOptions {
   frameRate?: number;
 }
 
-export type ViewType = "changes" | "branches" | "review" | "chat" | "insights" | "settings";
+export type ViewType = "changes" | "branches" | "files" | "review" | "chat" | "insights" | "settings";
 
 export type FileStatusType =
   | "modified"

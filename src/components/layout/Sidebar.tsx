@@ -35,10 +35,11 @@ const NAV_ITEMS: {
 }[] = [
   { id: "changes", labelKey: "nav.changes", icon: FileEditIcon, shortcut: "1" },
   { id: "branches", labelKey: "nav.branches", icon: GitBranchIcon, shortcut: "2" },
-  { id: "review", labelKey: "nav.review", icon: ScanSearchIcon, shortcut: "3" },
-  { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon, shortcut: "4" },
-  { id: "insights", labelKey: "nav.insights", icon: BarChartIcon, shortcut: "5" },
-  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "6" },
+  { id: "files", labelKey: "nav.files", icon: FolderIcon, shortcut: "3" },
+  { id: "review", labelKey: "nav.review", icon: ScanSearchIcon, shortcut: "4" },
+  { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon, shortcut: "5" },
+  { id: "insights", labelKey: "nav.insights", icon: BarChartIcon, shortcut: "6" },
+  { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "7" },
 ];
 
 export function Sidebar({ activeView, onViewChange }: SidebarProps) {

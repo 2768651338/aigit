@@ -183,11 +183,11 @@ pub trait AiProvider: Send + Sync {
 
 pub fn get_provider(provider_name: &str) -> AppResult<Box<dyn AiProvider>> {
     match provider_name {
-        "openai" | "deepseek" => Ok(Box::new(openai::OpenAiProvider::default())),
+        "openai" | "deepseek" | "custom" => Ok(Box::new(openai::OpenAiProvider::default())),
         "claude" => Ok(Box::new(claude::ClaudeProvider::default())),
         "ollama" => Ok(Box::new(ollama::OllamaProvider::default())),
         other => Err(AppError::Ai(format!(
-            "Unknown provider: {other}. Supported: openai, claude, deepseek, ollama"
+            "Unknown provider: {other}. Supported: openai, claude, deepseek, custom, ollama"
         ))),
     }
 }

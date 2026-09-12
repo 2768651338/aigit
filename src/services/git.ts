@@ -5,8 +5,15 @@ import type {
   CommitPlan,
   ConflictFile,
   FileDiff,
+  FileContent,
   FileStatus,
+  BlameLine,
+  BisectState,
+  FileTreeEntry,
+  HookInfo,
   LogEntry,
+  RewriteStep,
+  WorktreeInfo,
   MergeResult,
   GitOperationState,
   RepoInfo,
@@ -14,6 +21,7 @@ import type {
   StashInfo,
   SubmoduleInfo,
   RemoteInfo,
+  ReflogEntry,
   RepositoryInsights,
   TagInfo,
   TrackingInfo,
@@ -154,9 +162,9 @@ export const gitService = {
     return invoke<BranchInfo[]>("list_branches", { path });
   },
 
-  createBranch: (path: string, name: string) => {
+  createBranch: (path: string, name: string, startPoint?: string) => {
     ensureTauri();
-    return invoke<void>("create_branch", { path, name });
+    return invoke<void>("create_branch", { path, name, startPoint });
   },
 
   switchBranch: (path: string, name: string, force = false) => {
@@ -169,9 +177,15 @@ export const gitService = {
     return invoke<void>("delete_branch", { path, name });
   },
 
-  getLog: (path: string, limit?: number) => {
+  getLog: (path: string, limit?: number, offset?: number) => {
     ensureTauri();
-    return invoke<LogEntry[]>("get_log", { path, limit });
+    return invoke<LogEntry[]>("get_log", { path, limit, offset });
+  },
+
+  /** Recent HEAD movements for the recovery panel. */
+  listHeadReflog: (path: string) => {
+    ensureTauri();
+    return invoke<ReflogEntry[]>("list_head_reflog", { path });
   },
 
   getRepositoryInsights: (path: string, startDate?: string, endDate?: string) => {
@@ -189,6 +203,108 @@ export const gitService = {
   listFiles: (path: string) => {
     ensureTauri();
     return invoke<string[]>("list_files", { path });
+  },
+
+  /** List one directory of the tracked tree (file browser, lazy per dir). */
+  listTree: (path: string, dir?: string) => {
+    ensureTauri();
+    return invoke<FileTreeEntry[]>("list_tree", { path, dir });
+  },
+
+  /** Commits that touched one file, newest first. */
+  getFileHistory: (path: string, filePath: string, limit?: number) => {
+    ensureTauri();
+    return invoke<LogEntry[]>("get_file_history", { path, filePath, limit });
+  },
+
+  /** Per-line blame attribution of a file at HEAD. */
+  getFileBlame: (path: string, filePath: string) => {
+    ensureTauri();
+    return invoke<BlameLine[]>("get_file_blame", { path, filePath });
+  },
+
+  /** Binary-detected, size-capped worktree file preview. */
+  getFileContent: (path: string, filePath: string) => {
+    ensureTauri();
+    return invoke<FileContent>("get_file_content", { path, filePath });
+  },
+
+  /** Structured diff of one commit limited to a single file. */
+  getCommitFileDiff: (path: string, hash: string, filePath: string) => {
+    ensureTauri();
+    return invoke<FileDiff[]>("get_commit_file_diff", { path, hash, filePath });
+  },
+
+  /** Dry-run a unified diff against the index (`git apply --check --cached`). */
+  validatePatchApplies: (path: string, patch: string) => {
+    ensureTauri();
+    return invoke<boolean>("validate_patch_applies", { path, patch });
+  },
+
+  /** List linked worktrees of this repository. */
+  listWorktrees: (path: string) => {
+    ensureTauri();
+    return invoke<WorktreeInfo[]>("list_worktrees", { path });
+  },
+
+  /** Create a linked worktree, optionally checking out a branch. */
+  addWorktree: (path: string, name: string, worktreePath: string, branch?: string) => {
+    ensureTauri();
+    return invoke<string>("add_worktree", { path, name, worktreePath, branch });
+  },
+
+  /** Prune a linked worktree; with force the working directory is deleted. */
+  removeWorktree: (path: string, name: string, force: boolean) => {
+    ensureTauri();
+    return invoke<void>("remove_worktree", { path, name, force });
+  },
+
+  /** List known git hook slots and whether a script exists for each. */
+  listHooks: (path: string) => {
+    ensureTauri();
+    return invoke<HookInfo[]>("list_hooks", { path });
+  },
+
+  /** Read one hook script (empty when it does not exist). */
+  getHookContent: (path: string, name: string) => {
+    ensureTauri();
+    return invoke<string>("get_hook_content", { path, name });
+  },
+
+  /** Write one hook script (validated against the hook-name whitelist). */
+  saveHookContent: (path: string, name: string, content: string) => {
+    ensureTauri();
+    return invoke<void>("save_hook_content", { path, name, content });
+  },
+
+  /** Current `git bisect` session state. */
+  getBisectState: (path: string) => {
+    ensureTauri();
+    return invoke<BisectState>("get_bisect_state", { path });
+  },
+
+  /** Start a bisect session, optionally seeding bad/good commits. */
+  bisectStart: (path: string, bad?: string, good?: string) => {
+    ensureTauri();
+    return invoke<BisectState>("bisect_start", { path, bad, good });
+  },
+
+  /** Mark the current commit good/bad/skip. */
+  bisectMark: (path: string, verdict: "good" | "bad" | "skip", commit?: string) => {
+    ensureTauri();
+    return invoke<BisectState>("bisect_mark", { path, verdict, commit });
+  },
+
+  /** End the bisect session and return to the original HEAD. */
+  bisectReset: (path: string) => {
+    ensureTauri();
+    return invoke<void>("bisect_reset", { path });
+  },
+
+  /** Rewrite the branch tail: reword / squash / drop (oldest first). */
+  rewriteHistory: (path: string, steps: RewriteStep[]) => {
+    ensureTauri();
+    return invoke<string>("rewrite_history", { path, steps });
   },
 
   listRemotes: (path: string) => {

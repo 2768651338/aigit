@@ -41,6 +41,28 @@ impl OpenAiProvider {
 }
 
 #[async_trait]
+/// Validate the user-defined endpoint before building the request URL:
+/// only http/https schemes are allowed and both URL and model must be set.
+fn require_custom_endpoint(config: &AiProviderConfig) -> AppResult<()> {
+    let url = config.custom_base_url.trim();
+    if url.is_empty() {
+        return Err(AppError::Ai(
+            "Custom provider base URL is not configured".into(),
+        ));
+    }
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err(AppError::Ai(
+            "Custom provider base URL must start with http:// or https://".into(),
+        ));
+    }
+    if config.custom_model.trim().is_empty() {
+        return Err(AppError::Ai(
+            "Custom provider model is not configured".into(),
+        ));
+    }
+    Ok(())
+}
+
 impl AiProvider for OpenAiProvider {
     async fn chat(
         &self,
@@ -62,6 +84,9 @@ impl AiProvider for OpenAiProvider {
         let messages = &prepared.messages;
         let (model, base_url) = if config.active_provider == "deepseek" {
             (&config.deepseek_model, &config.deepseek_base_url)
+        } else if config.active_provider == "custom" {
+            require_custom_endpoint(config)?;
+            (&config.custom_model, &config.custom_base_url)
         } else {
             (&config.openai_model, &config.openai_base_url)
         };
@@ -119,6 +144,9 @@ impl AiProvider for OpenAiProvider {
             let messages = &prepared.messages;
             let (model, base_url) = if config.active_provider == "deepseek" {
                 (&config.deepseek_model, &config.deepseek_base_url)
+            } else if config.active_provider == "custom" {
+                require_custom_endpoint(config)?;
+                (&config.custom_model, &config.custom_base_url)
             } else {
                 (&config.openai_model, &config.openai_base_url)
             };

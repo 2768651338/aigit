@@ -177,6 +177,30 @@ pub fn get_commit_diff_files(repo: &Repository, hash: &str) -> AppResult<Vec<Fil
     parse_diff(&diff)
 }
 
+/// Structured diff of `hash` limited to one file (`git show <hash> -- <path>`),
+/// used by the file-history panel in the file browser.
+pub fn get_commit_file_diff(
+    repo: &Repository,
+    hash: &str,
+    file_path: &str,
+) -> AppResult<Vec<FileDiff>> {
+    let oid = git2::Oid::from_str(hash)?;
+    let commit = repo.find_commit(oid)?;
+
+    let tree = commit.tree()?;
+    let parent_tree = commit.parent(0).ok().map(|p| p.tree()).transpose()?;
+
+    let mut opts = DiffOptions::new();
+    opts.pathspec(file_path);
+
+    let diff = match parent_tree {
+        Some(ref pt) => repo.diff_tree_to_tree(Some(pt), Some(&tree), Some(&mut opts))?,
+        None => repo.diff_tree_to_tree(None, Some(&tree), Some(&mut opts))?,
+    };
+
+    parse_diff(&diff)
+}
+
 fn strip_line_ending(content: &[u8]) -> String {
     let content = if content.ends_with(b"\r\n") {
         &content[..content.len() - 2]

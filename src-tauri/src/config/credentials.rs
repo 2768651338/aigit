@@ -2,10 +2,11 @@ use crate::error::{AppError, AppResult};
 
 #[cfg(windows)]
 const SERVICE_NAME: &str = "aigit";
-const PROVIDERS: [&str; 5] = [
+const PROVIDERS: [&str; 6] = [
     "openai",
     "claude",
     "deepseek",
+    "custom",
     "embedding_openai",
     "github_pat",
 ];

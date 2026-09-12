@@ -31,6 +31,8 @@ pub struct CredentialStatus {
     pub openai: bool,
     pub claude: bool,
     pub deepseek: bool,
+    #[serde(default)]
+    pub custom: bool,
     pub embedding_openai: bool,
 }
 
@@ -102,6 +104,11 @@ pub struct AiProviderConfig {
     pub deepseek_base_url: String,
     pub ollama_base_url: String,
     pub ollama_model: String,
+    /// User-defined OpenAI-compatible endpoint (`active_provider = "custom"`).
+    #[serde(default)]
+    pub custom_base_url: String,
+    #[serde(default)]
+    pub custom_model: String,
     pub temperature: f64,
     pub max_tokens: u32,
     /// Model context window in tokens. Inputs (system prompt + messages) are
@@ -123,6 +130,10 @@ pub struct UiConfig {
     /// configs written before this switch existed.
     #[serde(default = "default_true")]
     pub remember_open_repos: bool,
+    /// Optional UI font family override (CSS font-family value). Empty means
+    /// the built-in default stack.
+    #[serde(default)]
+    pub font_family: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -161,6 +172,8 @@ impl Default for AiProviderConfig {
             deepseek_base_url: "https://api.deepseek.com/v1".to_string(),
             ollama_base_url: "http://localhost:11434".to_string(),
             ollama_model: "qwen2.5-coder:7b".to_string(),
+            custom_base_url: String::new(),
+            custom_model: String::new(),
             temperature: 0.7,
             max_tokens: 2048,
             max_context_tokens: 131_072,
@@ -177,6 +190,7 @@ impl Default for UiConfig {
             show_diff_inline: true,
             language: default_language(),
             remember_open_repos: true,
+            font_family: String::new(),
         }
     }
 }
@@ -279,6 +293,7 @@ impl AppConfig {
             openai: store.get("openai")?.is_some(),
             claude: store.get("claude")?.is_some(),
             deepseek: store.get("deepseek")?.is_some(),
+            custom: store.get("custom")?.is_some(),
             embedding_openai: store.get("embedding_openai")?.is_some(),
         };
         Ok(())

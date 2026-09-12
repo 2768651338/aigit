@@ -12,6 +12,10 @@ import { TagPanel } from "@/components/git/TagPanel";
 import { StashPanel } from "@/components/git/StashPanel";
 import { SubmodulePanel } from "@/components/git/SubmodulePanel";
 import { PullRequestsPanel } from "@/components/git/PullRequestsPanel";
+import { IssuesPanel } from "@/components/git/IssuesPanel";
+import { WorktreesPanel } from "@/components/git/WorktreesPanel";
+import { HooksPanel } from "@/components/git/HooksPanel";
+import { BisectPanel } from "@/components/git/BisectPanel";
 import {
   GitBranchIcon,
   TagIcon,
@@ -23,12 +27,14 @@ import {
   CheckIcon,
   SpinnerIcon,
   SearchIcon,
+  AlertCircleIcon,
+  PlayIcon,
 } from "@/components/common/Icons";
 import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import { confirmDialog } from "@/utils/dialog";
 import clsx from "clsx";
 
-type SubTab = "branches" | "pullRequests" | "tags" | "stashes" | "submodules";
+type SubTab = "branches" | "pullRequests" | "issues" | "worktrees" | "hooks" | "bisect" | "tags" | "stashes" | "submodules";
 
 export function BranchesView() {
   const { t } = useTranslation();
@@ -170,6 +176,10 @@ export function BranchesView() {
   const subTabs: { id: SubTab; label: string; icon: React.ComponentType<{ size?: number; className?: string }> }[] = [
     { id: "branches", label: t("branches.tabBranches"), icon: GitBranchIcon },
     { id: "pullRequests", label: t("branches.tabPullRequests"), icon: CheckIcon },
+    { id: "issues", label: t("branches.tabIssues"), icon: AlertCircleIcon },
+    { id: "worktrees", label: t("branches.tabWorktrees"), icon: PackageIcon },
+    { id: "hooks", label: t("branches.tabHooks"), icon: PlayIcon },
+    { id: "bisect", label: t("branches.tabBisect"), icon: SearchIcon },
     { id: "tags", label: t("branches.tabTags"), icon: TagIcon },
     { id: "stashes", label: t("branches.tabStashes"), icon: ArchiveIcon },
     { id: "submodules", label: t("branches.tabSubmodules"), icon: PackageIcon },
@@ -177,6 +187,10 @@ export function BranchesView() {
 
   // Delegate the whole panel to the dedicated component for non-branch tabs.
   if (subTab === "pullRequests") return <PullRequestsPanel onBack={() => setSubTab("branches")} />;
+  if (subTab === "issues") return <IssuesPanel onBack={() => setSubTab("branches")} />;
+  if (subTab === "worktrees") return <WorktreesPanel onBack={() => setSubTab("branches")} />;
+  if (subTab === "hooks") return <HooksPanel onBack={() => setSubTab("branches")} />;
+  if (subTab === "bisect") return <BisectPanel onBack={() => setSubTab("branches")} />;
   if (subTab === "tags") return <TagPanel />;
   if (subTab === "stashes") return <StashPanel />;
   if (subTab === "submodules") return <SubmodulePanel />;

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   CreatePullRequest,
   GhStatus,
+  GitHubIssue,
   GitHubRemote,
   InlineCommentRequest,
   PullRequest,
@@ -51,6 +52,14 @@ export const githubService = {
   publishInlineComment(path: string, input: InlineCommentRequest, remote?: string) {
     ensureTauri();
     return invoke<string>("github_publish_inline_comment", { path, remote, input });
+  },
+  issueList(path: string, remote?: string) {
+    ensureTauri();
+    return invoke<GitHubIssue[]>("github_issue_list", { path, remote });
+  },
+  issueCreate(path: string, title: string, body: string, remote?: string) {
+    ensureTauri();
+    return invoke<string>("github_issue_create", { path, remote, title, body });
   },
   setPat(token: string) {
     ensureTauri();

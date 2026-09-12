@@ -6,8 +6,8 @@ use tauri_plugin_opener::OpenerExt;
 use crate::error::{AppError, AppResult};
 use crate::git;
 use crate::github::{
-    self, CreatePullRequest, GhStatus, GitHubApi, GitHubRemote, InlineCommentRequest, PullRequest,
-    PullRequestDetail, WorkflowResult,
+    self, CreatePullRequest, GhStatus, GitHubApi, GitHubIssue, GitHubRemote, InlineCommentRequest,
+    PullRequest, PullRequestDetail, WorkflowResult,
 };
 use crate::review;
 
@@ -227,6 +227,58 @@ pub async fn github_publish_inline_comment(
     );
     api.inline_comment(input.pull_number, commit_id, &finding.file, line, &body)
         .await
+}
+
+#[tauri::command]
+pub async fn github_issue_list(
+    path: String,
+    remote: Option<String>,
+) -> AppResult<Vec<GitHubIssue>> {
+    let (repo, remote) = context(&path, remote.as_deref())?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
+    if status.installed && status.authenticated {
+        return tokio::task::spawn_blocking(move || github::gh_issue_list(&workdir, &remote))
+            .await
+            .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?;
+    }
+    if let Some(api) = GitHubApi::from_store(remote)? {
+        return api.issue_list().await;
+    }
+    Err(AppError::Credential(
+        "Authenticate GitHub CLI or store a GitHub PAT to browse issues".into(),
+    ))
+}
+
+#[tauri::command]
+pub async fn github_issue_create(
+    path: String,
+    remote: Option<String>,
+    title: String,
+    body: String,
+) -> AppResult<String> {
+    if title.trim().is_empty() {
+        return Err(AppError::General("Issue title must not be empty".into()));
+    }
+    if title.len() > 1_000 || body.len() > 64 * 1024 {
+        return Err(AppError::General("Issue title/body too long".into()));
+    }
+    let (repo, remote) = context(&path, remote.as_deref())?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
+    if status.installed && status.authenticated {
+        return tokio::task::spawn_blocking(move || {
+            github::gh_issue_create(&workdir, &remote, &title, &body)
+        })
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?;
+    }
+    if let Some(api) = GitHubApi::from_store(remote)? {
+        return api.issue_create(&title, &body).await;
+    }
+    Err(AppError::Credential(
+        "GitHub authentication is required to create an issue".into(),
+    ))
 }
 
 #[tauri::command]

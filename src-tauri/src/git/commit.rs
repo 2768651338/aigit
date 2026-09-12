@@ -237,6 +237,32 @@ pub fn apply_patch_to_index_reverse(repo: &Repository, patch: &str) -> AppResult
     apply_patch(repo, patch, true)
 }
 
+/// Dry-run a unified-diff patch against the index (`git apply --check --cached`)
+/// without modifying anything. Lets the UI validate an AI-suggested patch
+/// before offering the destructive-ish apply action.
+pub fn check_patch_applies(repo: &Repository, patch: &str) -> AppResult<()> {
+    if patch.is_empty() {
+        return Err(AppError::General("patch 不能为空".to_string()));
+    }
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository has no workdir".to_string()))?;
+    let temp_patch = TempPatch::create(workdir, patch)?;
+    let args = vec![
+        "apply".to_string(),
+        "--check".to_string(),
+        "--cached".to_string(),
+        "--whitespace=nowarn".to_string(),
+        "--".to_string(),
+        temp_patch.file_name()?,
+    ];
+    let output = cli::run(workdir, args, LOCAL_TIMEOUT)?;
+    if !output.success() {
+        return Err(cli::command_failed("patch 校验失败", &output));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::{amend, stage_all, TempPatch};

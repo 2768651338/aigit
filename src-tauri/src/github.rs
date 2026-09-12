@@ -91,6 +91,20 @@ pub struct PullRequest {
     pub changed_files: Option<u64>,
 }
 
+/// Issue descriptor for the Issues panel (list + view).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitHubIssue {
+    pub number: u64,
+    pub title: String,
+    pub body: String,
+    pub state: String,
+    pub url: String,
+    pub author: String,
+    pub labels: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckRun {
     pub name: String,
@@ -431,6 +445,85 @@ fn gh_json<T: DeserializeOwned>(workdir: &Path, args: Vec<String>) -> AppResult<
         )));
     }
     serde_json::from_str(&stdout).map_err(AppError::from)
+}
+
+pub fn gh_issue_list(workdir: &Path, remote: &GitHubRemote) -> AppResult<Vec<GitHubIssue>> {
+    #[derive(Deserialize)]
+    struct GhAuthor {
+        login: String,
+    }
+    #[derive(Deserialize)]
+    struct GhLabel {
+        name: String,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GhIssue {
+        number: u64,
+        title: String,
+        #[serde(default)]
+        body: Option<String>,
+        state: String,
+        url: String,
+        author: Option<GhAuthor>,
+        #[serde(default)]
+        labels: Vec<GhLabel>,
+        created_at: String,
+        updated_at: String,
+    }
+    let args = vec![
+        "issue".into(),
+        "list".into(),
+        "--repo".into(),
+        remote.repository(),
+        "--state".into(),
+        "all".into(),
+        "--limit".into(),
+        "100".into(),
+        "--json".into(),
+        "number,title,body,state,url,author,labels,createdAt,updatedAt".into(),
+    ];
+    Ok(gh_json::<Vec<GhIssue>>(workdir, args)?
+        .into_iter()
+        .map(|i| GitHubIssue {
+            number: i.number,
+            title: i.title,
+            body: i.body.unwrap_or_default(),
+            state: i.state.to_lowercase(),
+            url: i.url,
+            author: i.author.map(|a| a.login).unwrap_or_default(),
+            labels: i.labels.into_iter().map(|l| l.name).collect(),
+            created_at: i.created_at,
+            updated_at: i.updated_at,
+        })
+        .collect())
+}
+
+/// Create an issue via `gh`; returns the new issue URL from CLI stdout.
+pub fn gh_issue_create(
+    workdir: &Path,
+    remote: &GitHubRemote,
+    title: &str,
+    body: &str,
+) -> AppResult<String> {
+    let args = vec![
+        "issue".into(),
+        "create".into(),
+        "--repo".into(),
+        remote.repository(),
+        "--title".into(),
+        title.to_string(),
+        "--body".into(),
+        body.to_string(),
+    ];
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
+    if !ok {
+        return Err(AppError::General(format!(
+            "GitHub CLI failed: {}",
+            stderr.trim()
+        )));
+    }
+    Ok(stdout.trim().lines().last().unwrap_or("").to_string())
 }
 
 pub fn gh_list(workdir: &Path, remote: &GitHubRemote) -> AppResult<Vec<PullRequest>> {
@@ -783,6 +876,103 @@ impl GitHubApi {
             )
             .await?;
         Ok(api.into())
+    }
+    /// List issues via the REST API. The issues endpoint also returns pull
+    /// requests; entries carrying a `pull_request` object are filtered out.
+    pub async fn issue_list(&self) -> AppResult<Vec<GitHubIssue>> {
+        #[derive(Deserialize)]
+        struct ApiUser {
+            login: String,
+        }
+        #[derive(Deserialize)]
+        struct ApiLabel {
+            name: String,
+        }
+        #[derive(Deserialize)]
+        struct ApiIssue {
+            number: u64,
+            title: String,
+            #[serde(default)]
+            body: Option<String>,
+            state: String,
+            html_url: String,
+            #[serde(default)]
+            user: Option<ApiUser>,
+            #[serde(default)]
+            labels: Vec<ApiLabel>,
+            created_at: String,
+            updated_at: String,
+            /// Present for PRs listed under /issues; used to filter them out.
+            #[serde(default)]
+            pull_request: Option<serde_json::Value>,
+        }
+        let mut page = 1;
+        let mut all = Vec::new();
+        loop {
+            let mut url = self.endpoint(&format!(
+                "/repos/{}/{}/issues",
+                self.remote.owner, self.remote.repo
+            ))?;
+            url.query_pairs_mut()
+                .append_pair("state", "all")
+                .append_pair("per_page", "100")
+                .append_pair("page", &page.to_string());
+            let batch: Vec<ApiIssue> = self
+                .response(self.request(reqwest::Method::GET, url).send().await?)
+                .await?;
+            let count = batch.len();
+            all.extend(batch.into_iter().filter_map(|i| {
+                if i.pull_request.is_some() {
+                    return None;
+                }
+                Some(GitHubIssue {
+                    number: i.number,
+                    title: i.title,
+                    body: i.body.unwrap_or_default(),
+                    state: i.state.to_lowercase(),
+                    url: i.html_url,
+                    author: i.user.map(|u| u.login).unwrap_or_default(),
+                    labels: i.labels.into_iter().map(|l| l.name).collect(),
+                    created_at: i.created_at,
+                    updated_at: i.updated_at,
+                })
+            }));
+            if count < 100 {
+                break;
+            }
+            page += 1;
+            if page > 20 {
+                return Err(AppError::General(
+                    "GitHub pagination exceeded safety limit".into(),
+                ));
+            }
+        }
+        Ok(all)
+    }
+    /// Create an issue via the REST API; returns the new issue URL.
+    pub async fn issue_create(&self, title: &str, body: &str) -> AppResult<String> {
+        #[derive(Serialize)]
+        struct NewIssue<'a> {
+            title: &'a str,
+            body: &'a str,
+        }
+        let url = self.endpoint(&format!(
+            "/repos/{}/{}/issues",
+            self.remote.owner, self.remote.repo
+        ))?;
+        #[derive(Deserialize)]
+        struct CreatedIssue {
+            html_url: String,
+        }
+        let created: CreatedIssue = self
+            .response(
+                self.request(reqwest::Method::POST, url)
+                    .json(&NewIssue { title, body })
+                    .send()
+                    .await?,
+            )
+            .await?;
+        Ok(created.html_url)
     }
     pub async fn pull_request_snapshot(&self, number: u64) -> AppResult<PullRequestSnapshot> {
         let url = self.endpoint(&format!(

@@ -143,6 +143,30 @@ export const aiService = {
     return invoke<ReviewReport | null>("load_review_report", { repoPath });
   },
 
+  /** Non-streaming AI merge suggestion for one conflicted file. */
+  suggestConflictResolution: (repoPath: string, filePath: string, confirmSecrets?: boolean) => {
+    ensureTauri();
+    return invoke<string>("suggest_conflict_resolution", { repoPath, filePath, confirmSecrets });
+  },
+
+  /** Streaming AI merge suggestion for one conflicted file. */
+  streamConflictResolution: (
+    repoPath: string,
+    filePath: string,
+    handlers: AiStreamHandlers,
+    requestId = createRequestId(),
+    confirmSecrets?: boolean
+  ) => ({
+    requestId,
+    done: streamCommand(
+      "suggest_conflict_resolution_stream",
+      { repoPath, filePath, confirmSecrets },
+      handlers,
+      () => aiService.suggestConflictResolution(repoPath, filePath, confirmSecrets),
+      requestId
+    ),
+  }),
+
   updateReviewFinding: (repoPath: string, findingId: string, status: FindingStatus) => {
     ensureTauri();
     return invoke<ReviewReport>("update_review_finding", { repoPath, findingId, status });
