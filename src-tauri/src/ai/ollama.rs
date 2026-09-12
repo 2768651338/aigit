@@ -114,9 +114,11 @@ impl AiProvider for OllamaProvider {
             let url = format!("{}/api/chat", config.ollama_base_url.trim_end_matches('/'));
             let response = tokio::time::timeout(
                 STREAM_IDLE_TIMEOUT,
-                tokio::select! {
-                    _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
-                    response = self.streaming_client()?.post(url).json(&body).send() => response.map_err(AppError::Http),
+                async {
+                    tokio::select! {
+                        _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
+                        response = self.streaming_client()?.post(url).json(&body).send() => response.map_err(AppError::Http),
+                    }
                 },
             )
             .await

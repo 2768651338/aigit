@@ -121,9 +121,11 @@ impl AiProvider for ClaudeProvider {
             let url = format!("{}/messages", config.claude_base_url.trim_end_matches('/'));
             let response = tokio::time::timeout(
                 STREAM_IDLE_TIMEOUT,
-                tokio::select! {
-                    _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
-                    response = self.streaming_client()?.post(url).header("x-api-key", api_key).header("anthropic-version", "2023-06-01").json(&body).send() => response.map_err(AppError::Http),
+                async {
+                    tokio::select! {
+                        _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
+                        response = self.streaming_client()?.post(url).header("x-api-key", api_key).header("anthropic-version", "2023-06-01").json(&body).send() => response.map_err(AppError::Http),
+                    }
                 },
             )
             .await

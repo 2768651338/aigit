@@ -138,9 +138,11 @@ impl AiProvider for OpenAiProvider {
             let url = format!("{}/chat/completions", base_url.trim_end_matches('/'));
             let response = tokio::time::timeout(
                 STREAM_IDLE_TIMEOUT,
-                tokio::select! {
-                    _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
-                    response = self.streaming_client()?.post(url).bearer_auth(api_key).json(&body).send() => response.map_err(AppError::Http),
+                async {
+                    tokio::select! {
+                        _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
+                        response = self.streaming_client()?.post(url).bearer_auth(api_key).json(&body).send() => response.map_err(AppError::Http),
+                    }
                 },
             )
             .await

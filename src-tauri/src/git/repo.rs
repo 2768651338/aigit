@@ -1,5 +1,6 @@
 use std::path::Path;
-use std::sync::{Arc, AtomicBool};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use git2::Repository;
 

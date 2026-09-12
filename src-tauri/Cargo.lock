@@ -24,6 +24,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "atomicwrites",
+ "bytes",
  "chrono",
  "dirs",
  "env_logger",

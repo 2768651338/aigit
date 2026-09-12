@@ -306,9 +306,9 @@ pub(crate) async fn next_stream_chunk<S>(
     stream: &mut S,
     cancellation: &CancellationToken,
     idle_timeout: Duration,
-) -> AppResult<Option<reqwest::Bytes>>
+) -> AppResult<Option<bytes::Bytes>>
 where
-    S: futures_util::Stream<Item = reqwest::Result<reqwest::Bytes>> + Unpin,
+    S: futures_util::Stream<Item = reqwest::Result<bytes::Bytes>> + Unpin,
 {
     tokio::time::timeout(idle_timeout, async {
         tokio::select! {
@@ -578,7 +578,7 @@ mod tests {
     #[tokio::test]
     async fn stalled_stream_chunks_hit_the_idle_timeout() {
         let cancellation = CancellationToken::default();
-        let mut stream = futures_util::stream::pending::<reqwest::Result<reqwest::Bytes>>();
+        let mut stream = futures_util::stream::pending::<reqwest::Result<bytes::Bytes>>();
         let result = tokio::time::timeout(
             Duration::from_secs(5),
             next_stream_chunk(&mut stream, &cancellation, Duration::from_millis(50)),
@@ -591,7 +591,7 @@ mod tests {
     #[tokio::test]
     async fn stream_chunk_reports_cancellation_before_the_idle_timeout() {
         let cancellation = CancellationToken::default();
-        let mut stream = futures_util::stream::pending::<reqwest::Result<reqwest::Bytes>>();
+        let mut stream = futures_util::stream::pending::<reqwest::Result<bytes::Bytes>>();
         let cancel_task = {
             let token = cancellation.clone();
             tokio::spawn(async move {
@@ -607,8 +607,7 @@ mod tests {
     #[tokio::test]
     async fn stream_chunk_returns_data_then_stream_end() {
         let cancellation = CancellationToken::default();
-        let mut stream =
-            futures_util::stream::iter(vec![Ok(reqwest::Bytes::from_static(b"hello"))]);
+        let mut stream = futures_util::stream::iter(vec![Ok(bytes::Bytes::from_static(b"hello"))]);
         let chunk = next_stream_chunk(&mut stream, &cancellation, Duration::from_secs(1))
             .await
             .expect("first chunk must arrive");
