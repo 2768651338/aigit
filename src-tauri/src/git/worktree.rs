@@ -98,7 +98,7 @@ pub fn add_worktree(
 /// The UI must confirm before calling this with `force = true`.
 pub fn remove_worktree(repo: &Repository, name: &str, force: bool) -> AppResult<()> {
     validate_name(name)?;
-    let mut worktree = repo.find_worktree(name)?;
+    let worktree = repo.find_worktree(name)?;
     let mut opts = WorktreePruneOptions::new();
     if force {
         // libgit2 has no single "force" flag: pruning a valid worktree and

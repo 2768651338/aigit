@@ -35,7 +35,7 @@ pub fn rewrite_history(repo: &Repository, steps: &[RewriteStep]) -> AppResult<St
     if steps.len() > 500 {
         return Err(AppError::General("整理步骤过多（上限 500）".into()));
     }
-    if repo.head_detached() {
+    if repo.head_detached()? {
         return Err(AppError::General(
             "当前处于 detached HEAD，无法整理分支历史".into(),
         ));

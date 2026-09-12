@@ -6,7 +6,6 @@ use git2::Repository;
 
 use crate::error::{AppError, AppResult};
 
-use super::cli;
 use super::{FileContent, FileTreeEntry};
 
 /// Hard cap per directory listing. A pathological tree (e.g. `node_modules`
