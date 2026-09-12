@@ -122,10 +122,11 @@ pub fn rewrite_history(repo: &Repository, steps: &[RewriteStep]) -> AppResult<St
     let mut new_head = parent;
     for (tree_oid, message, author, committer) in &plan {
         let tree = repo.find_tree(*tree_oid)?;
-        let parents: Vec<&git2::Commit> = match parent {
-            Some(oid) => vec![&repo.find_commit(oid)?],
-            None => vec![],
+        let parent_commit = match parent {
+            Some(oid) => Some(repo.find_commit(oid)?),
+            None => None,
         };
+        let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
         let id = repo.commit(None, committer, author, message, &tree, &parents)?;
         parent = Some(id);
         new_head = Some(id);
