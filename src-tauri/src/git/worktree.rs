@@ -89,7 +89,7 @@ pub fn add_worktree(
     if let Some(reference) = reference.as_ref() {
         opts.reference(Some(reference));
     }
-    let worktree = repo.worktree(name, path, Some(&mut opts))?;
+    let worktree = repo.worktree(name, path, Some(&opts))?;
     Ok(worktree.path().to_string_lossy().into_owned())
 }
 
