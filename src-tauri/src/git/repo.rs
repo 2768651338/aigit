@@ -183,6 +183,10 @@ mod tests {
 
         fn normalize(p: &str) -> String {
             let mut value = p.replace('\\', "/");
+            // 剥离 canonicalize 产生的 Windows 扩展长度路径前缀（\\?\）。
+            if let Some(stripped) = value.strip_prefix("//?/") {
+                value = stripped.to_string();
+            }
             while value.ends_with('/') {
                 value.pop();
             }
