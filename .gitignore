@@ -27,3 +27,11 @@ Thumbs.db
 *.log
 /.mimosa
 /src-tauri/.mimosa
+/src/.mimosa/
+/docs/
+
+# Local artifacts
+*.baiduyun*
+/release-dl/
+/gui-test-screenshots/
+/.zcode/
