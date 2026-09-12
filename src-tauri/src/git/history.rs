@@ -232,7 +232,7 @@ fn commit_touches_path(
     let tree = commit.tree()?;
     let parent_tree = commit.parent(0).ok().map(|p| p.tree()).transpose()?;
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(opts))?;
-    Ok(diff.deltas() > 0)
+    Ok(diff.deltas().count() > 0)
 }
 
 /// Per-line blame attribution of `file_path` at HEAD (`git blame`).

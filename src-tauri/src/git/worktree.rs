@@ -37,7 +37,7 @@ pub fn list_worktrees(repo: &Repository) -> AppResult<Vec<WorktreeInfo>> {
         match repo.find_worktree(&name) {
             Ok(wt) => {
                 let wt_path = wt.path().to_path_buf();
-                let is_locked = matches!(wt.is_locked()?, WorktreeLockStatus::Locked);
+                let is_locked = matches!(wt.is_locked()?, WorktreeLockStatus::Locked(_));
                 result.push(WorktreeInfo {
                     name,
                     path: wt_path.to_string_lossy().into_owned(),
