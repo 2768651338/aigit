@@ -55,7 +55,7 @@ pub fn rewrite_history(repo: &Repository, steps: &[RewriteStep]) -> AppResult<St
     // one); gaps are allowed and mean "drop this commit". Reordering is
     // deliberately unsupported: snapshot-tree rewrites cannot re-apply
     // patches in a different order the way `git rebase` does.
-    let mut commits = Vec::with_capacity(steps.len());
+    let mut commits: Vec<git2::Commit<'_>> = Vec::with_capacity(steps.len());
     for (i, step) in steps.iter().enumerate() {
         let oid = git2::Oid::from_str(step.hash.trim())
             .map_err(|_| AppError::General(format!("非法提交哈希：{}", step.hash)))?;
