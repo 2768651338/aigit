@@ -109,10 +109,10 @@ mod dpapi {
             };
             let ok = CryptUnprotectData(
                 &mut input,
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
                 CRYPTPROTECT_UI_FORBIDDEN,
                 &mut output,
             );

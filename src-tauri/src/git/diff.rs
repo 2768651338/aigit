@@ -205,7 +205,7 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
         let index = if is_current {
             current.as_ref().map(|(_, index)| *index).unwrap_or(0)
         } else {
-            let index = match files.iter().position(|f| f.path == path) {
+            let index = match files.iter().position(|f: &FileDiff| f.path == path) {
                 Some(index) => index,
                 None => {
                     let old_path = delta

@@ -298,7 +298,7 @@ fn read_embeddings(path: &Path) -> HashMap<String, Vec<f32>> {
             return result;
         }
         let mut vector = Vec::with_capacity(dim);
-        for slot in &bytes[cursor..cursor + dim * 4].chunks_exact(4) {
+        for slot in bytes[cursor..cursor + dim * 4].chunks_exact(4) {
             vector.push(f32::from_le_bytes(slot.try_into().unwrap_or([0; 4])));
         }
         cursor += dim * 4;

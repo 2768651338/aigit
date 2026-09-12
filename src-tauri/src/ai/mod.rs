@@ -313,7 +313,9 @@ where
     tokio::time::timeout(idle_timeout, async {
         tokio::select! {
             _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
-            chunk = stream.next() => chunk.map_err(AppError::Http),
+            chunk = stream.next() => chunk
+                .map(|received| received.map_err(AppError::Http))
+                .transpose(),
         }
     })
     .await
@@ -393,8 +395,9 @@ async fn read_body_limited(response: Response, limit: usize) -> AppResult<Vec<u8
         // timeout; this idle bound covers streaming error bodies, which have
         // no total timeout.
         let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
-            Ok(Some(chunk)) => chunk,
+            Ok(Some(Ok(chunk))) => chunk,
             Ok(None) => break,
+            Ok(Some(Err(error))) => return Err(AppError::from(error)),
             Err(_) => {
                 return Err(AppError::AiTimeout(format!(
                     "no data received within {} seconds; the response was aborted",

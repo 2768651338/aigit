@@ -668,10 +668,11 @@ impl GitHubApi {
             return Ok(None);
         }
         let store = SystemCredentialStore;
+        // Reuse the shared client so GitHub API calls inherit the 10s
+        // connect / 90s total timeouts instead of hanging forever.
+        let client = crate::ai::http_client()?.clone();
         Ok(store.get("github_pat")?.map(|token| Self {
-            // Reuse the shared client so GitHub API calls inherit the 10s
-            // connect / 90s total timeouts instead of hanging forever.
-            client: crate::ai::http_client()?.clone(),
+            client,
             remote,
             token,
         }))

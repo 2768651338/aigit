@@ -80,7 +80,7 @@ pub fn switch_branch(repo: &Repository, name: &str, force: bool) -> AppResult<()
     if force {
         checkout.force();
     }
-    repo.checkout_head(Some(checkout))?;
+    repo.checkout_head(Some(&mut checkout))?;
     Ok(())
 }
 
