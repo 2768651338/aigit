@@ -181,18 +181,26 @@ mod tests {
         init_repo(root.to_str().expect("utf8")).expect("init repo");
         assert!(root.join(".git").exists());
 
-        let expected = root.to_string_lossy().to_string();
-        // libgit2 may report the workdir with a trailing separator.
-        let with_slash = format!("{}{}", expected, std::path::MAIN_SEPARATOR);
+        fn normalize(p: &str) -> String {
+            let mut value = p.replace('\\', "/");
+            while value.ends_with('/') {
+                value.pop();
+            }
+            value
+        }
+
+        let expected = normalize(&root.to_string_lossy());
+        // libgit2 可能以尾部分隔符或平台相关斜杠报告 workdir，统一后比较。
         let discovered = discover_repo(root.to_str().expect("utf8")).expect("discover");
-        assert!(
-            discovered == expected || discovered == with_slash,
-            "unexpected discovered path: {discovered}"
+        assert_eq!(
+            normalize(&discovered),
+            expected,
+            "unexpected discovered path"
         );
 
         let repo = open_repo(root.to_str().expect("utf8")).expect("open");
         let info = get_repo_info(&repo).expect("repo info");
-        assert!(info.path == expected || info.path == with_slash);
+        assert_eq!(normalize(&info.path), expected);
         assert_eq!(
             info.name,
             root.file_name().expect("file name").to_string_lossy()

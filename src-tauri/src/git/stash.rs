@@ -133,6 +133,14 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aigit-stash-{name}-{unique}"));
         fs::create_dir_all(&root).expect("create temp directory");
         let repo = Repository::init(&root).expect("init repo");
+        {
+            let mut config = repo.config().expect("repo config");
+            // CI runner 的全局 autocrlf 会在 CLI 恢复文件时改写行尾，
+            // 仓库级关闭以保证断言与恢复内容确定性。
+            config
+                .set_bool("core.autocrlf", false)
+                .expect("set autocrlf");
+        }
 
         fs::write(root.join("tracked.txt"), "base\n").expect("write tracked file");
         stage_all(&repo).expect("stage initial");
