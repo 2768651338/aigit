@@ -71,7 +71,7 @@ mod dpapi {
 
     pub fn protect(plaintext: &[u8]) -> Result<Vec<u8>, String> {
         unsafe {
-            let mut input = CRYPT_INTEGER_BLOB {
+            let input = CRYPT_INTEGER_BLOB {
                 cbData: plaintext.len() as u32,
                 pbData: plaintext.as_ptr() as *mut u8,
             };
@@ -80,7 +80,7 @@ mod dpapi {
                 pbData: std::ptr::null_mut(),
             };
             let ok = CryptProtectData(
-                &mut input,
+                &input,
                 std::ptr::null(),
                 std::ptr::null(),
                 std::ptr::null(),
@@ -99,7 +99,7 @@ mod dpapi {
 
     pub fn unprotect(sealed: &[u8]) -> Result<Vec<u8>, String> {
         unsafe {
-            let mut input = CRYPT_INTEGER_BLOB {
+            let input = CRYPT_INTEGER_BLOB {
                 cbData: sealed.len() as u32,
                 pbData: sealed.as_ptr() as *mut u8,
             };
@@ -108,7 +108,7 @@ mod dpapi {
                 pbData: std::ptr::null_mut(),
             };
             let ok = CryptUnprotectData(
-                &mut input,
+                &input,
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
