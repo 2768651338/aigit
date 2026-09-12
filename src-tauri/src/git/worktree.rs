@@ -158,13 +158,13 @@ mod tests {
         let created =
             add_worktree(&repo, "feature-wt", &wt_path, Some("feature")).expect("add worktree");
         assert!(wt_path.exists());
-        assert!(created.contains("feature-wt"));
+        assert!(created.contains("wt-feature"));
 
         let listed = list_worktrees(&repo).expect("list after add");
         assert_eq!(listed.len(), 1);
         let added = &listed[0];
         assert_eq!(added.name, "feature-wt");
-        assert!(added.path.contains("feature-wt"));
+        assert!(added.path.contains("wt-feature"));
         assert!(!added.is_current);
 
         remove_worktree(&repo, "feature-wt", true).expect("prune");
