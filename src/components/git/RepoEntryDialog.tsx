@@ -1,9 +1,10 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { formatError } from "@/utils/error";
+import { useModalAccessibility } from "@/utils/modalA11y";
 import {
   AlertCircleIcon,
   DownloadIcon,
@@ -25,7 +26,9 @@ const RepoEntryContext = createContext<RepoEntryContextValue | null>(null);
 export function isCloneUrlValid(value: string): boolean {
   const url = value.trim();
   if (!url || /[\r\n\0]/.test(url)) return false;
-  if (/^(https?|ssh|git):\/\/[^\s]+$/i.test(url)) return true;
+  // Mirrors the backend whitelist: https/ssh transports only — no http, git
+  // protocol or local paths.
+  if (/^(https|ssh):\/\/[^\s]+$/i.test(url)) return true;
   return /^[^\s@]+@[^\s:]+:[^\s]+$/.test(url);
 }
 
@@ -76,7 +79,13 @@ function RepoEntryDialog({
   const [path, setPath] = useState("");
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [cloneTaskId, setCloneTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Esc during a busy operation must not close; the trap/guard lives here.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(panelRef, () => {
+    if (!busy) onClose();
+  }, true);
 
   const chooseDirectory = async () => {
     const selected = await open({ directory: true, multiple: false });
@@ -101,7 +110,11 @@ function RepoEntryDialog({
       if (mode === "open") {
         repoPath = await gitService.discoverRepo(target);
       } else if (mode === "clone") {
-        await gitService.cloneRepo(url.trim(), target);
+        // Run the clone as a cancellable task so a slow or hung clone can be
+        // aborted from the dialog without closing it.
+        const taskId = `clone-${Date.now()}`;
+        setCloneTaskId(taskId);
+        await gitService.cloneRepoTask(url.trim(), target, taskId);
       } else {
         await gitService.initRepo(target);
       }
@@ -110,8 +123,13 @@ function RepoEntryDialog({
     } catch (reason) {
       setError(formatError(reason));
     } finally {
+      setCloneTaskId(null);
       setBusy(false);
     }
+  };
+
+  const cancelClone = () => {
+    if (cloneTaskId) void gitService.cancelGitTask(cloneTaskId);
   };
 
   const tabs: Array<{ id: RepoEntryMode; icon: typeof FolderIcon }> = [
@@ -130,7 +148,7 @@ function RepoEntryDialog({
         if (event.key === "Escape" && !busy) onClose();
       }}
     >
-      <div className="w-full max-w-lg rounded-lg border border-border bg-bg-surface shadow-xl">
+      <div ref={panelRef} tabIndex={-1} className="w-full max-w-lg rounded-lg border border-border bg-bg-surface shadow-xl">
         <div className="flex items-center px-5 h-14 border-b border-border">
           <h2 id="repo-entry-title" className="font-semibold">{t("repoEntry.title")}</h2>
           <div className="flex-1" />
@@ -205,6 +223,11 @@ function RepoEntryDialog({
 
         <div className="flex justify-end gap-2 px-5 py-4 border-t border-border">
           <button type="button" onClick={onClose} disabled={busy} className="btn-ghost">{t("common.cancel")}</button>
+          {mode === "clone" && busy && cloneTaskId && (
+            <button type="button" onClick={cancelClone} className="btn-ghost">
+              {t("repoEntry.cancelClone")}
+            </button>
+          )}
           <button type="button" onClick={() => void submit()} disabled={!canSubmit || busy} aria-busy={busy} className="btn-primary">
             {busy && <SpinnerIcon size={14} />}
             {busy ? t(`repoEntry.${mode}Working`) : t(`repoEntry.${mode}Action`)}

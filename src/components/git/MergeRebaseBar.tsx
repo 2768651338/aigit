@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
@@ -49,7 +50,28 @@ export function MergeRebaseBar() {
     resolveOurs,
     resolveTheirs,
     refreshMergeState,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      branches: s.branches,
+      repoInfo: s.repoInfo,
+      operationKind: s.operationKind,
+      mergeInProgress: s.mergeInProgress,
+      isRebasing: s.isRebasing,
+      conflicts: s.conflicts,
+      merging: s.merging,
+      mergeBranch: s.mergeBranch,
+      rebaseBranch: s.rebaseBranch,
+      abortMerge: s.abortMerge,
+      abortRebase: s.abortRebase,
+      continueMerge: s.continueMerge,
+      continueRebase: s.continueRebase,
+      skipRebase: s.skipRebase,
+      resolveOurs: s.resolveOurs,
+      resolveTheirs: s.resolveTheirs,
+      refreshMergeState: s.refreshMergeState,
+    })),
+  );
   const toast = useToastStore();
 
   const [targetBranch, setTargetBranch] = useState("");

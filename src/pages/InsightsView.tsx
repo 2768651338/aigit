@@ -34,7 +34,7 @@ function presetDates(preset: RangePreset): InsightDateRange {
 
 export function InsightsView() {
   const { t } = useTranslation();
-  const { currentPath } = useRepoStore();
+  const currentPath = useRepoStore((s) => s.currentPath);
   const { config } = useSettingsStore();
   const toast = useToastStore();
   const [data, setData] = useState<RepositoryInsights | null>(null);

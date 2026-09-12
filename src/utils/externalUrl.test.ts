@@ -8,7 +8,6 @@ import { openExternalUrl, safeExternalUrl } from "./externalUrl";
 describe("external URL boundary", () => {
   it.each([
     ["https://example.com/path", "https://example.com/path"],
-    ["http://localhost:11434/", "http://localhost:11434/"],
     ["mailto:security@example.com", "mailto:security@example.com"],
   ])("allows explicit external protocol %s", (input, expected) => {
     expect(safeExternalUrl(input)).toBe(expected);
@@ -17,6 +16,7 @@ describe("external URL boundary", () => {
   it.each([
     "javascript:alert(1)",
     "data:text/html,<script>alert(1)</script>",
+    "http://localhost:11434/",
     "file:///C:/Windows/win.ini",
     "https://example.com\nfile:///tmp/a",
     "/relative/path",

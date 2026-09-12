@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -30,7 +31,25 @@ export function RemotePanel() {
     currentPath, branches, remotes, tracking, fetchUpdatedAt, remoteBusy: busy,
     remoteTask: runningTask, loadRemoteState, setRemoteBusy, setRemoteError,
     setRemoteTask, refreshBranches, refreshLog, refreshRepoInfo, refreshStatus,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      branches: s.branches,
+      remotes: s.remotes,
+      tracking: s.tracking,
+      fetchUpdatedAt: s.fetchUpdatedAt,
+      remoteBusy: s.remoteBusy,
+      remoteTask: s.remoteTask,
+      loadRemoteState: s.loadRemoteState,
+      setRemoteBusy: s.setRemoteBusy,
+      setRemoteError: s.setRemoteError,
+      setRemoteTask: s.setRemoteTask,
+      refreshBranches: s.refreshBranches,
+      refreshLog: s.refreshLog,
+      refreshRepoInfo: s.refreshRepoInfo,
+      refreshStatus: s.refreshStatus,
+    })),
+  );
   const toast = useToastStore();
   const [form, setForm] = useState<RemoteForm | null>(null);
   const [selectedRemote, setSelectedRemote] = useState("");

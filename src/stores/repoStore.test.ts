@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { git, config } = vi.hoisted(() => ({
+const { git, config, dialog } = vi.hoisted(() => ({
   git: {
     getRepoInfo: vi.fn(),
     getStatus: vi.fn(),
@@ -10,15 +10,20 @@ const { git, config } = vi.hoisted(() => ({
     listRemotes: vi.fn(),
     getTrackingInfo: vi.fn(),
     push: vi.fn(),
+    switchBranch: vi.fn(),
   },
   config: {
     addRecentRepo: vi.fn(),
     setOpenRepos: vi.fn(),
   },
+  dialog: {
+    confirmDialog: vi.fn(),
+  },
 }));
 
 vi.mock("@/services/git", () => ({ gitService: git }));
 vi.mock("@/services/config", () => ({ configService: config }));
+vi.mock("@/utils/dialog", () => ({ confirmDialog: dialog.confirmDialog }));
 
 import { useRepoStore } from "@/stores/repoStore";
 
@@ -80,6 +85,7 @@ beforeEach(() => {
   });
   config.addRecentRepo.mockResolvedValue(undefined);
   config.setOpenRepos.mockResolvedValue(undefined);
+  dialog.confirmDialog.mockResolvedValue(true);
   git.getStatus.mockImplementation(async (path: string) => [{ path: `${path}.txt`, status: "modified", staged: false }]);
   git.listBranches.mockImplementation(async (path: string) => [{ name: `${path}-branch`, is_head: true, is_remote: false }]);
   git.getLog.mockImplementation(async (path: string) => [{ hash: `${path}-hash`, short_hash: "abc", message: path, body: "", author: "test", author_email: "test@example.com", timestamp: 1, parents: [] }]);
@@ -237,5 +243,74 @@ describe("repoStore moveRepoTab", () => {
     useRepoStore.getState().moveRepoTab("/a", "/missing", "after");
     expect(useRepoStore.getState().tabOrder).toEqual(["/a", "/b"]);
     expect(config.setOpenRepos).not.toHaveBeenCalled();
+  });
+});
+
+describe("repoStore switchBranch dirty-worktree guard", () => {
+  const uncommittedError = {
+    code: "uncommitted_changes",
+    message: "Uncommitted changes: switching to 'feature' would discard them",
+    retryable: false,
+  };
+
+  beforeEach(() => {
+    git.getRepoInfo.mockResolvedValue(repoInfo("a"));
+  });
+
+  it("asks for confirmation and force-switches after the user confirms", async () => {
+    await useRepoStore.getState().openRepo("/a");
+    git.switchBranch
+      .mockRejectedValueOnce(uncommittedError)
+      .mockResolvedValueOnce(undefined);
+
+    const result = await useRepoStore.getState().switchBranch("feature");
+
+    expect(result).toBe(true);
+    expect(dialog.confirmDialog).toHaveBeenCalledTimes(1);
+    expect(dialog.confirmDialog).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringContaining("feature")
+    );
+    expect(git.switchBranch).toHaveBeenNthCalledWith(1, "/a", "feature", false);
+    expect(git.switchBranch).toHaveBeenNthCalledWith(2, "/a", "feature", true);
+  });
+
+  it("does not retry when the user declines the confirmation", async () => {
+    await useRepoStore.getState().openRepo("/a");
+    git.switchBranch.mockRejectedValueOnce(uncommittedError);
+    dialog.confirmDialog.mockResolvedValueOnce(false);
+
+    const result = await useRepoStore.getState().switchBranch("feature");
+
+    expect(result).toBe(false);
+    expect(git.switchBranch).toHaveBeenCalledTimes(1);
+    // A declined switch is not an error — no banner is shown.
+    expect(useRepoStore.getState().tabs["/a"].error).toBeNull();
+  });
+
+  it("does not ask for confirmation when force was requested upfront", async () => {
+    await useRepoStore.getState().openRepo("/a");
+    git.switchBranch.mockRejectedValueOnce(uncommittedError);
+
+    const result = await useRepoStore.getState().switchBranch("feature", true);
+
+    expect(result).toBe(false);
+    expect(dialog.confirmDialog).not.toHaveBeenCalled();
+    expect(git.switchBranch).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes unrelated switch errors to the tab error banner", async () => {
+    await useRepoStore.getState().openRepo("/a");
+    git.switchBranch.mockRejectedValueOnce({
+      code: "git_error",
+      message: "boom",
+      retryable: false,
+    });
+
+    const result = await useRepoStore.getState().switchBranch("feature");
+
+    expect(result).toBe(false);
+    expect(dialog.confirmDialog).not.toHaveBeenCalled();
+    expect(useRepoStore.getState().tabs["/a"].error).toContain("boom");
   });
 });

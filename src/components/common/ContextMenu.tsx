@@ -91,7 +91,28 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
       }
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") hide();
+      if (e.key === "Escape") {
+        hide();
+        return;
+      }
+      // 键盘导航：↑↓ 在可用项间移动并循环，Home/End 跳到首/末项。
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") {
+        return;
+      }
+      const items = Array.from(
+        menuRef.current?.querySelectorAll<HTMLButtonElement>(
+          'button[role="menuitem"]:not([disabled])'
+        ) ?? []
+      );
+      if (items.length === 0) return;
+      e.preventDefault();
+      const current = items.indexOf(document.activeElement as HTMLButtonElement);
+      let next: number;
+      if (e.key === "ArrowDown") next = current === -1 ? 0 : (current + 1) % items.length;
+      else if (e.key === "ArrowUp") next = current <= 0 ? items.length - 1 : current - 1;
+      else if (e.key === "Home") next = 0;
+      else next = items.length - 1;
+      items[next]?.focus();
     };
     const onScroll = () => hide();
     // 用 capture 阶段，确保在子元素的 onClick 之前关闭外层菜单
@@ -106,6 +127,17 @@ export function ContextMenuProvider({ children }: { children: React.ReactNode })
       window.removeEventListener("resize", onScroll);
     };
   }, [menu.open, hide]);
+
+  // 打开时把焦点移入菜单，键盘用户才能使用 ↑↓ 导航。
+  useEffect(() => {
+    if (!menu.open) return;
+    const frame = requestAnimationFrame(() => {
+      menuRef.current
+        ?.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]:not([disabled])')[0]
+        ?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [menu.open, menu.items]);
 
   // 边界检测：若菜单超出视口则回缩
   const adjustedPos = (() => {

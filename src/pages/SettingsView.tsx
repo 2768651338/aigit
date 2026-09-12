@@ -1,23 +1,22 @@
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { useSettingsStore, useAiStore } from "@/stores/aiStore";
+import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
-import type { AppConfig, AiProviderConfig, CredentialProvider, PromptsConfig, IndexStatus } from "@/types";
-import { codeIndexService } from "@/services/codeIndex";
+import type { AppConfig, AiProviderConfig, CredentialProvider, PromptsConfig } from "@/types";
 import { configService } from "@/services/config";
-import { CheckIcon, AlertCircleIcon, CopyIcon, MailIcon, FolderIcon, SpinnerIcon, GithubIcon, TrashIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, SpinnerIcon } from "@/components/common/Icons";
 import { PromptEditor } from "@/components/settings/PromptEditor";
+import { openExternalUrl } from "@/utils/externalUrl";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import { applyTheme, type ThemeMode } from "@/utils/theme";
 import clsx from "clsx";
-import { openExternalUrl } from "@/utils/externalUrl";
-import { updaterService, type AvailableUpdate } from "@/services/updater";
-
-const AUTHOR = "田小橙";
-const QQ = "2768651338";
-const EMAIL = "2768651338@qq.com";
-const GITHUB_REPO = "https://github.com/2768651338/aigit";
+import { Field } from "@/components/settings/Field";
+import { IndexSettingsSection } from "@/components/settings/IndexSettingsSection";
+import { ChatPrivacySection } from "@/components/settings/ChatPrivacySection";
+import { RecentReposSection } from "@/components/settings/RecentReposSection";
+import { UpdaterSection } from "@/components/settings/UpdaterSection";
+import { AboutSection } from "@/components/settings/AboutSection";
 
 const PROVIDERS = [
   { id: "openai", label: "OpenAI", needsKey: true },
@@ -35,13 +34,8 @@ const THEMES: { id: ThemeMode; labelKey: string }[] = [
 export function SettingsView() {
   const { t, i18n } = useTranslation();
   const { config, loadConfig, saveConfig, setApiKey, deleteApiKey, error } = useSettingsStore();
-  const openRepo = useRepoStore((s) => s.openRepo);
-  const openTabs = useRepoStore((s) => s.tabOrder);
   const currentPath = useRepoStore((s) => s.currentPath);
   const toast = useToastStore();
-  const localSaveEnabled = useAiStore((s) => s.localSaveEnabled);
-  const setLocalSaveEnabled = useAiStore((s) => s.setLocalSaveEnabled);
-  const clearAllHistory = useAiStore((s) => s.clearAllHistory);
   const [local, setLocal] = useState<AppConfig | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<CredentialProvider, string>>({
     openai: "",
@@ -50,15 +44,7 @@ export function SettingsView() {
     embedding_openai: "",
   });
   const [saving, setSaving] = useState(false);
-  const [indexStatus, setIndexStatus] = useState<IndexStatus | null>(null);
-  const [indexBusy, setIndexBusy] = useState(false);
   const [embeddingKey, setEmbeddingKey] = useState("");
-  const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [updaterEnabled, setUpdaterEnabled] = useState(false);
-  const [updateBusy, setUpdateBusy] = useState(false);
-  const [availableUpdate, setAvailableUpdate] = useState<AvailableUpdate | null>(null);
-  const [updateProgress, setUpdateProgress] = useState<{ downloaded: number; total?: number } | null>(null);
-  const [updateError, setUpdateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!config) {
@@ -67,78 +53,6 @@ export function SettingsView() {
       setLocal(config);
     }
   }, [config, loadConfig]);
-
-  useEffect(() => {
-    if (!currentPath) { setIndexStatus(null); return; }
-    void codeIndexService.status(currentPath).then(setIndexStatus).catch(() => setIndexStatus(null));
-  }, [currentPath]);
-
-  useEffect(() => {
-    void updaterService.availability()
-      .then(({ enabled }) => setUpdaterEnabled(enabled))
-      .catch(() => setUpdaterEnabled(false));
-  }, []);
-
-  const handleCheckUpdate = async () => {
-    if (!updaterEnabled || updateBusy) return;
-    setUpdateBusy(true);
-    setUpdateError(null);
-    setAvailableUpdate(null);
-    try {
-      const result = await updaterService.check();
-      setAvailableUpdate(result);
-      if (!result) toast.success(t("settings.updateCurrent"));
-    } catch (e) {
-      setUpdateError(String(e));
-    } finally {
-      setUpdateBusy(false);
-    }
-  };
-
-  const handleInstallUpdate = async () => {
-    if (!availableUpdate || updateBusy) return;
-    setUpdateBusy(true);
-    setUpdateError(null);
-    setUpdateProgress({ downloaded: 0 });
-    try {
-      await updaterService.downloadAndInstall((downloaded, total) =>
-        setUpdateProgress((current) => ({ downloaded, total: total ?? current?.total })),
-      );
-    } catch (e) {
-      setUpdateError(String(e));
-      setUpdateBusy(false);
-    }
-  };
-
-  const runIndexAction = async (action: "rebuild" | "cancel" | "delete") => {
-    if (!currentPath || !local || (indexBusy && action !== "cancel")) return;
-    if (action === "rebuild") {
-      setIndexBusy(true);
-      try {
-        // The backend reloads persisted settings before indexing, so save first.
-        const configSaved = await saveConfig(local);
-        if (!configSaved) {
-          throw new Error(useSettingsStore.getState().error ?? t("settings.saveFailed"));
-        }
-        if (embeddingKey.trim()) {
-          await setApiKey("embedding_openai", embeddingKey.trim());
-          setEmbeddingKey("");
-        }
-        setIndexStatus((status) => status ? { ...status, phase: "scanning", stale: false, message: null } : status);
-        setIndexStatus(await codeIndexService.rebuild(currentPath, false));
-      } catch (e) {
-        toast.error(String(e), t("settings.indexActionFailed"));
-      } finally {
-        setIndexBusy(false);
-      }
-      return;
-    }
-    try {
-      if (action === "cancel") await codeIndexService.cancel(currentPath);
-      if (action === "delete") await codeIndexService.delete(currentPath);
-      setIndexStatus(await codeIndexService.status(currentPath));
-    } catch (e) { toast.error(String(e), t("settings.indexActionFailed")); }
-  };
 
   const update = (partial: Partial<AiProviderConfig>) => {
     if (!local) return;
@@ -205,16 +119,6 @@ export function SettingsView() {
       toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleCopy = async (text: string, field: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedField(field);
-      setTimeout(() => setCopiedField(null), 1500);
-    } catch (e) {
-      console.warn("[aigit] Copy to clipboard failed:", e);
     }
   };
 
@@ -549,221 +453,26 @@ export function SettingsView() {
         </section>
 
         {/* Local code index */}
-        <section>
-          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.codeIndex")}</h3>
-          <p className="text-xs text-text-muted mb-4">{t("settings.codeIndexHint")}</p>
-          <div className="space-y-4">
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input type="checkbox" checked={local.index.enabled} onChange={(e) => setLocal({ ...local, index: { ...local.index, enabled: e.target.checked } })} className="accent-accent w-4 h-4" />
-              <span className="text-sm text-text-secondary">{t("settings.indexEnabled")}</span>
-            </label>
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input type="checkbox" checked={local.index.include_untracked} onChange={(e) => setLocal({ ...local, index: { ...local.index, include_untracked: e.target.checked } })} className="accent-accent w-4 h-4" />
-              <span className="text-sm text-text-secondary">{t("settings.includeUntrackedIndex")}</span>
-            </label>
-            <label className="flex items-center gap-2.5 cursor-pointer">
-              <input type="checkbox" checked={local.index.never_upload_index} onChange={(e) => setLocal({ ...local, index: { ...local.index, never_upload_index: e.target.checked } })} className="accent-accent w-4 h-4" />
-              <span className="text-sm text-text-secondary">{t("settings.neverUploadIndex")}</span>
-            </label>
-            <Field label={t("settings.embeddingProvider")}>
-              <select value={local.index.embedding_provider} onChange={(e) => setLocal({ ...local, index: { ...local.index, embedding_provider: e.target.value as "ollama" | "openai_compatible" } })} className="input">
-                <option value="ollama">Ollama (local)</option><option value="openai_compatible">OpenAI-compatible (explicit)</option>
-              </select>
-            </Field>
-            {local.index.embedding_provider === "ollama" ? <>
-              <Field label={t("settings.model")}><input className="input font-mono" value={local.index.ollama_embedding_model} onChange={(e) => setLocal({ ...local, index: { ...local.index, ollama_embedding_model: e.target.value } })} /></Field>
-              <Field label={t("settings.baseUrl")}><input className="input font-mono" value={local.index.ollama_embedding_base_url} onChange={(e) => setLocal({ ...local, index: { ...local.index, ollama_embedding_base_url: e.target.value } })} /></Field>
-            </> : <>
-              <label className="flex items-center gap-2.5 cursor-pointer"><input type="checkbox" checked={local.index.cloud_embedding_enabled} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_enabled: e.target.checked } })} className="accent-accent w-4 h-4" /><span className="text-sm text-text-secondary">{t("settings.enableCloudEmbedding")}</span></label>
-              <Field label={t("settings.apiKey")}><input type="password" autoComplete="new-password" className="input font-mono" value={embeddingKey} onChange={(e) => setEmbeddingKey(e.target.value)} placeholder={local.ai.credential_status.embedding_openai ? t("settings.apiKeyConfigured") : "sk-..."} /></Field>
-              <Field label={t("settings.model")}><input className="input font-mono" value={local.index.cloud_embedding_model} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_model: e.target.value } })} /></Field>
-              <Field label={t("settings.baseUrl")}><input className="input font-mono" value={local.index.cloud_embedding_base_url} onChange={(e) => setLocal({ ...local, index: { ...local.index, cloud_embedding_base_url: e.target.value } })} /></Field>
-            </>}
-            {indexStatus?.message && <p className={clsx("text-xs", indexStatus.stale ? "text-warning" : "text-text-muted")}>{indexStatus.message}</p>}
-            <div className="flex items-center gap-2 text-xs text-text-muted"><span>{t("settings.indexStatus")}: {indexStatus?.phase ?? "idle"}{indexStatus?.stale ? ` (${t("settings.indexStale")})` : ""} · {indexStatus?.chunks ?? 0} chunks</span><div className="flex-1" /><button className="btn-secondary" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("rebuild")}>{t("settings.rebuildIndex")}</button><button className="btn-secondary" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("cancel")}>{t("settings.cancelIndex")}</button><button className="btn-secondary text-danger" disabled={!currentPath || indexBusy} onClick={() => void runIndexAction("delete")}>{t("settings.deleteIndex")}</button></div>
-          </div>
-        </section>
+        <IndexSettingsSection
+          local={local}
+          onLocal={setLocal}
+          embeddingKey={embeddingKey}
+          onEmbeddingKey={setEmbeddingKey}
+          currentPath={currentPath}
+        />
 
         {/* Local chat privacy */}
-        <section>
-          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.chatPrivacy")}</h3>
-          <p className="text-xs text-text-muted mb-4">{t("settings.chatPrivacyHint")}</p>
-          <label className="flex items-center gap-2.5 cursor-pointer mb-4">
-            <input type="checkbox" checked={localSaveEnabled} onChange={(e) => setLocalSaveEnabled(e.target.checked)} className="accent-accent w-4 h-4" />
-            <span className="text-sm text-text-secondary">{t("settings.saveChatLocally")}</span>
-          </label>
-          <button type="button" className="btn-secondary text-danger" onClick={() => { if (window.confirm(t("settings.clearChatConfirm"))) void clearAllHistory().then(() => toast.success(t("settings.chatCleared"))); }}>
-            <TrashIcon size={14} /> {t("settings.clearChatHistory")}
-          </button>
-        </section>
+        <ChatPrivacySection />
 
         {/* Recent repos */}
-        {local.recent_repos.length > 0 && (
-          <section>
-            <h3 className="text-base font-semibold text-text-primary mb-4">
-              {t("settings.recentRepos")}
-            </h3>
-            <div className="space-y-2">
-              {local.recent_repos.map((repo, idx) => {
-                const isOpen = openTabs.includes(repo);
-                return (
-                  <button
-                    key={idx}
-                    onClick={() => openRepo(repo)}
-                    disabled={isOpen}
-                    className={clsx(
-                      "w-full flex items-center gap-3 px-4 py-2.5 rounded text-sm transition-colors text-left",
-                      isOpen
-                        ? "bg-bg-elevated text-text-muted cursor-default"
-                        : "bg-bg-elevated text-text-secondary hover:bg-bg-hover hover:text-text-primary"
-                    )}
-                    title={isOpen ? t("settings.recentRepoAlreadyOpen") : t("settings.recentRepoOpen")}
-                  >
-                    <FolderIcon size={14} className="shrink-0 text-text-muted" />
-                    <span className="flex-1 truncate">{repo}</span>
-                    {isOpen && (
-                      <span className="text-xs text-text-muted shrink-0">
-                        {t("settings.recentRepoAlreadyOpen")}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
+        <RecentReposSection repos={local.recent_repos} />
 
         {/* Updates */}
-        <section>
-          <h3 className="text-base font-semibold text-text-primary mb-2">{t("settings.updates")}</h3>
-          <p className="text-xs text-text-muted mb-4">
-            {updaterEnabled ? t("settings.updateEnabledHint") : t("settings.updateDisabledHint")}
-          </p>
-          {updateError && <p className="text-xs text-danger mb-3 break-words">{updateError}</p>}
-          {availableUpdate && (
-            <p className="text-sm text-text-secondary mb-3">
-              {t("settings.updateAvailable", { version: availableUpdate.version })}
-            </p>
-          )}
-          {updateProgress && (
-            <div className="mb-3">
-              <progress
-                className="w-full"
-                value={updateProgress.downloaded}
-                max={updateProgress.total ?? Math.max(updateProgress.downloaded, 1)}
-              />
-              <p className="text-xs text-text-muted mt-1">
-                {updateProgress.total
-                  ? `${Math.min(100, Math.round(updateProgress.downloaded * 100 / updateProgress.total))}%`
-                  : t("settings.updateDownloading")}
-              </p>
-            </div>
-          )}
-          <div className="flex gap-2">
-            <button type="button" className="btn-secondary" disabled={!updaterEnabled || updateBusy} onClick={() => void handleCheckUpdate()}>
-              {updateBusy && !updateProgress ? <SpinnerIcon size={14} /> : null}
-              {t("settings.checkUpdate")}
-            </button>
-            {availableUpdate && (
-              <button type="button" className="btn-primary" disabled={updateBusy} onClick={() => void handleInstallUpdate()}>
-                {updateBusy ? <SpinnerIcon size={14} /> : null}
-                {t("settings.installUpdate")}
-              </button>
-            )}
-          </div>
-        </section>
+        <UpdaterSection />
 
         {/* About / Copyright */}
-        <section className="mt-2 pt-8 border-t border-border">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-base font-semibold text-text-primary">
-              {t("settings.about")}
-            </h3>
-            <span className="text-xs text-text-muted">
-              {t("settings.version")} <span className="font-mono">v{__APP_VERSION__}</span>
-            </span>
-          </div>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
-                {t("settings.author")}
-              </span>
-              <span className="text-text-primary font-medium">{AUTHOR}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
-                {t("settings.contact")}
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-text-secondary">QQ</span>
-                <span className="text-text-primary font-mono">{QQ}</span>
-                <button
-                  onClick={() => handleCopy(QQ, "qq")}
-                  className="text-text-muted hover:text-accent transition-colors"
-                  title={t("settings.copy")}
-                  aria-label={t("settings.copy")}
-                >
-                  {copiedField === "qq" ? (
-                    <CheckIcon size={14} className="text-success" />
-                  ) : (
-                    <CopyIcon size={14} />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
-                Email
-              </span>
-              <div className="flex items-center gap-2">
-                <MailIcon size={14} className="text-text-muted" />
-                <a
-                  href={`mailto:${EMAIL}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    void handleOpenUrl(`mailto:${EMAIL}`);
-                  }}
-                  className="text-accent hover:underline font-mono"
-                >
-                  {EMAIL}
-                </a>
-                <button
-                  onClick={() => handleCopy(EMAIL, "email")}
-                  className="text-text-muted hover:text-accent transition-colors"
-                  title={t("settings.copy")}
-                  aria-label={t("settings.copy")}
-                >
-                  {copiedField === "email" ? (
-                    <CheckIcon size={14} className="text-success" />
-                  ) : (
-                    <CopyIcon size={12} />
-                  )}
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-text-muted uppercase tracking-wider min-w-[72px]">
-                {t("settings.openSource")}
-              </span>
-              <div className="flex items-center gap-2">
-                <GithubIcon size={14} className="text-text-muted" />
-                <a
-                  href={GITHUB_REPO}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    handleOpenUrl(GITHUB_REPO);
-                  }}
-                  className="text-accent hover:underline font-mono"
-                >
-                  {GITHUB_REPO}
-                </a>
-              </div>
-            </div>
-          </div>
-          <p className="mt-5 text-xs text-text-muted">
-            © {new Date().getFullYear()} {AUTHOR}. {t("settings.copyright")}.
-          </p>
-        </section>
+        <AboutSection />
+
       </div>
     </div>
   );
@@ -839,16 +548,5 @@ function ProviderFields({
         </Field>
       </div>
     </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="block text-xs text-text-muted uppercase tracking-wider mb-2">
-        {label}
-      </label>
-      {children}
-    </div>
   );
 }

@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import type { FileDiff } from "@/types";
+import { useState, useMemo, useEffect, useCallback, memo } from "react";
+import type { FileDiff, DiffLine } from "@/types";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -15,6 +15,12 @@ import {
 import clsx from "clsx";
 
 type DiffMode = "workdir" | "staged" | "view";
+
+/** Files with more than this many diff lines render a prefix plus an explicit
+ *  "show all" button — tens of thousands of DOM nodes rendered at once freeze
+ *  the UI. Line indexes stay aligned because only a prefix is hidden, so
+ *  line-level staging keeps working after expanding. */
+const LARGE_FILE_LINE_LIMIT = 1500;
 
 interface DiffViewerProps {
   diffs: FileDiff[];
@@ -109,13 +115,17 @@ export function DiffViewer({
   const { t } = useTranslation();
   // Track which files are collapsed (by path). Default: all expanded.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Files over LARGE_FILE_LINE_LIMIT that the user explicitly expanded to
+  // full. Paths that are no longer in `diffs` are simply ignored.
+  const [fullFiles, setFullFiles] = useState<Set<string>>(new Set());
   // Selected line indices: keyed by `${fileIdx}:${hunkIdx}:${lineIdx}`.
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
 
   const interactive = mode === "workdir" || mode === "staged";
 
-  const { applyPatchToIndex, applyPatchToIndexReverse } = useRepoStore();
+  const applyPatchToIndex = useRepoStore((s) => s.applyPatchToIndex);
+  const applyPatchToIndexReverse = useRepoStore((s) => s.applyPatchToIndexReverse);
   const toast = useToastStore();
 
   // Re-collapse everything whenever a fresh `diffs` array arrives so the
@@ -146,14 +156,14 @@ export function DiffViewer({
   const expandAll = () => setCollapsed(new Set());
   const collapseAll = () => setCollapsed(new Set(diffs.map((d) => d.path)));
 
-  const toggleLine = (key: string) => {
+  const toggleLine = useCallback((key: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
       return next;
     });
-  };
+  }, []);
 
   const clearSelection = () => setSelected(new Set());
 
@@ -279,6 +289,16 @@ export function DiffViewer({
 
       {diffs.map((diff) => {
         const isCollapsed = collapsed.has(diff.path);
+        const totalLines = diff.hunks.reduce((sum, h) => sum + h.lines.length, 0);
+        const truncated = !fullFiles.has(diff.path) && totalLines > LARGE_FILE_LINE_LIMIT;
+        // Per-hunk line budget so the file renders at most LARGE_FILE_LINE_LIMIT
+        // rows when truncated; `slice` keeps original line indexes intact.
+        let budget = truncated ? LARGE_FILE_LINE_LIMIT : Number.MAX_SAFE_INTEGER;
+        const hunkRenderCounts = diff.hunks.map((hunk) => {
+          const count = Math.min(budget, hunk.lines.length);
+          budget -= count;
+          return count;
+        });
         return (
           <div key={diff.path} className="mb-4">
             <button
@@ -323,61 +343,49 @@ export function DiffViewer({
                           </button>
                         )}
                       </div>
-                      {hunk.lines.map((line, li) => {
+                      {hunk.lines.slice(0, hunkRenderCounts[hi]).map((line, li) => {
                         const key = `${diff.path}::${hi}:${li}`;
-                        const isSelected = selected.has(key);
-                        const isSelectable =
-                          interactive &&
-                          (line.line_type === "add" || line.line_type === "delete");
-
                         return (
-                          <div
+                          <DiffRow
                             key={li}
-                            data-diff-line={line.new_line_no ?? line.old_line_no ?? undefined}
-                            className={clsx(
-                              "flex items-start px-3 py-0.5 hover:bg-bg-hover/30 group",
-                              line.line_type === "add" && "diff-add",
-                              line.line_type === "delete" && "diff-del",
-                              line.line_type === "context" && "diff-context"
-                            )}
-                          >
-                            {/* Checkbox column — only for add/delete lines in interactive mode. */}
-                            <span className="w-4 shrink-0 select-none flex items-center justify-center">
-                              {isSelectable && (
-                                <input
-                                  type="checkbox"
-                                  checked={isSelected}
-                                  onChange={() => toggleLine(key)}
-                                  className="accent-accent opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
-                                  style={{
-                                    opacity: isSelected ? 1 : undefined,
-                                  }}
-                                  aria-label={t("diffStage.selectLinesHint")}
-                                />
-                              )}
-                            </span>
-                            <span className="w-8 text-text-muted select-none text-right pr-2 shrink-0">
-                              {line.old_line_no ?? ""}
-                            </span>
-                            <span className="w-8 text-text-muted select-none text-right pr-2 shrink-0">
-                              {line.new_line_no ?? ""}
-                            </span>
-                            <span className="w-4 shrink-0 select-none">
-                              {line.line_type === "add"
-                                ? "+"
-                                : line.line_type === "delete"
-                                ? "-"
-                                : line.line_type === "no_newline"
-                                ? "\\"
-                                : " "}
-                            </span>
-                            <span className="whitespace-pre-wrap break-all">{line.content}</span>
-                          </div>
+                            line={line}
+                            lineKey={key}
+                            isSelected={selected.has(key)}
+                            isSelectable={
+                              interactive &&
+                              (line.line_type === "add" || line.line_type === "delete")
+                            }
+                            onToggle={toggleLine}
+                            selectHint={t("diffStage.selectLinesHint")}
+                          />
                         );
                       })}
                     </div>
                   );
                 })}
+                {truncated && (
+                  <div className="flex items-center gap-2 px-3 py-2 text-2xs text-text-muted">
+                    <span>
+                      {t("diff.largeFileTruncated", {
+                        shown: LARGE_FILE_LINE_LIMIT,
+                        total: totalLines,
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setFullFiles((prev) => {
+                          const next = new Set(prev);
+                          next.add(diff.path);
+                          return next;
+                        })
+                      }
+                      className="btn-ghost text-2xs px-1.5 py-0.5"
+                    >
+                      {t("diff.showFullFile")}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -386,3 +394,65 @@ export function DiffViewer({
     </div>
   );
 }
+
+/** Single diff line. Memoized: 万行 diff 场景下，选中态或流式更新只应重渲染
+ *  受影响的行，而不是整棵 diff 树。`line` 来自 store 的不可变 diff 数据。 */
+const DiffRow = memo(function DiffRow({
+  line,
+  lineKey,
+  isSelected,
+  isSelectable,
+  onToggle,
+  selectHint,
+}: {
+  line: DiffLine;
+  lineKey: string;
+  isSelected: boolean;
+  isSelectable: boolean;
+  onToggle: (key: string) => void;
+  selectHint: string;
+}) {
+  return (
+    <div
+      data-diff-line={line.new_line_no ?? line.old_line_no ?? undefined}
+      className={clsx(
+        "flex items-start px-3 py-0.5 hover:bg-bg-hover/30 group",
+        line.line_type === "add" && "diff-add",
+        line.line_type === "delete" && "diff-del",
+        line.line_type === "context" && "diff-context"
+      )}
+    >
+      {/* Checkbox column — only for add/delete lines in interactive mode. */}
+      <span className="w-4 shrink-0 select-none flex items-center justify-center">
+        {isSelectable && (
+          <input
+            type="checkbox"
+            checked={isSelected}
+            onChange={() => onToggle(lineKey)}
+            className="accent-accent opacity-0 group-hover:opacity-100 focus:opacity-100 cursor-pointer"
+            style={{
+              opacity: isSelected ? 1 : undefined,
+            }}
+            aria-label={selectHint}
+          />
+        )}
+      </span>
+      <span className="w-8 text-text-muted select-none text-right pr-2 shrink-0">
+        {line.old_line_no ?? ""}
+      </span>
+      <span className="w-8 text-text-muted select-none text-right pr-2 shrink-0">
+        {line.new_line_no ?? ""}
+      </span>
+      <span className="w-4 shrink-0 select-none">
+        {line.line_type === "add"
+          ? "+"
+          : line.line_type === "delete"
+          ? "-"
+          : line.line_type === "no_newline"
+          ? "\\"
+          : " "}
+      </span>
+      <span className="whitespace-pre-wrap break-all">{line.content}</span>
+    </div>
+  );
+});

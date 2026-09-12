@@ -8,6 +8,7 @@ import { aiService, type AiRequestKind, type AiStreamEvent } from "@/services/ai
 import { chatHistoryService } from "@/services/chatHistory";
 import { configService } from "@/services/config";
 import { formatError } from "@/utils/error";
+import { withSecretsConfirmation } from "@/utils/aiGuard";
 import { useToastStore } from "@/stores/toastStore";
 
 interface SettingsState {
@@ -74,7 +75,12 @@ export function isSensitivePath(path: string): boolean {
 }
 
 function id(): string { return crypto.randomUUID(); }
-function titleFor(content: string): string { return content.replace(/\s+/g, " ").trim().slice(0, 48) || i18n.t("chat.newSession"); }
+/** 按码点截断，避免 slice 切开 emoji 等代理对造成标题乱码。 */
+function titleFor(content: string): string {
+  const flattened = content.replace(/\s+/g, " ").trim();
+  const clipped = Array.from(flattened).slice(0, 48).join("");
+  return clipped || i18n.t("chat.newSession");
+}
 function toastAiError(e: unknown, titleKey: string) { useToastStore.getState().error(formatError(e), i18n.t(titleKey)); }
 function toWire(messages: ChatSession["messages"]): ChatMessage[] { return messages.map(({ role, content }) => ({ role, content })); }
 function toMetadata(attachments: ChatAttachment[] = []): ChatAttachmentMetadata[] {
@@ -123,6 +129,10 @@ interface AiState {
   loading: boolean;
   localSaveEnabled: boolean;
   contextLimit: number;
+  /** Accumulated assistant text of the chat stream in flight, per repo.
+   *  Null when idle. Kept outside `sessionsByRepo` so a delta only pays an
+   *  O(1) copy instead of rebuilding every session and message map. */
+  streamingTextByRepo: Record<string, string | null>;
   loadSessions: (repoPath: string) => Promise<void>;
   loadReview: (repoPath: string) => Promise<void>;
   updateFindingStatus: (repoPath: string, findingId: string, status: FindingStatus) => Promise<void>;
@@ -141,7 +151,7 @@ interface AiState {
 
 export const useAiStore = create<AiState>((set, get) => ({
   sessionsByRepo: {}, activeSessionByRepo: {}, loadedRepos: {}, lastResultByRepo: {}, reviewByRepo: {},
-  tasks: {}, activeRequestByScope: {}, loading: false,
+  tasks: {}, activeRequestByScope: {}, loading: false, streamingTextByRepo: {},
   localSaveEnabled: localStorage.getItem("aigit.chat.localSave") !== "false", contextLimit: DEFAULT_CONTEXT_LIMIT,
   loadSessions: async (repoPath) => {
     if (get().loadedRepos[repoPath]) return;
@@ -196,7 +206,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       };
     });
     set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "commit", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, loading: true }));
-    const { done } = aiService.streamCommitMessage(repoPath, { onEvent }, requestId);
+    const { done } = await withSecretsConfirmation((confirmSecrets) =>
+      aiService.streamCommitMessage(repoPath, { onEvent }, requestId, confirmSecrets)
+    );
     try { return await done; } catch (e) { set((state) => clearActiveScope(state, scope)); throw e; }
   },
   reviewCode: async (repoPath, filePath, stagedOnly) => {
@@ -216,7 +228,9 @@ export const useAiStore = create<AiState>((set, get) => ({
       return { tasks: { ...state.tasks, [key]: next }, lastResultByRepo: { ...state.lastResultByRepo, [repoPath]: next.content }, activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
     });
     set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "review", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, lastResultByRepo: { ...state.lastResultByRepo, [repoPath]: "" }, loading: true }));
-    const { done } = aiService.streamReviewCode(repoPath, filePath, stagedOnly, { onEvent }, requestId);
+    const { done } = await withSecretsConfirmation((confirmSecrets) =>
+      aiService.streamReviewCode(repoPath, filePath, stagedOnly, { onEvent }, requestId, confirmSecrets)
+    );
     try {
       await done;
       const report = await aiService.loadReviewReport(repoPath);
@@ -257,19 +271,46 @@ export const useAiStore = create<AiState>((set, get) => ({
         if (event.type === "Completed") updated.status = "completed";
         if (event.type === "Cancelled") updated.status = "cancelled";
         if (event.type === "Failed") { updated.status = "failed"; updated.error = event.message; }
-        const sessions = (state.sessionsByRepo[repoPath] ?? []).map((item) => item.id === streaming.id ? { ...item, updated_at: Date.now(), messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: updated.content } : message) } : item);
         const terminal = updated.status === "completed" || updated.status === "cancelled" || updated.status === "failed";
         const activeRequestByScope = terminal ? { ...state.activeRequestByScope, [scope]: null } : state.activeRequestByScope;
-        return { sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: sessions }, tasks: { ...state.tasks, [key]: updated }, activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
+
+        // While streaming, accumulate text in `streamingTextByRepo` only —
+        // rebuilding the whole session/message map on every delta is
+        // O(sessions × messages) per token. The final text lands in the
+        // session once, on the terminal event.
+        if (!terminal) {
+          return {
+            tasks: { ...state.tasks, [key]: updated },
+            streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: updated.content },
+            activeRequestByScope,
+            loading: hasActiveTasks(activeRequestByScope),
+          };
+        }
+        const sessions = (state.sessionsByRepo[repoPath] ?? []).map((item) => item.id === streaming.id ? { ...item, updated_at: Date.now(), messages: item.messages.map((message) => message.id === assistantId ? { ...message, content: updated.content } : message) } : item);
+        return {
+          sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: sessions },
+          tasks: { ...state.tasks, [key]: updated },
+          streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: null },
+          activeRequestByScope,
+          loading: hasActiveTasks(activeRequestByScope),
+        };
       });
-      const { done } = aiService.streamRepoChat(context.messages, repoPath, attachments, { onEvent }, requestId);
+      const { done } = await withSecretsConfirmation((confirmSecrets) =>
+        aiService.streamRepoChat(context.messages, repoPath, attachments, { onEvent }, requestId, confirmSecrets)
+      );
       await done;
       const completed = (get().sessionsByRepo[repoPath] ?? []).find((item) => item.id === streaming.id);
       if (completed && get().localSaveEnabled) {
         try { await chatHistoryService.save(completed); }
         catch (e) { toastAiError(e, "chat.historyError"); }
       }
-    } catch (e) { set((state) => clearActiveScope(state, `${repoPath}\u0000chat`)); toastAiError(e, "chat.errorTitle"); }
+    } catch (e) {
+      set((state) => ({
+        ...clearActiveScope(state, `${repoPath}\u0000chat`),
+        streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: null },
+      }));
+      toastAiError(e, "chat.errorTitle");
+    }
   },
   cancelTask: async (repoPath, kind) => {
     const requestId = get().activeRequestByScope[`${repoPath}\u0000${kind}`];

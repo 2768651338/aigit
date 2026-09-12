@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
+import i18n from "@/i18n";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
@@ -33,7 +35,18 @@ export function BranchGraph() {
     cherryPickCommit,
     resetToCommit,
     mergeInProgress,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      log: s.log,
+      branches: s.branches,
+      currentPath: s.currentPath,
+      checkoutCommit: s.checkoutCommit,
+      revertCommit: s.revertCommit,
+      cherryPickCommit: s.cherryPickCommit,
+      resetToCommit: s.resetToCommit,
+      mergeInProgress: s.mergeInProgress,
+    })),
+  );
   const toast = useToastStore();
   const { show: showMenu } = useContextMenu();
   const [selectedHash, setSelectedHash] = useState<string | null>(null);
@@ -52,18 +65,23 @@ export function BranchGraph() {
   );
 
   const q = search.trim().toLowerCase();
-  const filteredLog = log.filter((e) => {
-    if (authorFilter && e.author !== authorFilter) return false;
-    if (!q) return true;
-    return (
-      e.message.toLowerCase().includes(q) ||
-      (e.body ?? "").toLowerCase().includes(q) ||
-      e.author.toLowerCase().includes(q) ||
-      e.short_hash.toLowerCase().includes(q)
-    );
-  });
+  const filteredLog = useMemo(
+    () =>
+      log.filter((e) => {
+        if (authorFilter && e.author !== authorFilter) return false;
+        if (!q) return true;
+        return (
+          e.message.toLowerCase().includes(q) ||
+          (e.body ?? "").toLowerCase().includes(q) ||
+          e.author.toLowerCase().includes(q) ||
+          e.short_hash.toLowerCase().includes(q)
+        );
+      }),
+    [log, authorFilter, q]
+  );
 
-  const laneMap = computeLanes(filteredLog);
+  // 图布局随过滤结果缓存，避免每次输入字符都全量重算。
+  const laneMap = useMemo(() => computeLanes(filteredLog), [filteredLog]);
 
   const handleEntryClick = async (entry: LogEntry) => {
     if (!currentPath) return;
@@ -449,20 +467,18 @@ export function BranchGraph() {
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp * 1000);
   const now = new Date();
-  const diff = now.getTime() - date.getTime();
-  const days = Math.floor(diff / 86400000);
-  if (days === 0) {
-    const hours = Math.floor(diff / 3600000);
-    if (hours === 0) {
-      const mins = Math.floor(diff / 60000);
-      return `${mins}m ago`;
-    }
-    return `${hours}h ago`;
-  }
-  if (days === 1) return "yesterday";
-  if (days < 7) return `${days}d ago`;
-  if (days < 30) return `${Math.floor(days / 7)}w ago`;
-  return date.toLocaleDateString();
+  const diffMs = now.getTime() - date.getTime();
+  // Locale-aware relative time ("3 小时前" / "3 hours ago"), matching the
+  // selected UI language.
+  const rtf = new Intl.RelativeTimeFormat(i18n.language, { numeric: "auto" });
+  const minutes = Math.round(diffMs / 60000);
+  if (Math.abs(minutes) < 60) return rtf.format(-minutes, "minute");
+  const hours = Math.round(diffMs / 3600000);
+  if (Math.abs(hours) < 24) return rtf.format(-hours, "hour");
+  const days = Math.round(diffMs / 86400000);
+  if (Math.abs(days) < 7) return rtf.format(-days, "day");
+  if (Math.abs(days) < 30) return rtf.format(-Math.round(days / 7), "week");
+  return date.toLocaleDateString(i18n.language);
 }
 
 function computeLanes(log: LogEntry[]): Map<string, { lane: number; maxLanes: number }> {
@@ -494,9 +510,8 @@ function computeLanes(log: LogEntry[]): Map<string, { lane: number; maxLanes: nu
     // Add parents to lanes
     for (const parent of entry.parents) {
       if (!activeLanes.includes(parent)) {
-        let parentLane = activeLanes.indexOf(null);
+        const parentLane = activeLanes.indexOf(null);
         if (parentLane === -1) {
-          parentLane = activeLanes.length;
           activeLanes.push(parent);
         } else {
           activeLanes[parentLane] = parent;

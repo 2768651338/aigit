@@ -1,8 +1,10 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo, useCallback, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore, estimateTokens, isSensitivePath, LARGE_CONTEXT_TOKENS } from "@/stores/aiStore";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
+import { InputDialog } from "@/components/common/InputDialog";
+import { confirmDialog } from "@/utils/dialog";
 import { gitService } from "@/services/git";
 import type { ChatAttachment, LogEntry } from "@/types";
 import {
@@ -23,11 +25,17 @@ function CopyButton({ content }: { content: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
+  // 复位定时器挂在 effect 上，组件卸载时自动清理，不产生悬挂 setTimeout。
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(content);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
     } catch {
       // ignore clipboard errors
     }
@@ -44,6 +52,38 @@ function CopyButton({ content }: { content: string }) {
   );
 }
 
+/** 单条消息气泡。Memoized：流式输出期间只有内容在变的那条会重渲染。 */
+const MessageBubble = memo(function MessageBubble({
+  role,
+  content,
+}: {
+  role: string;
+  content: string;
+}) {
+  return (
+    <div className={`flex ${role === "user" ? "justify-end" : "justify-start"}`}>
+      <div
+        className={`group max-w-[80%] rounded-lg px-4 py-2.5 ${
+          role === "user"
+            ? "bg-bg-elevated border border-border"
+            : "bg-bg-surface border border-border"
+        }`}
+      >
+        {role === "user" ? (
+          <p className="text-sm text-text-primary whitespace-pre-wrap">{content}</p>
+        ) : (
+          <>
+            <MarkdownRenderer content={content} />
+            <div className="flex justify-end mt-1 -mb-1">
+              <CopyButton content={content} />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
+
 export function ChatView() {
   const { t } = useTranslation();
   const currentPath = useRepoStore((s) => s.currentPath);
@@ -52,6 +92,7 @@ export function ChatView() {
   const activeSessionId = useAiStore((s) => currentPath ? s.activeSessionByRepo[currentPath] ?? null : null);
   const chatMessages = sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
   const loading = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000chat`]) : false);
+  const streamingText = useAiStore((s) => currentPath ? s.streamingTextByRepo[currentPath] ?? null : null);
   const sendChatMessage = useAiStore((s) => s.sendChatMessage);
   const cancelTask = useAiStore((s) => s.cancelTask);
   const loadSessions = useAiStore((s) => s.loadSessions);
@@ -63,6 +104,8 @@ export function ChatView() {
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  // Session being renamed via the input dialog (replaces window.prompt).
+  const [renamingSession, setRenamingSession] = useState<{ id: string; title: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Picker state
@@ -83,7 +126,7 @@ export function ChatView() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [chatMessages]);
+  }, [chatMessages, streamingText]);
 
   // Reset transient context when switching repos and invalidate stale file requests.
   useEffect(() => {
@@ -138,9 +181,9 @@ export function ChatView() {
     [loadFiles]
   );
 
-  const addFileAttachment = (path: string) => {
+  const addFileAttachment = async (path: string) => {
     const sensitive = isSensitivePath(path);
-    if (sensitive && !window.confirm(t("chat.sensitiveConfirm", { path }))) return;
+    if (sensitive && !(await confirmDialog(t("common.confirmAction"), t("chat.sensitiveConfirm", { path })))) return;
     setAttachments((prev) => {
       if (prev.some((a) => a.kind === "file" && a.path === path)) return prev;
       return [...prev, { kind: "file", path, confirmed: sensitive }];
@@ -181,7 +224,7 @@ export function ChatView() {
     if (!input.trim() || !config || loading || !currentPath) return;
     const msg = input.trim();
     const estimated = estimateTokens(msg) + chatMessages.reduce((sum, item) => sum + estimateTokens(item.content), 0);
-    if (estimated >= LARGE_CONTEXT_TOKENS && !window.confirm(t("chat.largeContextConfirm", { count: estimated.toLocaleString() }))) return;
+    if (estimated >= LARGE_CONTEXT_TOKENS && !(await confirmDialog(t("common.confirmAction"), t("chat.largeContextConfirm", { count: estimated.toLocaleString() })))) return;
     const atts = attachments.length > 0 ? attachments : undefined;
     setInput("");
     setAttachments([]);
@@ -221,8 +264,8 @@ export function ChatView() {
           <div className="flex-1 overflow-auto p-2 space-y-1">
             {sessions.map((session) => <div key={session.id} className={`group flex items-center rounded ${session.id === activeSessionId ? "bg-bg-hover" : "hover:bg-bg-hover"}`}>
               <button className="flex-1 min-w-0 text-left px-2 py-2 text-xs truncate" onClick={() => currentPath && selectSession(currentPath, session.id)} title={session.title}>{session.title}</button>
-              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted" aria-label={t("chat.rename")} onClick={() => { const title = window.prompt(t("chat.renamePrompt"), session.title); if (title && currentPath) void renameSession(currentPath, session.id, title); }}>✎</button>
-              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted hover:text-danger" aria-label={t("chat.delete")} onClick={() => currentPath && window.confirm(t("chat.deleteConfirm")) && void deleteSession(currentPath, session.id)}><XIcon size={12} /></button>
+              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted" aria-label={t("chat.rename")} onClick={() => setRenamingSession({ id: session.id, title: session.title })}>✎</button>
+              <button className="opacity-0 group-hover:opacity-100 px-1 text-text-muted hover:text-danger" aria-label={t("chat.delete")} onClick={() => { void (async () => { if (!currentPath) return; if (await confirmDialog(t("common.confirmAction"), t("chat.deleteConfirm"))) void deleteSession(currentPath, session.id); })(); }}><XIcon size={12} /></button>
             </div>)}
           </div>
         </aside>
@@ -266,33 +309,17 @@ export function ChatView() {
           </div>
         )}
 
-        {chatMessages.map((msg, idx) => (
-          <div
-            key={idx}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`group max-w-[80%] rounded-lg px-4 py-2.5 ${
-                msg.role === "user"
-                  ? "bg-bg-elevated border border-border"
-                  : "bg-bg-surface border border-border"
-              }`}
-            >
-              {msg.role === "user" ? (
-                <p className="text-sm text-text-primary whitespace-pre-wrap">{msg.content}</p>
-              ) : (
-                <>
-                  <MarkdownRenderer content={msg.content} />
-                  <div className="flex justify-end mt-1 -mb-1">
-                    <CopyButton content={msg.content} />
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
+        {chatMessages.map((msg, idx) => {
+          // While a chat stream is in flight its text lives in
+          // `streamingTextByRepo`; render it in the placeholder bubble so the
+          // session map does not need to be rebuilt on every delta.
+          const isStreamingBubble =
+            loading && streamingText !== null && msg.role === "assistant" && idx === chatMessages.length - 1;
+          const content = isStreamingBubble ? streamingText : msg.content;
+          return <MessageBubble key={idx} role={msg.role} content={content} />;
+        })}
 
-        {loading && (
+        {loading && (streamingText === null || streamingText === "") && (
           <div className="flex justify-start">
             <div className="flex items-center gap-2 bg-bg-surface border border-border rounded-lg px-4 py-2.5">
               <SpinnerIcon size={14} className="text-text-muted" />
@@ -469,6 +496,18 @@ export function ChatView() {
       </div>
         </div>
       </div>
+      <InputDialog
+        open={renamingSession !== null}
+        title={t("chat.renamePrompt")}
+        initialValue={renamingSession?.title ?? ""}
+        onCancel={() => setRenamingSession(null)}
+        onConfirm={(value) => {
+          if (currentPath && renamingSession) {
+            void renameSession(currentPath, renamingSession.id, value);
+          }
+          setRenamingSession(null);
+        }}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Component, type ReactNode } from "react";
+import i18n from "@/i18n";
 
 interface Props {
   children: ReactNode;
@@ -8,6 +9,8 @@ interface Props {
 
 interface State {
   error: Error | null;
+  /** 与后端 ErrorDto 体系一致的诊断 ID，便于崩溃归因。 */
+  diagnosticId: string | null;
 }
 
 /**
@@ -22,14 +25,22 @@ interface State {
  *   </ErrorBoundary>
  */
 export class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null };
+  state: State = { error: null, diagnosticId: null };
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    const diagnosticId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `ui-${Date.now()}`;
+    return { error, diagnosticId };
   }
 
   componentDidCatch(error: Error, info: { componentStack: string }) {
-    console.error("[aigit] ErrorBoundary caught:", error, info);
+    console.error(
+      `[aigit] ErrorBoundary caught (diagnostic ${this.state.diagnosticId ?? "n/a"}):`,
+      error,
+      info
+    );
   }
 
   reset = () => {
@@ -41,27 +52,47 @@ export class ErrorBoundary extends Component<Props, State> {
       if (this.props.fallback) {
         return this.props.fallback(this.state.error, this.reset);
       }
-      return <DefaultFallback error={this.state.error} reset={this.reset} />;
+      return (
+        <DefaultFallback
+          error={this.state.error}
+          reset={this.reset}
+          diagnosticId={this.state.diagnosticId}
+        />
+      );
     }
     return this.props.children;
   }
 }
 
-function DefaultFallback({ error, reset }: { error: Error; reset: () => void }) {
+function DefaultFallback({
+  error,
+  reset,
+  diagnosticId,
+}: {
+  error: Error;
+  reset: () => void;
+  diagnosticId: string | null;
+}) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8 py-10">
       <div className="w-12 h-12 rounded-full bg-danger/10 text-danger flex items-center justify-center mb-4 text-2xl">
         !
       </div>
       <h2 className="text-base font-semibold text-text-primary mb-1">
-        Something went wrong
+        {i18n.t("errors.boundaryTitle")}
       </h2>
       <p className="text-sm text-text-secondary mb-4 max-w-md break-words">
-        {error.message || "Unexpected error"}
+        {error.message || i18n.t("errors.boundaryUnexpected")}
       </p>
+      {diagnosticId && (
+        <p className="text-xs text-text-muted mb-4">
+          {i18n.t("errors.diagnosticId")}:{" "}
+          <span className="font-mono">{diagnosticId}</span>
+        </p>
+      )}
       <details className="mb-4 max-w-2xl w-full">
         <summary className="text-xs text-text-muted cursor-pointer hover:text-text-secondary">
-          Stack trace
+          {i18n.t("errors.stackTrace")}
         </summary>
         <pre className="mt-2 p-3 bg-bg-surface border border-border rounded text-xs text-text-muted overflow-auto text-left whitespace-pre-wrap break-all">
           {error.stack ?? String(error)}
@@ -69,13 +100,13 @@ function DefaultFallback({ error, reset }: { error: Error; reset: () => void }) 
       </details>
       <div className="flex gap-2">
         <button onClick={reset} className="btn-secondary">
-          Retry
+          {i18n.t("errors.retry")}
         </button>
         <button
           onClick={() => window.location.reload()}
           className="btn-primary"
         >
-          Reload
+          {i18n.t("errors.reload")}
         </button>
       </div>
     </div>

@@ -17,7 +17,10 @@ import type {
 import { gitService } from "@/services/git";
 import { configService } from "@/services/config";
 import { appFlags } from "@/utils/appFlags";
-import { formatError } from "@/utils/error";
+import { formatError, isErrorDto } from "@/utils/error";
+import { confirmDialog } from "@/utils/dialog";
+import i18n from "@/i18n";
+import { createPanelSlice } from "./repoStorePanels";
 
 /**
  * Shape of the active-tab fields mirrored from `tabs[activePath]`.
@@ -60,7 +63,7 @@ interface ActiveTabProjection {
   merging: boolean;
 }
 
-interface RepoStoreState extends ActiveTabProjection {
+export interface RepoStoreState extends ActiveTabProjection {
   /** Source of truth: per-repo state keyed by absolute path. */
   tabs: Record<string, RepoTabState>;
   /** Path of the currently active tab. `null` when no tab is open. */
@@ -123,7 +126,7 @@ interface RepoStoreState extends ActiveTabProjection {
   setRemoteBusy: (path: string, busy: string | null) => void;
   setRemoteError: (path: string, error: string | null) => void;
   setRemoteTask: (path: string, task: RepoTabState["remoteTask"]) => void;
-  switchBranch: (name: string) => Promise<void>;
+  switchBranch: (name: string, force?: boolean) => Promise<boolean>;
   createBranch: (name: string) => Promise<void>;
   deleteBranch: (name: string) => Promise<void>;
   clearError: () => void;
@@ -390,11 +393,97 @@ async function persistTabs(
   }
 }
 
-export const useRepoStore = create<RepoStoreState>((set, get) => ({
+/** Refresh actions a repo-scoped operation may trigger after succeeding. */
+type RepoOpRefresh =
+  | "status"
+  | "branches"
+  | "log"
+  | "stashes"
+  | "tags"
+  | "submodules"
+  | "mergeState";
+
+export const useRepoStore = create<RepoStoreState>((set, get) => {
+  /**
+   * Shared skeleton for repo-scoped actions. Pins the operation to the
+   * currently active repo, runs it, applies the requested refreshes, and
+   * funnels errors into the tab's error banner. Mutating ops rethrow after
+   * recording (`rethrow` defaults to true); background refreshes pass
+   * `rethrow: false` to swallow errors — and may therefore resolve to
+   * undefined when no repo is open or the op fails.
+   */
+  function runRepoOp<T>(
+    run: (repoPath: string) => Promise<T>,
+    options: {
+      refresh?: RepoOpRefresh[];
+      rethrow: false;
+      before?: Partial<RepoTabState>;
+      after?: Partial<RepoTabState>;
+      withRepoInfo?: boolean;
+    }
+  ): Promise<T | undefined>;
+  function runRepoOp<T>(
+    run: (repoPath: string) => Promise<T>,
+    options?: {
+      refresh?: RepoOpRefresh[];
+      rethrow?: true;
+      before?: Partial<RepoTabState>;
+      after?: Partial<RepoTabState>;
+      withRepoInfo?: boolean;
+    }
+  ): Promise<T>;
+  async function runRepoOp<T>(
+    run: (repoPath: string) => Promise<T>,
+    options: {
+      refresh?: RepoOpRefresh[];
+      rethrow?: boolean;
+      before?: Partial<RepoTabState>;
+      after?: Partial<RepoTabState>;
+      withRepoInfo?: boolean;
+    } = {}
+  ): Promise<T | undefined> {
+    const { activePath } = get();
+    if (!activePath) {
+      if (options.rethrow === false) return undefined;
+      throw new Error("No repository open");
+    }
+    if (options.before) {
+      updateTab(set, get, activePath, { error: null, ...options.before });
+    }
+    try {
+      const result = await run(activePath);
+      for (const key of options.refresh ?? []) {
+        if (key === "status") await get().refreshStatus(true);
+        else if (key === "branches") await get().refreshBranches(true);
+        else if (key === "log") await get().refreshLog(true);
+        else if (key === "stashes") await get().refreshStashes();
+        else if (key === "tags") await get().refreshTags();
+        else if (key === "submodules") await get().refreshSubmodules();
+        else await get().refreshMergeState();
+      }
+      if (options.withRepoInfo) {
+        const info = await gitService.getRepoInfo(activePath);
+        updateTab(set, get, activePath, { repoInfo: info });
+      }
+      return result;
+    } catch (e) {
+      updateTab(set, get, activePath, { error: formatError(e) });
+      if (options.rethrow !== false) throw e;
+      return undefined;
+    } finally {
+      if (options.after) updateTab(set, get, activePath, options.after);
+    }
+  };
+
+  return {
   tabs: {},
   activePath: null,
   tabOrder: [],
   ...projectActiveTab({}, null),
+
+  // Panel-domain actions (stash / tags / submodules / merge / history) live
+  // in repoStorePanels.ts; they share this store's runRepoOp runner.
+  ...createPanelSlice(runRepoOp),
 
   openRepo: async (path: string) => {
     const state = get();
@@ -864,42 +953,46 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     updateTab(set, get, path, { remoteTask: task });
   },
 
-  switchBranch: async (name: string) => {
+  /** Returns false when the switch was declined or failed, true when switched. */
+  switchBranch: async (name: string, force = false): Promise<boolean> => {
     const { activePath } = get();
-    if (!activePath) return;
+    if (!activePath) return false;
     try {
-      await gitService.switchBranch(activePath, name);
+      await gitService.switchBranch(activePath, name, force);
       await get().refreshStatus(true);
       await get().refreshBranches(true);
       await get().refreshLog(true);
       const info = await gitService.getRepoInfo(activePath);
       updateTab(set, get, activePath, { repoInfo: info });
+      return true;
     } catch (e) {
+      if (!force && isErrorDto(e) && e.code === "uncommitted_changes") {
+        // 后端拒绝覆盖未提交改动；仅在用户显式确认丢弃后才强制切换。
+        const confirmed = await confirmDialog(
+          i18n.t("branches.forceSwitchTitle"),
+          i18n.t("branches.forceSwitchMessage", { name })
+        );
+        if (confirmed) {
+          return get().switchBranch(name, true);
+        }
+        return false;
+      }
       updateTab(set, get, activePath, { error: formatError(e) });
+      return false;
     }
   },
 
-  createBranch: async (name: string) => {
-    const { activePath } = get();
-    if (!activePath) return;
-    try {
-      await gitService.createBranch(activePath, name);
-      await get().refreshBranches(true);
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-    }
-  },
+  createBranch: async (name: string) =>
+    runRepoOp((repoPath) => gitService.createBranch(repoPath, name), {
+      refresh: ["branches"],
+      rethrow: false,
+    }),
 
-  deleteBranch: async (name: string) => {
-    const { activePath } = get();
-    if (!activePath) return;
-    try {
-      await gitService.deleteBranch(activePath, name);
-      await get().refreshBranches(true);
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-    }
-  },
+  deleteBranch: async (name: string) =>
+    runRepoOp((repoPath) => gitService.deleteBranch(repoPath, name), {
+      refresh: ["branches"],
+      rethrow: false,
+    }),
 
   clearError: () => {
     const { activePath } = get();
@@ -953,65 +1046,6 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  stashSave: async (message, includeUntracked, keepIndex) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.stashSave(
-        activePath,
-        message,
-        includeUntracked,
-        keepIndex
-      );
-      await get().refreshStashes();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  stashApply: async (index: number) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.stashApply(activePath, index);
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  stashPop: async (index: number) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.stashPop(activePath, index);
-      await get().refreshStashes();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  stashDrop: async (index: number) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.stashDrop(activePath, index);
-      await get().refreshStashes();
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
   // --- Tags ---
 
   refreshTags: async () => {
@@ -1022,31 +1056,6 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
       updateTab(set, get, activePath, { tags });
     } catch (e) {
       updateTab(set, get, activePath, { error: formatError(e) });
-    }
-  },
-
-  createTag: async (name: string, message?: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.createTag(activePath, name, message);
-      await get().refreshTags();
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  deleteTag: async (name: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      await gitService.deleteTag(activePath, name);
-      await get().refreshTags();
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
     }
   },
 
@@ -1063,169 +1072,9 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  updateSubmodule: async (name?: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.updateSubmodule(activePath, name);
-      await get().refreshSubmodules();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  addSubmodule: async (url: string, path: string, branch?: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.addSubmodule(
-        activePath,
-        url,
-        path,
-        branch
-      );
-      await get().refreshSubmodules();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  removeSubmodule: async (name: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.removeSubmodule(activePath, name);
-      await get().refreshSubmodules();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
   // --- Merge / Rebase ---
 
-  mergeBranch: async (branch: string, noFf?: boolean) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    updateTab(set, get, activePath, { merging: true, error: null });
-    try {
-      const result = await gitService.mergeBranch(activePath, branch, noFf);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshLog(true);
-      await get().refreshBranches(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    } finally {
-      updateTab(set, get, activePath, { merging: false });
-    }
-  },
-
-  rebaseBranch: async (branch: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    updateTab(set, get, activePath, { merging: true, error: null });
-    try {
-      const result = await gitService.rebaseBranch(activePath, branch);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshLog(true);
-      await get().refreshBranches(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    } finally {
-      updateTab(set, get, activePath, { merging: false });
-    }
-  },
-
-  abortMerge: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.abortMerge(activePath);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  abortRebase: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.abortRebase(activePath);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  continueMerge: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.continueMerge(activePath);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshLog(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  continueRebase: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.continueRebase(activePath);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshLog(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  skipRebase: async () => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.skipRebase(activePath);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshLog(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
+  // --- Merge / Rebase / History actions live in repoStorePanels.ts ---
 
   refreshMergeState: async () => {
     const { activePath } = get();
@@ -1244,103 +1093,5 @@ export const useRepoStore = create<RepoStoreState>((set, get) => ({
     }
   },
 
-  resolveOurs: async (files: string[]) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.resolveOurs(activePath, files);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  resolveTheirs: async (files: string[]) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.resolveTheirs(activePath, files);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  // --- History (commit-level operations) ---
-
-  checkoutCommit: async (hash: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      await gitService.checkoutCommit(activePath, hash);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshBranches(true);
-      await get().refreshLog(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  revertCommit: async (hash: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.revertCommit(activePath, hash);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshBranches(true);
-      await get().refreshLog(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  cherryPickCommit: async (hash: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      const result = await gitService.cherryPickCommit(activePath, hash);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshBranches(true);
-      await get().refreshLog(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-      return result;
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-
-  resetToCommit: async (hash: string, mode: string) => {
-    const { activePath } = get();
-    if (!activePath) throw new Error("No repository open");
-    try {
-      await gitService.resetToCommit(activePath, hash, mode);
-      await get().refreshMergeState();
-      await get().refreshStatus(true);
-      await get().refreshBranches(true);
-      await get().refreshLog(true);
-      const info = await gitService.getRepoInfo(activePath);
-      updateTab(set, get, activePath, { repoInfo: info });
-    } catch (e) {
-      updateTab(set, get, activePath, { error: formatError(e) });
-      throw e;
-    }
-  },
-}));
+  };
+});

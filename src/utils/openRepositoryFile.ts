@@ -1,13 +1,15 @@
-import { openPath } from "@tauri-apps/plugin-opener";
-
-function joinRepoPath(repoPath: string, relativePath: string): string {
-  const separator = repoPath.includes("\\") ? "\\" : "/";
-  return `${repoPath.replace(/[\\/]$/, "")}${separator}${relativePath.replace(/[\\/]/g, separator)}`;
-}
+import { systemService } from "@/services/system";
 
 export async function openRepositoryFile(repoPath: string, relativePath: string): Promise<void> {
-  if (!relativePath || relativePath.startsWith("/") || relativePath.startsWith("\\") || relativePath.split(/[\\/]/).includes("..")) {
+  if (
+    !relativePath ||
+    relativePath.startsWith("/") ||
+    relativePath.startsWith("\\") ||
+    relativePath.split(/[\\/]/).includes("..")
+  ) {
     throw new Error("Invalid repository-relative path");
   }
-  await openPath(joinRepoPath(repoPath, relativePath));
+  // The backend re-validates the path against the repository root before
+  // opening, so no unrestricted open-path capability is needed in the webview.
+  await systemService.openRepoFile(repoPath, relativePath);
 }

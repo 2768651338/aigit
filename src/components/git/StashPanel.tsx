@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
@@ -44,7 +45,18 @@ export function StashPanel() {
     stashApply,
     stashPop,
     stashDrop,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      stashes: s.stashes,
+      refreshing: s.refreshing,
+      refreshStashes: s.refreshStashes,
+      stashSave: s.stashSave,
+      stashApply: s.stashApply,
+      stashPop: s.stashPop,
+      stashDrop: s.stashDrop,
+    })),
+  );
   const toast = useToastStore();
 
   const [showForm, setShowForm] = useState(false);

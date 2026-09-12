@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
@@ -40,7 +41,17 @@ export function SubmodulePanel() {
     updateSubmodule,
     addSubmodule,
     removeSubmodule,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      submodules: s.submodules,
+      refreshing: s.refreshing,
+      refreshSubmodules: s.refreshSubmodules,
+      updateSubmodule: s.updateSubmodule,
+      addSubmodule: s.addSubmodule,
+      removeSubmodule: s.removeSubmodule,
+    })),
+  );
   const toast = useToastStore();
 
   const [showForm, setShowForm] = useState(false);

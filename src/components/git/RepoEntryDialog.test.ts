@@ -5,13 +5,21 @@ describe("repository entry validation", () => {
   it.each([
     "https://github.com/example/repo.git",
     "ssh://git@example.com/example/repo.git",
-    "git://example.com/example/repo.git",
     "git@example.com:example/repo.git",
   ])("accepts supported clone URL %s", (url) => {
     expect(isCloneUrlValid(url)).toBe(true);
   });
 
-  it.each(["", "github.com/example/repo", "https://example.com/repo\n--upload-pack=bad", "git@:repo"])(
+  it.each([
+    "",
+    "github.com/example/repo",
+    "https://example.com/repo\n--upload-pack=bad",
+    "git@:repo",
+    // Non-remote transports are rejected together with the backend whitelist.
+    "git://example.com/example/repo.git",
+    "http://example.com/example/repo.git",
+    "D:\\work\\repo",
+  ])(
     "rejects invalid clone URL %s",
     (url) => expect(isCloneUrlValid(url)).toBe(false),
   );

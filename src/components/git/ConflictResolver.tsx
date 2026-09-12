@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConflictFile } from "@/types";
 import { gitService } from "@/services/git";
 import { formatError } from "@/utils/error";
 import { parseConflictBlocks, resolveConflictBlock } from "@/utils/conflict";
+import { useModalAccessibility } from "@/utils/modalA11y";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { openRepositoryFile } from "@/utils/openRepositoryFile";
@@ -53,6 +54,9 @@ export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
 
   const blocks = useMemo(() => parseConflictBlocks(result), [result]);
 
+  const panelRef = useRef<HTMLDivElement>(null);
+  useModalAccessibility(panelRef, onClose, open);
+
   if (!open) return null;
 
   const quickResolve = async (ours: boolean) => {
@@ -100,7 +104,7 @@ export function ConflictResolver({ open, onClose }: ConflictResolverProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex bg-black/60" role="dialog" aria-modal="true" aria-label={t("conflictResolver.title")}>
-      <div className="m-5 flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-base shadow-2xl">
+      <div ref={panelRef} tabIndex={-1} className="m-5 flex min-w-0 flex-1 flex-col overflow-hidden rounded-lg border border-border bg-bg-base shadow-2xl">
         <div className="flex h-12 items-center gap-3 border-b border-border px-4">
           <h2 className="font-semibold">{t("conflictResolver.title")}</h2>
           <span className="text-xs text-text-muted">{t("conflictResolver.remaining", { count: files.length })}</span>

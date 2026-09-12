@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import "@/i18n";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { TitleBar } from "@/components/layout/TitleBar";
 import { StatusBar } from "@/components/layout/StatusBar";
@@ -31,12 +32,16 @@ import { appFlags } from "@/utils/appFlags";
 import type { ViewType } from "@/types";
 
 export default function App() {
+  // 最外层边界兜住 ContextMenu/RepoEntry Provider 自身的渲染错误，
+  // 否则这些 Provider 抛错会绕过所有边界直接白屏。
   return (
-    <ContextMenuProvider>
-      <RepoEntryProvider>
-        <AppShell />
-      </RepoEntryProvider>
-    </ContextMenuProvider>
+    <ErrorBoundary>
+      <ContextMenuProvider>
+        <RepoEntryProvider>
+          <AppShell />
+        </RepoEntryProvider>
+      </ContextMenuProvider>
+    </ErrorBoundary>
   );
 }
 
@@ -44,7 +49,14 @@ function AppShell() {
   const { i18n, t } = useTranslation();
   const [activeView, setActiveView] = useState<ViewType>("changes");
   const { config, loadConfig } = useSettingsStore();
-  const { openRepo, setActiveRepo, currentPath, refreshStatus } = useRepoStore();
+  const { openRepo, setActiveRepo, currentPath, refreshStatus } = useRepoStore(
+    useShallow((s) => ({
+      openRepo: s.openRepo,
+      setActiveRepo: s.setActiveRepo,
+      currentPath: s.currentPath,
+      refreshStatus: s.refreshStatus,
+    })),
+  );
   const { show: showMenu } = useContextMenu();
   const toast = useToastStore();
   // Guard against re-opening tabs on every config change.
@@ -148,13 +160,21 @@ function AppShell() {
     (async () => {
       // Prefer the saved tab list; otherwise restore just the last repo.
       const list = openRepos.length > 0 ? openRepos : recentFirst ? [recentFirst] : [];
-      for (const path of list) {
-        try {
-          await gitService.discoverRepo(path);
-          await openRepo(path);
-        } catch (e) {
-          console.warn("[aigit] Skipping invalid saved repo:", path, e);
-        }
+      // Validate every saved repo in parallel first — a serial discover would
+      // make the startup white-screen time grow linearly with the tab count.
+      const valid = await Promise.all(
+        list.map((path) =>
+          gitService
+            .discoverRepo(path)
+            .then(() => path)
+            .catch((e) => {
+              console.warn("[aigit] Skipping invalid saved repo:", path, e);
+              return null;
+            })
+        )
+      );
+      for (const path of valid) {
+        if (path) await openRepo(path);
       }
       // Activate the previously active tab if it was restored.
       if (activeRepo) {

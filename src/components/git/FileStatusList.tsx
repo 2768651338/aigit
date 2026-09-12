@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { useTranslation } from "react-i18next";
@@ -52,11 +53,25 @@ export function FileStatusList({ staged }: FileStatusListProps) {
     discardFiles,
     refreshStatus,
     currentPath,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      fileStatuses: s.fileStatuses,
+      selectedFile: s.selectedFile,
+      selectFile: s.selectFile,
+      stageFiles: s.stageFiles,
+      unstageFiles: s.unstageFiles,
+      discardFiles: s.discardFiles,
+      refreshStatus: s.refreshStatus,
+      currentPath: s.currentPath,
+    })),
+  );
   const toast = useToastStore();
   const { show: showMenu } = useContextMenu();
   const [search, setSearch] = useState("");
-  const files = useMemoFilteredFiles(fileStatuses, staged, search);
+  const files = useMemo(
+    () => filterFiles(fileStatuses, staged, search),
+    [fileStatuses, staged, search]
+  );
   const totalCount = fileStatuses.filter((f) => f.staged === staged).length;
 
   // Batch selection state (transient UI state — not persisted in the store).
@@ -442,7 +457,8 @@ export function FileStatusList({ staged }: FileStatusListProps) {
   );
 }
 
-function useMemoFilteredFiles(files: FileStatus[], staged: boolean, search: string) {
+/** Filter the status list to the current stage side and search term. */
+function filterFiles(files: FileStatus[], staged: boolean, search: string) {
   const list = files.filter((f) => f.staged === staged);
   if (!search.trim()) return list;
   const q = search.trim().toLowerCase();

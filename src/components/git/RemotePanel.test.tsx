@@ -38,7 +38,12 @@ const store = vi.hoisted(() => ({
   refreshStatus: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }));
+vi.mock("react-i18next", () => ({
+  // `initReactI18next` must exist because modules in this graph (error.ts)
+  // initialize the real i18n singleton.
+  initReactI18next: { type: "3rdParty", init: () => {} },
+  useTranslation: () => ({ t: translate }),
+}));
 vi.mock("@/services/git", () => ({ gitService: services }));
 vi.mock("@/stores/toastStore", () => ({ useToastStore: () => toast }));
 vi.mock("@/utils/dialog", () => ({ confirmDialog: vi.fn(() => Promise.resolve(true)) }));

@@ -1,17 +1,19 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "http:", "mailto:"]);
+// Only https — matches the opener capability whitelist; plain http links
+// degrade to plain text in the markdown renderer.
+const ALLOWED_EXTERNAL_PROTOCOLS = new Set(["https:", "mailto:"]);
 
 /**
  * Parse an external link and reject schemes that can execute or read local
- * content (for example javascript:, data:, file: and shell pseudo-URLs).
+ * content (for example javascript:, data:, http:, file: and shell pseudo-URLs).
  */
 export function safeExternalUrl(value: string | undefined): string | null {
   if (!value || value.length > 2048 || /[\0\r\n]/.test(value)) return null;
   try {
     const url = new URL(value);
     if (!ALLOWED_EXTERNAL_PROTOCOLS.has(url.protocol)) return null;
-    if ((url.protocol === "http:" || url.protocol === "https:") && !url.hostname) return null;
+    if (url.protocol === "https:" && !url.hostname) return null;
     return url.href;
   } catch {
     return null;

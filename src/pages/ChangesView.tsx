@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useTranslation } from "react-i18next";
 import clsx from "clsx";
@@ -42,7 +43,18 @@ export function ChangesView() {
     refreshing,
     error,
     clearError,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      selectedFile: s.selectedFile,
+      workdirDiff: s.workdirDiff,
+      stagedDiff: s.stagedDiff,
+      refreshStatus: s.refreshStatus,
+      refreshing: s.refreshing,
+      error: s.error,
+      clearError: s.clearError,
+    })),
+  );
   const showDiffInline = useSettingsStore((s) => s.config?.ui.show_diff_inline ?? true);
 
   useEffect(() => {

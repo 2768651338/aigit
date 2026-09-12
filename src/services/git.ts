@@ -44,6 +44,12 @@ export const gitService = {
     return invoke<void>("clone_repo", { url, targetPath });
   },
 
+  /** Cancellable clone; pair with `cancelGitTask` using the returned task id. */
+  cloneRepoTask: (url: string, targetPath: string, taskId: string) => {
+    ensureTauri();
+    return invoke<void>("clone_repo_task", { url, targetPath, taskId });
+  },
+
   getRepoInfo: (path: string) => {
     ensureTauri();
     return invoke<RepoInfo>("get_repo_info", { path });
@@ -153,9 +159,9 @@ export const gitService = {
     return invoke<void>("create_branch", { path, name });
   },
 
-  switchBranch: (path: string, name: string) => {
+  switchBranch: (path: string, name: string, force = false) => {
     ensureTauri();
-    return invoke<void>("switch_branch", { path, name });
+    return invoke<void>("switch_branch", { path, name, force });
   },
 
   deleteBranch: (path: string, name: string) => {

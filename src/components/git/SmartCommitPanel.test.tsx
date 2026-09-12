@@ -17,6 +17,14 @@ vi.mock("@/services/git", () => ({ gitService: {
   stageSmartCommitGroup: stageGroup,
   commitSmartCommitGroup: commitGroup,
 } }));
+// Pass-through so this suite keeps uninitialized i18n (assertions use raw keys).
+vi.mock("@/utils/aiGuard", () => ({ withSecretsConfirmation: (send: (confirm: boolean) => unknown) => send(false) }));
+vi.mock("@/i18n", () => ({
+  default: {
+    t: (key: string, opts?: { defaultValue?: string }) => opts?.defaultValue ?? key,
+    language: "zh",
+  },
+}));
 vi.mock("@/stores/repoStore", () => ({ useRepoStore: (selector: (s: unknown) => unknown) => selector({ currentPath: "D:/repo", refreshStatus, refreshLog }) }));
 const toast = { success: vi.fn(), error: vi.fn() };
 vi.mock("@/stores/toastStore", () => ({ useToastStore: () => toast }));

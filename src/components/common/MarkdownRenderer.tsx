@@ -1,6 +1,6 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CopyIcon, CheckIcon } from "@/components/common/Icons";
 import { openExternalUrl, safeExternalUrl } from "@/utils/externalUrl";
 
@@ -95,13 +95,19 @@ export function MarkdownRenderer({ content }: { content: string }) {
 function CodeBlock({ children }: { children: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
 
+  // 复位定时器挂在 effect 上，组件卸载时自动清理。
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+
   const handleCopy = async () => {
     try {
       // Extract text content from the React nodes.
       const text = extractText(children);
       await navigator.clipboard.writeText(text);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
     } catch (e) {
       console.warn("[aigit] copy failed:", e);
     }

@@ -68,7 +68,8 @@
     font-family: "Inter", system-ui, sans-serif;
     background-color: rgb(var(--color-bg-base));
     color: rgb(var(--color-text-primary));
-    font-size: 14px;
+    /* rem 继承 html 上的字号设置，让 12–18px 字号滑条对原生文本同样生效 */
+    font-size: 0.875rem;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

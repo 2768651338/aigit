@@ -4,6 +4,9 @@ import { DiffViewer } from "./DiffViewer";
 import type { FileDiff } from "@/types";
 
 vi.mock("react-i18next", () => ({
+  // `initReactI18next` must exist because modules in this graph (error.ts)
+  // initialize the real i18n singleton.
+  initReactI18next: { type: "3rdParty", init: () => {} },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 

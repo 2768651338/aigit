@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { gitService } from "@/services/git";
@@ -40,7 +41,16 @@ export function TagPanel() {
     refreshTags,
     createTag,
     deleteTag,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      tags: s.tags,
+      refreshing: s.refreshing,
+      refreshTags: s.refreshTags,
+      createTag: s.createTag,
+      deleteTag: s.deleteTag,
+    })),
+  );
   const toast = useToastStore();
 
   const [showForm, setShowForm] = useState(false);

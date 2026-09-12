@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import {
   GitBranchIcon,
@@ -10,7 +11,17 @@ import {
 export function StatusBar() {
   const { t } = useTranslation();
   const { repoInfo, fileStatuses, committing, commitAndPushing, pushing, pulling, aiLoading } =
-    useRepoStore();
+    useRepoStore(
+      useShallow((s) => ({
+        repoInfo: s.repoInfo,
+        fileStatuses: s.fileStatuses,
+        committing: s.committing,
+        commitAndPushing: s.commitAndPushing,
+        pushing: s.pushing,
+        pulling: s.pulling,
+        aiLoading: s.aiLoading,
+      })),
+    );
 
   // Compute the most informative in-progress label. Precedence:
   // commit & push > commit > push > pull > AI. Only one is shown at a time.

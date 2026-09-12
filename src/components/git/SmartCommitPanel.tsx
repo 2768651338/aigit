@@ -6,6 +6,8 @@ import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
+import { withSecretsConfirmation } from "@/utils/aiGuard";
+import { confirmDialog } from "@/utils/dialog";
 import { AlertCircleIcon, CheckIcon, ChevronDownIcon, ChevronRightIcon, SpinnerIcon } from "@/components/common/Icons";
 
 export function SmartCommitPanel({ onClose }: { onClose: () => void }) {
@@ -26,7 +28,9 @@ export function SmartCommitPanel({ onClose }: { onClose: () => void }) {
     if (!currentPath) return;
     let active = true;
     setLoading(true);
-    aiService.generateSmartCommitPlan(currentPath)
+    withSecretsConfirmation((confirmSecrets) =>
+      aiService.generateSmartCommitPlan(currentPath, confirmSecrets)
+    )
       .then((value) => {
         if (!active) return;
         setPlan(value);
@@ -67,7 +71,7 @@ export function SmartCommitPanel({ onClose }: { onClose: () => void }) {
 
   const commitGroup = async (groupId: string) => {
     if (!currentPath || !plan || !staged[groupId]) return;
-    if (!window.confirm(t("smartCommit.commitConfirm"))) return;
+    if (!(await confirmDialog(t("common.confirmAction"), t("smartCommit.commitConfirm")))) return;
     setBusyGroup(groupId);
     setRecovery(null);
     try {

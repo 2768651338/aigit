@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
+import { confirmDialog } from "@/utils/dialog";
 import { gitService } from "@/services/git";
 import { aiService } from "@/services/ai";
 import type { GitErrorAnalysis } from "@/types";
@@ -76,7 +78,36 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
     setCommittingFor,
     setCommitAndPushingFor,
     setPushErrorFor,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      fileStatuses: s.fileStatuses,
+      stageAll: s.stageAll,
+      unstageFiles: s.unstageFiles,
+      commit: s.commit,
+      amend: s.amend,
+      push: s.push,
+      pull: s.pull,
+      refreshStatus: s.refreshStatus,
+      repoInfo: s.repoInfo,
+      pushing: s.pushing,
+      pulling: s.pulling,
+      committing: s.committing,
+      commitAndPushing: s.commitAndPushing,
+      pushError: s.pushError,
+      aiError: s.aiError,
+      commitMessage: s.commitMessage,
+      setCommitMessage: s.setCommitMessage,
+      setPushError: s.setPushError,
+      setAiError: s.setAiError,
+      setCommitMessageFor: s.setCommitMessageFor,
+      setAiErrorFor: s.setAiErrorFor,
+      setAiLoadingFor: s.setAiLoadingFor,
+      setCommittingFor: s.setCommittingFor,
+      setCommitAndPushingFor: s.setCommitAndPushingFor,
+      setPushErrorFor: s.setPushErrorFor,
+    })),
+  );
   const { generateCommitMessage, cancelTask } = useAiStore();
   const aiRequestActive = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000commit`]) : false);
   const { config } = useSettingsStore();
@@ -137,11 +168,11 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       toast.success(t("commit.aiGenerated"));
     } catch (e) {
       // aiStore sets its own global error; mirror it onto the originating tab
-      // so the inline panel can display the message when the user returns to it.
+      // so the inline panel can display the message when the user returns to
+      // it. The inline banner is the single surface for this panel-scoped
+      // error — no extra toast (see the error-channel convention).
       console.error("[aigit] AI Generate failed in panel:", e);
-      const msg = formatError(e);
-      setAiErrorFor(targetPath, msg);
-      toast.error(msg, t("commit.aiGenerateFailed"));
+      setAiErrorFor(targetPath, formatError(e));
     } finally {
       setAiLoadingFor(targetPath, false);
     }
@@ -164,7 +195,10 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       if (amendMode) {
         let confirmPushed = false;
         if (await gitService.isHeadPushed(targetPath)) {
-          confirmPushed = window.confirm(t("commit.amendPushedConfirm"));
+          confirmPushed = await confirmDialog(
+            t("common.confirmAction"),
+            t("commit.amendPushedConfirm")
+          );
           if (!confirmPushed) return;
         }
         await amend(targetPath, message, includeStagedInAmend, confirmPushed);
@@ -217,9 +251,9 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
           : t("commit.pushSuccessBodyGeneric");
         toast.success(body, t("commit.pushSuccessTitle"));
       } catch (e) {
-        const msg = formatError(e);
-        setPushErrorFor(targetPath, msg);
-        toast.error(msg, t("commit.pushFailed"));
+        // Panel-scoped failure: the inline pushError banner is the single
+        // error surface — no extra toast (see the error-channel convention).
+        setPushErrorFor(targetPath, formatError(e));
       }
       // Force: commit() already refreshed internally, but the push above may
       // have taken a while — make sure the final status refresh can't be

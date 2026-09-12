@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -39,7 +40,17 @@ export function BranchesView() {
     createBranch,
     switchBranch,
     deleteBranch,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      currentPath: s.currentPath,
+      branches: s.branches,
+      refreshBranches: s.refreshBranches,
+      refreshing: s.refreshing,
+      createBranch: s.createBranch,
+      switchBranch: s.switchBranch,
+      deleteBranch: s.deleteBranch,
+    })),
+  );
   const toast = useToastStore();
   const { show: showMenu } = useContextMenu();
 
@@ -71,10 +82,12 @@ export function BranchesView() {
     try {
       await createBranch(newBranchName.trim());
       await refreshBranches();
-      await switchBranch(newBranchName.trim());
+      const switched = await switchBranch(newBranchName.trim());
       setNewBranchName("");
       setShowNewBranch(false);
-      toast.success(t("branches.branchCreated", { name: newBranchName.trim() }));
+      if (switched) {
+        toast.success(t("branches.branchCreated", { name: newBranchName.trim() }));
+      }
     } catch (e) {
       console.error(e);
       toast.error(formatError(e), t("branches.branchCreateFailed"));
@@ -83,8 +96,10 @@ export function BranchesView() {
 
   const handleSwitch = async (name: string) => {
     try {
-      await switchBranch(name);
-      toast.success(t("branches.switched", { name }));
+      const switched = await switchBranch(name);
+      if (switched) {
+        toast.success(t("branches.switched", { name }));
+      }
     } catch (e) {
       console.error(e);
       toast.error(formatError(e), t("branches.switchFailed"));

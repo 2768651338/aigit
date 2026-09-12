@@ -71,9 +71,9 @@ async function streamCommand(
 export const aiService = {
   createRequestId,
 
-  generateSmartCommitPlan: (repoPath: string) => {
+  generateSmartCommitPlan: (repoPath: string, confirmSecrets?: boolean) => {
     ensureTauri();
-    return invoke<CommitPlan>("generate_smart_commit_plan", { repoPath });
+    return invoke<CommitPlan>("generate_smart_commit_plan", { repoPath, confirmSecrets });
   },
 
   analyzeGitError: (repoPath: string, errorText: string) => {
@@ -81,38 +81,40 @@ export const aiService = {
     return invoke<GitErrorAnalysis>("analyze_git_error", { repoPath, errorText });
   },
 
-  generateCommitMessage: (repoPath: string) => {
+  generateCommitMessage: (repoPath: string, confirmSecrets?: boolean) => {
     ensureTauri();
-    return invoke<string>("generate_commit_message", { repoPath });
+    return invoke<string>("generate_commit_message", { repoPath, confirmSecrets });
   },
 
-  generatePullRequestDraft: (repoPath: string, base: string, head: string) => {
+  generatePullRequestDraft: (repoPath: string, base: string, head: string, confirmSecrets?: boolean) => {
     ensureTauri();
     return invoke<{ title: string; body: string }>("generate_pull_request_draft", {
       repoPath,
       base,
       head,
+      confirmSecrets,
     });
   },
 
   streamCommitMessage: (
     repoPath: string,
     handlers: AiStreamHandlers,
-    requestId = createRequestId()
+    requestId = createRequestId(),
+    confirmSecrets?: boolean
   ) => ({
     requestId,
     done: streamCommand(
       "generate_commit_message_stream",
-      { repoPath },
+      { repoPath, confirmSecrets },
       handlers,
-      () => aiService.generateCommitMessage(repoPath),
+      () => aiService.generateCommitMessage(repoPath, confirmSecrets),
       requestId
     ),
   }),
 
-  reviewCode: (repoPath: string, filePath?: string, stagedOnly?: boolean) => {
+  reviewCode: (repoPath: string, filePath?: string, stagedOnly?: boolean, confirmSecrets?: boolean) => {
     ensureTauri();
-    return invoke<ReviewReport>("review_code", { repoPath, filePath, stagedOnly });
+    return invoke<ReviewReport>("review_code", { repoPath, filePath, stagedOnly, confirmSecrets });
   },
 
   streamReviewCode: (
@@ -120,15 +122,16 @@ export const aiService = {
     filePath: string | undefined,
     stagedOnly: boolean | undefined,
     handlers: AiStreamHandlers,
-    requestId = createRequestId()
+    requestId = createRequestId(),
+    confirmSecrets?: boolean
   ) => ({
     requestId,
     done: streamCommand(
       "review_code_stream",
-      { repoPath, filePath, stagedOnly },
+      { repoPath, filePath, stagedOnly, confirmSecrets },
       handlers,
       async () => {
-        const report = await aiService.reviewCode(repoPath, filePath, stagedOnly);
+        const report = await aiService.reviewCode(repoPath, filePath, stagedOnly, confirmSecrets);
         return report.raw_markdown || report.summary;
       },
       requestId
@@ -145,9 +148,9 @@ export const aiService = {
     return invoke<ReviewReport>("update_review_finding", { repoPath, findingId, status });
   },
 
-  repoChat: (messages: ChatMessage[], repoPath?: string, attachments?: ChatAttachment[]) => {
+  repoChat: (messages: ChatMessage[], repoPath?: string, attachments?: ChatAttachment[], confirmSecrets?: boolean) => {
     ensureTauri();
-    return invoke<string>("repo_chat", { messages, repoPath, attachments });
+    return invoke<string>("repo_chat", { messages, repoPath, attachments, confirmSecrets });
   },
 
   streamRepoChat: (
@@ -155,14 +158,15 @@ export const aiService = {
     repoPath: string | undefined,
     attachments: ChatAttachment[] | undefined,
     handlers: AiStreamHandlers,
-    requestId = createRequestId()
+    requestId = createRequestId(),
+    confirmSecrets?: boolean
   ) => ({
     requestId,
     done: streamCommand(
       "repo_chat_stream",
-      { messages, repoPath, attachments },
+      { messages, repoPath, attachments, confirmSecrets },
       handlers,
-      () => aiService.repoChat(messages, repoPath, attachments),
+      () => aiService.repoChat(messages, repoPath, attachments, confirmSecrets),
       requestId
     ),
   }),

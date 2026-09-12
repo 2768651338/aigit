@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoEntry } from "@/components/git/RepoEntryDialog";
@@ -51,7 +52,18 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
     setActiveRepo,
     closeRepoTab,
     moveRepoTab,
-  } = useRepoStore();
+  } = useRepoStore(
+    useShallow((s) => ({
+      fileStatuses: s.fileStatuses,
+      openRepo: s.openRepo,
+      tabOrder: s.tabOrder,
+      tabs: s.tabs,
+      activePath: s.activePath,
+      setActiveRepo: s.setActiveRepo,
+      closeRepoTab: s.closeRepoTab,
+      moveRepoTab: s.moveRepoTab,
+    })),
+  );
   const { config } = useSettingsStore();
   const { showRepoEntry } = useRepoEntry();
   const changedCount = fileStatuses.length;
