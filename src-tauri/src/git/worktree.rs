@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use git2::{Repository, WorktreeAddOptions, WorktreePruneOptions};
+use git2::{Repository, WorktreeAddOptions, WorktreeLockStatus, WorktreePruneOptions};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
@@ -12,7 +12,6 @@ pub struct WorktreeInfo {
     pub path: String,
     /// `true` when this worktree is the directory the repo was opened from.
     pub is_current: bool,
-    pub is_bare: bool,
     pub is_locked: bool,
 }
 
@@ -38,12 +37,12 @@ pub fn list_worktrees(repo: &Repository) -> AppResult<Vec<WorktreeInfo>> {
         match repo.find_worktree(&name) {
             Ok(wt) => {
                 let wt_path = wt.path().to_path_buf();
+                let is_locked = matches!(wt.is_locked()?, WorktreeLockStatus::Locked);
                 result.push(WorktreeInfo {
                     name,
                     path: wt_path.to_string_lossy().into_owned(),
                     is_current: current.as_ref().map(|c| c == &wt_path).unwrap_or(false),
-                    is_bare: wt.is_bare(),
-                    is_locked: wt.is_locked()?,
+                    is_locked,
                 });
             }
             // A stale/prunable worktree still shows up in the list; surface it
@@ -52,7 +51,6 @@ pub fn list_worktrees(repo: &Repository) -> AppResult<Vec<WorktreeInfo>> {
                 name,
                 path: String::new(),
                 is_current: false,
-                is_bare: false,
                 is_locked: false,
             }),
         }
@@ -75,13 +73,21 @@ pub fn add_worktree(
             path.display()
         )));
     }
+    // `reference` must outlive `opts` (the borrowed reference is captured by
+    // the options' lifetime), so both live in the same function scope.
+    let reference = match branch {
+        Some(branch_name) => {
+            super::cli::validate_non_option(branch_name, "分支名")?;
+            Some(
+                repo.find_reference(&format!("refs/heads/{branch_name}"))
+                    .map_err(|_| AppError::General(format!("本地分支不存在：{branch_name}")))?,
+            )
+        }
+        None => None,
+    };
     let mut opts = WorktreeAddOptions::new();
-    if let Some(branch_name) = branch {
-        super::cli::validate_non_option(branch_name, "分支名")?;
-        let reference = repo
-            .find_reference(&format!("refs/heads/{branch_name}"))
-            .map_err(|_| AppError::General(format!("本地分支不存在：{branch_name}")))?;
-        opts.reference(Some(&reference));
+    if let Some(reference) = reference.as_ref() {
+        opts.reference(Some(reference));
     }
     let worktree = repo.worktree(name, path, Some(&mut opts))?;
     Ok(worktree.path().to_string_lossy().into_owned())
@@ -95,7 +101,10 @@ pub fn remove_worktree(repo: &Repository, name: &str, force: bool) -> AppResult<
     let mut worktree = repo.find_worktree(name)?;
     let mut opts = WorktreePruneOptions::new();
     if force {
-        opts.force();
+        // libgit2 has no single "force" flag: pruning a valid worktree and
+        // removing its working tree together is what `git worktree remove
+        // --force` does.
+        opts.valid(true).working_tree(true);
     }
     worktree.prune(Some(&mut opts))?;
     Ok(())

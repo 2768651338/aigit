@@ -35,7 +35,7 @@ pub fn rewrite_history(repo: &Repository, steps: &[RewriteStep]) -> AppResult<St
     if steps.len() > 500 {
         return Err(AppError::General("整理步骤过多（上限 500）".into()));
     }
-    if repo.head_is_detached() {
+    if repo.head_detached() {
         return Err(AppError::General(
             "当前处于 detached HEAD，无法整理分支历史".into(),
         ));
@@ -232,7 +232,7 @@ fn commit_touches_path(
     let tree = commit.tree()?;
     let parent_tree = commit.parent(0).ok().map(|p| p.tree()).transpose()?;
     let diff = repo.diff_tree_to_tree(parent_tree.as_ref(), Some(&tree), Some(opts))?;
-    Ok(diff.deltas_len() > 0)
+    Ok(diff.deltas() > 0)
 }
 
 /// Per-line blame attribution of `file_path` at HEAD (`git blame`).
@@ -263,9 +263,9 @@ pub fn get_file_blame(repo: &Repository, file_path: &str) -> AppResult<Vec<Blame
         };
         let short_hash = hash[..7].to_string();
         let start = hunk.final_start_line();
-        for i in 0..hunk.num_lines() {
+        for i in 0..hunk.lines_in_hunk() {
             lines.push(BlameLine {
-                line: start + i,
+                line: (start + i) as u32,
                 commit_hash: hash.clone(),
                 short_hash: short_hash.clone(),
                 author: author.clone(),
@@ -292,12 +292,13 @@ pub fn get_head_reflog(repo: &Repository) -> AppResult<Vec<ReflogEntry>> {
             break;
         }
         let new_hash = entry.id_new().to_string();
+        let committer = entry.committer();
         entries.push(ReflogEntry {
             old_hash: entry.id_old().to_string(),
             short_hash: new_hash[..7].to_string(),
             new_hash,
-            author: entry.signature().name().unwrap_or("").to_string(),
-            timestamp: entry.signature().when().seconds(),
+            author: committer.name().unwrap_or("").to_string(),
+            timestamp: committer.when().seconds(),
             message: entry.message().unwrap_or("").trim().to_string(),
         });
     }

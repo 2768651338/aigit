@@ -548,7 +548,7 @@ pub async fn repo_chat(
                     info.current_branch.as_deref().unwrap_or("HEAD")
                 ));
             }
-            if let Ok(log) = git::branch::get_log(&repo, 20) {
+            if let Ok(log) = git::branch::get_log(&repo, 20, 0) {
                 context.push_str("\nRecent commits:\n");
                 for entry in log.iter() {
                     context.push_str(&format!(
@@ -1069,7 +1069,7 @@ async fn build_repo_context(
             info.current_branch.as_deref().unwrap_or("HEAD")
         ));
     }
-    if let Ok(log) = git::branch::get_log(&repo, 20) {
+    if let Ok(log) = git::branch::get_log(&repo, 20, 0) {
         context.push_str("\nRecent commits:\n");
         for entry in &log {
             context.push_str(&format!(

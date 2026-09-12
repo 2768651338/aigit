@@ -40,7 +40,6 @@ impl OpenAiProvider {
     }
 }
 
-#[async_trait]
 /// Validate the user-defined endpoint before building the request URL:
 /// only http/https schemes are allowed and both URL and model must be set.
 fn require_custom_endpoint(config: &AiProviderConfig) -> AppResult<()> {
@@ -63,6 +62,7 @@ fn require_custom_endpoint(config: &AiProviderConfig) -> AppResult<()> {
     Ok(())
 }
 
+#[async_trait]
 impl AiProvider for OpenAiProvider {
     async fn chat(
         &self,

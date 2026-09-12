@@ -62,11 +62,8 @@ pub fn get_state(repo: &Repository) -> AppResult<BisectState> {
         });
     }
     let log = run_bisect(repo, &["log"])?;
-    let head = cli::run(
-        cli::workdir(repo)?,
-        vec!["rev-parse".into(), "HEAD".into()],
-        LOCAL_TIMEOUT,
-    )?;
+    let head_args: Vec<std::ffi::OsString> = vec!["rev-parse".into(), "HEAD".into()];
+    let head = cli::run(cli::workdir(repo)?, head_args, LOCAL_TIMEOUT)?;
     Ok(BisectState {
         in_progress: true,
         current_commit: head.combined_lossy().trim().to_string(),

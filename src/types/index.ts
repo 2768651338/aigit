@@ -252,7 +252,6 @@ export interface WorktreeInfo {
   name: string;
   path: string;
   is_current: boolean;
-  is_bare: boolean;
   is_locked: boolean;
 }
 
