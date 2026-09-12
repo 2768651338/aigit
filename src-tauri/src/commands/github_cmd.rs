@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
 
@@ -16,6 +18,17 @@ fn context(
     let repo = git::repo::open_repo(path)?;
     let remote = github::discover(&repo, preferred_remote)?;
     Ok((repo, remote))
+}
+
+/// `gh_status` spawns up to two `gh` subprocesses (10s/15s timeouts); it must
+/// run on the blocking pool so a missing or hung `gh` cannot stall a tokio
+/// worker thread while the async command waits.
+async fn gh_status_on_blocking_pool(workdir: &Path, host: &str) -> AppResult<GhStatus> {
+    let workdir = workdir.to_path_buf();
+    let host = host.to_string();
+    tokio::task::spawn_blocking(move || github::gh_status(&workdir, &host))
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))
 }
 
 #[tauri::command]
@@ -63,7 +76,7 @@ pub fn github_open_repo(app: AppHandle, path: String, remote: Option<String>) ->
 pub async fn github_pr_list(path: String, remote: Option<String>) -> AppResult<Vec<PullRequest>> {
     let (repo, remote) = context(&path, remote.as_deref())?;
     let workdir = git::cli::workdir(&repo)?.to_path_buf();
-    let status = github::gh_status(&workdir, &remote.host);
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
     if status.installed && status.authenticated {
         return tokio::task::spawn_blocking(move || github::gh_list(&workdir, &remote))
             .await
@@ -83,7 +96,7 @@ pub async fn github_pr_view(
 ) -> AppResult<PullRequestDetail> {
     let (repo, remote) = context(&path, remote.as_deref())?;
     let workdir = git::cli::workdir(&repo)?.to_path_buf();
-    let status = github::gh_status(&workdir, &remote.host);
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
     if status.installed && status.authenticated {
         return tokio::task::spawn_blocking(move || github::gh_view(&workdir, &remote, number))
             .await
@@ -111,7 +124,7 @@ pub async fn github_pr_create(
     }
     let (repo, remote) = context(&path, remote.as_deref())?;
     let workdir = git::cli::workdir(&repo)?.to_path_buf();
-    let status = github::gh_status(&workdir, &remote.host);
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
     if status.installed && status.authenticated {
         let remote_copy = remote.clone();
         let input_copy = input.clone();
@@ -153,7 +166,7 @@ pub async fn github_pr_checkout(
 ) -> AppResult<String> {
     let (repo, remote) = context(&path, remote.as_deref())?;
     let workdir = git::cli::workdir(&repo)?.to_path_buf();
-    let status = github::gh_status(&workdir, &remote.host);
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
     if !status.installed || !status.authenticated {
         return Err(AppError::General(
             "Authenticated GitHub CLI is required for PR checkout".into(),
@@ -219,7 +232,15 @@ pub async fn github_publish_inline_comment(
 #[tauri::command]
 pub fn set_github_pat(token: String) -> AppResult<()> {
     use crate::config::{CredentialStore, SystemCredentialStore};
-    SystemCredentialStore.set("github_pat", &token)
+    let token = token.trim();
+    // Sanity checks only — GitHub token formats may evolve, so require a
+    // plausible length without whitespace instead of pinning known prefixes.
+    if token.len() < 20 || token.len() > 255 || token.chars().any(char::is_whitespace) {
+        return Err(AppError::Credential(
+            "GitHub PAT looks malformed: expected 20–255 characters without whitespace".into(),
+        ));
+    }
+    SystemCredentialStore.set("github_pat", token)
 }
 
 #[tauri::command]

@@ -38,6 +38,11 @@ fn append_untracked_files(
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
+    // Scope the status scan to the pathspec when one is given, so the
+    // single-file diff view does not scan the whole worktree.
+    if let Some(p) = pathspec {
+        opts.pathspec(p);
+    }
 
     let statuses = repo.statuses(Some(&mut opts))?;
     let existing: HashSet<String> = files.iter().map(|f| f.path.clone()).collect();
@@ -185,6 +190,9 @@ fn strip_line_ending(content: &[u8]) -> String {
 
 fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
     let mut files = Vec::new();
+    // Patch lines arrive grouped per file delta; remembering the active entry
+    // turns the per-line file lookup from O(files × lines) into O(1).
+    let mut current: Option<(String, usize)> = None;
 
     diff.print(git2::DiffFormat::Patch, |delta, _hunk, line| {
         let path = delta
@@ -192,26 +200,33 @@ fn parse_diff(diff: &Diff) -> AppResult<Vec<FileDiff>> {
             .path()
             .and_then(|p| p.to_str())
             .unwrap_or("");
-        let old_path = delta
-            .old_file()
-            .path()
-            .and_then(|p| p.to_str())
-            .map(|s| s.to_string());
 
-        let file = files.iter_mut().find(|f: &&mut FileDiff| f.path == path);
-        let file = match file {
-            Some(f) => f,
-            None => {
-                files.push(FileDiff {
-                    path: path.to_string(),
-                    old_path,
-                    hunks: Vec::new(),
-                    additions: 0,
-                    deletions: 0,
-                });
-                files.last_mut().unwrap()
-            }
+        let is_current = matches!(&current, Some((active, _)) if active == path);
+        let index = if is_current {
+            current.as_ref().map(|(_, index)| *index).unwrap_or(0)
+        } else {
+            let index = match files.iter().position(|f| f.path == path) {
+                Some(index) => index,
+                None => {
+                    let old_path = delta
+                        .old_file()
+                        .path()
+                        .and_then(|p| p.to_str())
+                        .map(|s| s.to_string());
+                    files.push(FileDiff {
+                        path: path.to_string(),
+                        old_path,
+                        hunks: Vec::new(),
+                        additions: 0,
+                        deletions: 0,
+                    });
+                    files.len() - 1
+                }
+            };
+            current = Some((path.to_string(), index));
+            index
         };
+        let file = &mut files[index];
 
         let content = strip_line_ending(line.content());
         match line.origin() {

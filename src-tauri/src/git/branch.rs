@@ -1,6 +1,6 @@
 use git2::{BranchType, Repository};
 
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 
 use super::{BranchInfo, LogEntry};
 
@@ -61,11 +61,40 @@ pub fn create_branch(repo: &Repository, name: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn switch_branch(repo: &Repository, name: &str) -> AppResult<()> {
+/// Switch to a local branch. Without `force` the switch is refused when the
+/// worktree or index carries uncommitted changes, because the checkout would
+/// otherwise discard them — the caller may retry with `force` after the user
+/// explicitly confirmed the loss.
+pub fn switch_branch(repo: &Repository, name: &str, force: bool) -> AppResult<()> {
     let refname = format!("refs/heads/{name}");
+    if !git2::Reference::is_valid_name(&refname) {
+        return Err(AppError::General(format!("Invalid branch name: {name}")));
+    }
+    if !force && has_uncommitted_changes(repo)? {
+        return Err(AppError::UncommittedChanges(format!(
+            "switching to '{name}' would discard them"
+        )));
+    }
     repo.set_head(&refname)?;
-    repo.checkout_head(Some(git2::build::CheckoutBuilder::new().force()))?;
+    let mut checkout = git2::build::CheckoutBuilder::new();
+    if force {
+        checkout.force();
+    }
+    repo.checkout_head(Some(checkout))?;
     Ok(())
+}
+
+/// True when tracked index/worktree state differs from HEAD. Untracked files
+/// are deliberately ignored: a safe checkout keeps them, and if one would be
+/// overwritten by the target branch the checkout itself fails with a regular
+/// git error instead of silently deleting the file.
+fn has_uncommitted_changes(repo: &Repository) -> AppResult<bool> {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(false).include_ignored(false);
+    let statuses = repo.statuses(Some(&mut opts))?;
+    Ok(statuses
+        .iter()
+        .any(|entry| entry.status() != git2::Status::CURRENT))
 }
 
 pub fn delete_branch(repo: &Repository, name: &str) -> AppResult<()> {
@@ -178,6 +207,116 @@ pub fn get_commit_diff(repo: &Repository, hash: &str) -> AppResult<String> {
 #[cfg(test)]
 mod tests {
     use super::extract_message_body;
+    use super::switch_branch;
+    use crate::git::commit::stage_all;
+    use git2::{Repository, Signature};
+    use std::fs;
+    use std::path::Path;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo(name: &str) -> (std::path::PathBuf, Repository) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-branch-{name}-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        fs::write(root.join("tracked.txt"), "base\n").expect("write tracked file");
+        stage_all(&repo).expect("stage initial");
+        let sig = Signature::now("Test User", "test@example.com").expect("signature");
+        let mut index = repo.index().expect("index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .expect("initial commit");
+        drop(tree);
+        (root, repo)
+    }
+
+    fn create_branch_at_head(repo: &Repository, name: &str) {
+        let head = repo.head().expect("head");
+        let commit = head.peel_to_commit().expect("head commit");
+        repo.branch(name, &commit, false).expect("create branch");
+    }
+
+    fn worktree_file(root: &Path) -> String {
+        fs::read_to_string(root.join("tracked.txt")).expect("read tracked file")
+    }
+
+    #[test]
+    fn refuses_to_switch_when_worktree_is_dirty() {
+        let (root, repo) = temp_repo("dirty");
+        create_branch_at_head(&repo, "other");
+        let head_before = repo.head().expect("head").target().expect("head target");
+        fs::write(root.join("tracked.txt"), "uncommitted\n").expect("modify file");
+
+        let result = switch_branch(&repo, "other", false);
+        assert!(matches!(
+            result,
+            Err(crate::error::AppError::UncommittedChanges(_))
+        ));
+        // The failed switch must not have moved HEAD or touched the file.
+        assert_eq!(repo.head().expect("head").target(), Some(head_before));
+        assert_eq!(worktree_file(&root), "uncommitted\n");
+    }
+
+    #[test]
+    fn refuses_to_switch_when_changes_are_staged() {
+        let (root, repo) = temp_repo("staged");
+        create_branch_at_head(&repo, "other");
+        fs::write(root.join("tracked.txt"), "staged\n").expect("modify file");
+        stage_all(&repo).expect("stage the change");
+
+        let result = switch_branch(&repo, "other", false);
+        assert!(matches!(
+            result,
+            Err(crate::error::AppError::UncommittedChanges(_))
+        ));
+    }
+
+    #[test]
+    fn force_switch_overrides_the_dirty_guard() {
+        let (root, repo) = temp_repo("force");
+        create_branch_at_head(&repo, "other");
+        fs::write(root.join("tracked.txt"), "uncommitted\n").expect("modify file");
+
+        switch_branch(&repo, "other", true).expect("force switch");
+        assert_eq!(repo.head().unwrap().shorthand(), Some("other"));
+        // Force checkout reset the tracked file to the target branch content.
+        assert_eq!(worktree_file(&root), "base\n");
+    }
+
+    #[test]
+    fn clean_worktree_switches_without_force() {
+        let (root, repo) = temp_repo("clean");
+        create_branch_at_head(&repo, "other");
+
+        switch_branch(&repo, "other", false).expect("switch on clean worktree");
+        assert_eq!(repo.head().unwrap().shorthand(), Some("other"));
+    }
+
+    #[test]
+    fn untracked_files_do_not_block_the_switch() {
+        let (root, repo) = temp_repo("untracked");
+        create_branch_at_head(&repo, "other");
+        fs::write(root.join("notes.txt"), "keep me\n").expect("untracked file");
+
+        switch_branch(&repo, "other", false).expect("untracked files must not block");
+        assert_eq!(repo.head().unwrap().shorthand(), Some("other"));
+        assert_eq!(
+            fs::read_to_string(root.join("notes.txt")).expect("untracked file survived"),
+            "keep me\n"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_branch_names() {
+        let (_root, repo) = temp_repo("invalid-name");
+        let result = switch_branch(&repo, "bad..name", false);
+        assert!(matches!(result, Err(crate::error::AppError::General(_))));
+    }
 
     #[test]
     fn extracts_body_after_subject_and_blank_line() {

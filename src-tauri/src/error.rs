@@ -49,6 +49,15 @@ pub enum AppError {
     #[error("AI response could not be parsed: {0}")]
     AiResponse(String),
 
+    #[error("AI request timed out: {0}")]
+    AiTimeout(String),
+
+    #[error("Possible secrets detected: {0}")]
+    AiSensitiveContent(String),
+
+    #[error("Uncommitted changes: {0}")]
+    UncommittedChanges(String),
+
     #[error("Not a git repository: {0}")]
     NotARepo(String),
 
@@ -65,6 +74,9 @@ impl AppError {
             Self::Http(error) if error.is_connect() => ("ai_network", true),
             Self::Http(_) => ("http_error", true),
             Self::Json(_) | Self::AiResponse(_) => ("ai_response_invalid", false),
+            Self::AiTimeout(_) => ("ai_timeout", true),
+            Self::AiSensitiveContent(_) => ("ai_sensitive_content", false),
+            Self::UncommittedChanges(_) => ("uncommitted_changes", false),
             Self::Config(_) => ("config_error", false),
             Self::Credential(_) => ("credential_error", false),
             Self::Ai(_) => ("ai_error", false),
@@ -118,5 +130,18 @@ mod tests {
 
         assert_eq!(value["code"], "ai_context_exceeded");
         assert_eq!(value["retryable"], false);
+    }
+
+    #[test]
+    fn maps_new_guard_errors_to_stable_codes() {
+        let timeout = serde_json::to_value(AppError::AiTimeout("stalled".into()))
+            .expect("serialize timeout error");
+        assert_eq!(timeout["code"], "ai_timeout");
+        assert_eq!(timeout["retryable"], true);
+
+        let dirty = serde_json::to_value(AppError::UncommittedChanges("modified files".into()))
+            .expect("serialize dirty-worktree error");
+        assert_eq!(dirty["code"], "uncommitted_changes");
+        assert_eq!(dirty["retryable"], false);
     }
 }

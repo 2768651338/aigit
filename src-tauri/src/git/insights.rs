@@ -91,6 +91,14 @@ pub fn collect_insights(
         .and_then(|p| p.file_name())
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| "repository".into());
+    // 在遍历整张提交图之前按起始日期剪枝：越过截止线的祖先只会更早，
+    // 不必再入栈。与 date_in_range 一致使用本地时区的零点；留出 7 天余量
+    // 吸收提交时间戳的时钟偏移，剪枝线附近的记录仍由 date_in_range 精确
+    // 过滤，因此结果保持一致。
+    let prune_before = start_date
+        .and_then(|date| date.and_hms_opt(0, 0, 0))
+        .and_then(|datetime| Local.from_local_datetime(&datetime).single())
+        .map(|datetime| datetime.timestamp() - 7 * 86_400);
     let mut records: HashMap<Oid, CommitRecord> = HashMap::new();
     let mut local_branch_count = 0;
     let mut remote_branch_count = 0;
@@ -128,6 +136,9 @@ pub fn collect_insights(
             let Ok(c) = repo.find_commit(oid) else {
                 continue;
             };
+            if prune_before.is_some_and(|cutoff| c.time().seconds() < cutoff) {
+                continue;
+            }
             let mut record = CommitRecord {
                 oid,
                 author: c.author().name().unwrap_or("Unknown").to_owned(),

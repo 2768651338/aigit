@@ -215,6 +215,8 @@ fn list_conflicted_files_in(workdir: &std::path::Path) -> AppResult<Vec<String>>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::commit::stage_all;
+    use git2::Signature;
 
     #[test]
     fn empty_conflict_selection_targets_worktree() {
@@ -229,5 +231,113 @@ mod tests {
     #[test]
     fn conflict_paths_reject_empty_values() {
         assert!(validated_paths(&["".to_string()]).is_err());
+    }
+
+    fn temp_repo(name: &str) -> (std::path::PathBuf, Repository) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-merge-{name}-{unique}"));
+        std::fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+        {
+            let mut config = repo.config().expect("repo config");
+            config.set_str("user.name", "Test User").expect("user.name");
+            config
+                .set_str("user.email", "test@example.com")
+                .expect("user.email");
+        }
+        std::fs::write(root.join("tracked.txt"), "base\n").expect("write tracked file");
+        stage_all(&repo).expect("stage initial");
+        let sig = Signature::now("Test User", "test@example.com").expect("signature");
+        let mut index = repo.index().expect("index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .expect("initial commit");
+        drop(tree);
+        (root, repo)
+    }
+
+    fn commit_file(repo: &Repository, root: &std::path::Path, content: &str, msg: &str) {
+        std::fs::write(root.join("tracked.txt"), content).expect("write file");
+        stage_all(repo).expect("stage file");
+        let sig = Signature::now("Test User", "test@example.com").expect("signature");
+        let mut index = repo.index().expect("index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        let parent = repo
+            .head()
+            .ok()
+            .map(|head| head.peel_to_commit().expect("parent commit"));
+        let parents: Vec<&git2::Commit> = parent.iter().collect();
+        repo.commit(Some("HEAD"), &sig, &sig, msg, &tree, &parents)
+            .expect("commit");
+        drop(tree);
+    }
+
+    #[test]
+    fn merge_fast_forwards_to_the_diverged_branch() {
+        let (root, repo) = temp_repo("ff");
+        let default_branch = repo
+            .head()
+            .expect("head")
+            .shorthand()
+            .expect("branch name")
+            .to_string();
+
+        let head = repo.head().expect("head");
+        let tip = head.peel_to_commit().expect("tip");
+        repo.branch("feature", &tip, false).expect("create branch");
+        drop(tip);
+        crate::git::branch::switch_branch(&repo, "feature", false).expect("switch to feature");
+        commit_file(&repo, &root, "feature work\n", "feature commit");
+        let feature_head = repo.head().expect("feature head").target().expect("oid");
+        crate::git::branch::switch_branch(&repo, &default_branch, false)
+            .expect("switch back to default");
+
+        let result = merge_branch(&repo, "feature", false).expect("merge");
+        assert!(result.success, "merge failed: {}", result.message);
+        assert!(!result.has_conflicts);
+        assert_eq!(repo.head().expect("head").target(), Some(feature_head));
+    }
+
+    #[test]
+    fn merge_conflict_is_reported_and_abort_restores_the_branch() {
+        let (root, repo) = temp_repo("conflict");
+        let default_branch = repo
+            .head()
+            .expect("head")
+            .shorthand()
+            .expect("branch name")
+            .to_string();
+
+        let head = repo.head().expect("head");
+        let tip = head.peel_to_commit().expect("tip");
+        repo.branch("feature", &tip, false).expect("create branch");
+        drop(tip);
+        crate::git::branch::switch_branch(&repo, "feature", false).expect("switch to feature");
+        commit_file(&repo, &root, "feature line\n", "feature commit");
+        crate::git::branch::switch_branch(&repo, &default_branch, false)
+            .expect("switch back to default");
+        commit_file(&repo, &root, "main line\n", "main commit");
+
+        assert!(!is_merging(&repo));
+        let result = merge_branch(&repo, "feature", false).expect("merge reports conflicts");
+        assert!(
+            result.has_conflicts,
+            "expected conflicts: {}",
+            result.message
+        );
+        assert_eq!(result.conflicts, vec!["tracked.txt".to_string()]);
+        assert!(is_merging(&repo));
+
+        abort_merge(&repo).expect("abort merge");
+        assert!(!is_merging(&repo));
+        assert_eq!(
+            std::fs::read_to_string(root.join("tracked.txt")).expect("worktree restored"),
+            "main line\n"
+        );
     }
 }

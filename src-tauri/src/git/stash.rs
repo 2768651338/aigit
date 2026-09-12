@@ -116,3 +116,92 @@ fn _stash_apply_libgit2(repo: &mut Repository, index: usize) -> AppResult<()> {
 fn run_git(workdir: &std::path::Path, args: &[String], err_prefix: &str) -> AppResult<String> {
     cli::run_checked(workdir, args.iter().cloned(), LOCAL_TIMEOUT, err_prefix)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{list_stashes, stash_apply, stash_drop, stash_pop, stash_save};
+    use crate::git::commit::stage_all;
+    use git2::{Repository, Signature};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_repo(name: &str) -> (std::path::PathBuf, Repository) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-stash-{name}-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        fs::write(root.join("tracked.txt"), "base\n").expect("write tracked file");
+        stage_all(&repo).expect("stage initial");
+        let sig = Signature::now("Test User", "test@example.com").expect("signature");
+        let mut index = repo.index().expect("index");
+        let tree_id = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_id).expect("find tree");
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .expect("initial commit");
+        drop(tree);
+        (root, repo)
+    }
+
+    #[test]
+    fn stash_save_apply_drop_roundtrip() {
+        let (root, mut repo) = temp_repo("roundtrip");
+        fs::write(root.join("tracked.txt"), "changed\n").expect("modify file");
+        stash_save(&repo, Some("wip change"), false, false).expect("stash save");
+
+        // Stashing restores the worktree to HEAD.
+        assert_eq!(
+            fs::read_to_string(root.join("tracked.txt")).expect("worktree restored"),
+            "base\n"
+        );
+
+        let stashes = list_stashes(&mut repo).expect("list stashes");
+        assert_eq!(stashes.len(), 1);
+        assert!(stashes[0].message.contains("wip change"));
+
+        stash_apply(&repo, 0).expect("stash apply");
+        assert_eq!(
+            fs::read_to_string(root.join("tracked.txt")).expect("applied"),
+            "changed\n"
+        );
+        // Applying keeps the entry; dropping removes it.
+        assert_eq!(list_stashes(&mut repo).expect("list").len(), 1);
+        stash_drop(&repo, 0).expect("stash drop");
+        assert!(list_stashes(&mut repo).expect("list").is_empty());
+    }
+
+    #[test]
+    fn stash_pop_applies_and_removes_the_entry() {
+        let (root, mut repo) = temp_repo("pop");
+        fs::write(root.join("tracked.txt"), "popped\n").expect("modify file");
+        stash_save(&repo, None, false, false).expect("stash save");
+
+        stash_pop(&repo, 0).expect("stash pop");
+        assert_eq!(
+            fs::read_to_string(root.join("tracked.txt")).expect("popped"),
+            "popped\n"
+        );
+        assert!(list_stashes(&mut repo).expect("list").is_empty());
+    }
+
+    #[test]
+    fn stash_save_includes_untracked_files_when_requested() {
+        let (root, mut repo) = temp_repo("untracked");
+        fs::write(root.join("new.txt"), "new file\n").expect("untracked file");
+
+        stash_save(&repo, Some("with untracked"), true, false).expect("stash save");
+        assert!(
+            !root.join("new.txt").exists(),
+            "untracked file must be stashed away"
+        );
+
+        stash_pop(&repo, 0).expect("stash pop");
+        assert_eq!(
+            fs::read_to_string(root.join("new.txt")).expect("untracked restored"),
+            "new file\n"
+        );
+    }
+}

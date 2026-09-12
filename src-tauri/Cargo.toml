@@ -1,6 +1,6 @@
 [package]
 name = "aigit"
-version = "1.0.10"
+version = "1.0.11"
 description = "AI-Driven Git Tool"
 authors = ["aigit"]
 license = "Apache-2.0"
@@ -26,11 +26,22 @@ serde_json = "1"
 git2 = "0.19"
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
-tokio = { version = "1", features = ["full"] }
+# Feature set matches actual usage (io/net/test-support/streaming/sync);
+# "full" pulled in unused subsystems and inflated build time.
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "sync",
+    "time",
+    "io-util",
+    "net",
+    "fs",
+    "process",
+] }
 anyhow = "1"
-thiserror = "1"
+thiserror = "2"
 async-trait = "0.1"
-dirs = "5"
+dirs = "6"
 toml = "0.8"
 atomicwrites = "0.4"
 uuid = { version = "1", features = ["v4"] }
@@ -42,6 +53,10 @@ sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]

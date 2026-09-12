@@ -17,12 +17,17 @@ const MAX_PROCESS_OUTPUT: usize = 1024 * 1024;
 const MAX_ERROR_OUTPUT: usize = 16 * 1024;
 
 fn sanitize_external_output(value: &str) -> String {
-    let url_credentials = regex::Regex::new(r"(?i)(https?://)[^\s/@:]+(?::[^\s/@]*)?@")
-        .expect("credential URL regex");
-    let sensitive = regex::Regex::new(
-        r"(?i)\b(authorization|token|password|passwd|api[_-]?key|secret)\s*[:=]\s*([^\s,;]+)",
-    )
-    .expect("sensitive field regex");
+    static URL_CREDENTIALS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static SENSITIVE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let url_credentials = URL_CREDENTIALS.get_or_init(|| {
+        regex::Regex::new(r"(?i)(https?://)[^\s/@:]+(?::[^\s/@]*)?@").expect("credential URL regex")
+    });
+    let sensitive = SENSITIVE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\b(authorization|token|password|passwd|api[_-]?key|secret)\s*[:=]\s*([^\s,;]+)",
+        )
+        .expect("sensitive field regex")
+    });
     let value = url_credentials.replace_all(value, "$1[REDACTED]@");
     let safe = sensitive.replace_all(&value, "$1=[REDACTED]");
     safe.chars().take(MAX_ERROR_OUTPUT).collect()
@@ -664,7 +669,9 @@ impl GitHubApi {
         }
         let store = SystemCredentialStore;
         Ok(store.get("github_pat")?.map(|token| Self {
-            client: Client::new(),
+            // Reuse the shared client so GitHub API calls inherit the 10s
+            // connect / 90s total timeouts instead of hanging forever.
+            client: crate::ai::http_client()?.clone(),
             remote,
             token,
         }))

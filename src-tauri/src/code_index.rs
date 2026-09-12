@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::ai::{http_client, read_json_limited, upstream_error};
 use crate::config::settings::IndexConfig;
@@ -129,6 +129,35 @@ struct SourceFile {
 struct RepoSnapshot {
     metadata: IndexMetadata,
     files: Vec<SourceFile>,
+    /// Per-file (mtime_ns, size) fingerprints recorded during the scan; used
+    /// by the staleness fast path to skip full re-hashing on status queries.
+    file_stats: BTreeMap<String, (i64, u64)>,
+}
+
+/// Stat-only fingerprint cache of the last full worktree scan, keyed by repo.
+/// Lets repeated `status`/`search` staleness checks compare file mtimes and
+/// sizes instead of re-reading and re-hashing every candidate file.
+static WORKTREE_CACHE: OnceLock<Mutex<HashMap<String, WorktreeFingerprint>>> = OnceLock::new();
+
+fn worktree_cache() -> &'static Mutex<HashMap<String, WorktreeFingerprint>> {
+    WORKTREE_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone)]
+struct WorktreeFingerprint {
+    /// worktree_snapshot digest produced by the scan that recorded `files`.
+    snapshot: String,
+    files: BTreeMap<String, (i64, u64)>,
+}
+
+fn stat_fingerprint(metadata: &fs::Metadata) -> (i64, u64) {
+    let mtime = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos() as i64)
+        .unwrap_or(0);
+    (mtime, metadata.len())
 }
 
 fn now() -> i64 {
@@ -161,6 +190,123 @@ fn index_path(repo_path: &str) -> AppResult<PathBuf> {
     Ok(root.join(format!("{}.json", repo_key(repo_path))))
 }
 
+fn embeddings_path(repo_path: &str) -> AppResult<PathBuf> {
+    let root = dirs::data_local_dir()
+        .ok_or_else(|| AppError::Config("Cannot determine local data directory".into()))?
+        .join("aigit")
+        .join("code-index");
+    fs::create_dir_all(&root)?;
+    Ok(root.join(format!("{}.embeddings.bin", repo_key(repo_path))))
+}
+
+/// Binary sidecar layout (little-endian): 8-byte magic, u32 record count,
+/// then per record: u32 id length, id bytes (UTF-8), u32 dimension, f32 array.
+/// Storing vectors as raw f32 instead of JSON text cuts the on-disk index
+/// roughly by an order of magnitude and removes the JSON parse cost.
+const EMBEDDINGS_MAGIC: &[u8; 8] = b"AIGITEB1";
+
+fn write_embeddings(path: &Path, chunks: &[CodeChunk]) -> AppResult<()> {
+    let mut bytes = Vec::new();
+    let count = chunks
+        .iter()
+        .filter(|chunk| !chunk.embedding.is_empty())
+        .count();
+    if count == 0 {
+        // No embeddings (local-only mode) — a stale sidecar must not survive.
+        if path.exists() {
+            fs::remove_file(path)?;
+        }
+        return Ok(());
+    }
+    bytes.extend_from_slice(EMBEDDINGS_MAGIC);
+    bytes.extend_from_slice(&(count as u32).to_le_bytes());
+    for chunk in chunks {
+        if chunk.embedding.is_empty() {
+            continue;
+        }
+        let id = chunk.id.as_bytes();
+        bytes.extend_from_slice(&(id.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(id);
+        bytes.extend_from_slice(&(chunk.embedding.len() as u32).to_le_bytes());
+        for value in &chunk.embedding {
+            bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    if bytes.len() as u64 > MAX_INDEX_BYTES {
+        return Err(AppError::Config(
+            "Code index exceeds the 128 MiB storage limit".into(),
+        ));
+    }
+    let sealed = crate::crypto::encrypt_at_rest(&bytes);
+    AtomicFile::new(path, AllowOverwrite)
+        .write(|file| {
+            file.write_all(&sealed)?;
+            file.flush()?;
+            file.sync_all()
+        })
+        .map_err(|e| AppError::Config(format!("Failed to save code index embeddings: {e}")))
+}
+
+/// Parse the embeddings sidecar. A malformed file is quarantined and reported
+/// as empty — the index then behaves like "never embedded" and can be rebuilt.
+fn read_embeddings(path: &Path) -> HashMap<String, Vec<f32>> {
+    let mut result = HashMap::new();
+    let raw = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return result,
+    };
+    let bytes = match crate::crypto::decrypt_at_rest(&raw) {
+        Ok(bytes) => bytes,
+        Err(_) => return result,
+    };
+    let mut fail = |path: &Path| {
+        let stamp = chrono::Utc::now().timestamp_millis();
+        let _ = fs::rename(
+            path,
+            path.with_file_name(format!("embeddings.corrupt-{stamp}.bin")),
+        );
+        result.clear();
+    };
+    if bytes.len() < 12 || &bytes[..8] != EMBEDDINGS_MAGIC {
+        fail(path);
+        return result;
+    }
+    let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or([0; 4])) as usize;
+    let mut cursor = 12usize;
+    for _ in 0..count {
+        if cursor + 4 > bytes.len() {
+            fail(path);
+            return result;
+        }
+        let id_len =
+            u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap_or([0; 4])) as usize;
+        cursor += 4;
+        if cursor + id_len + 4 > bytes.len() {
+            fail(path);
+            return result;
+        }
+        let Ok(id) = std::str::from_utf8(&bytes[cursor..cursor + id_len]) else {
+            fail(path);
+            return result;
+        };
+        cursor += id_len;
+        let dim =
+            u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap_or([0; 4])) as usize;
+        cursor += 4;
+        if dim == 0 || dim > 16_384 || cursor + dim * 4 > bytes.len() {
+            fail(path);
+            return result;
+        }
+        let mut vector = Vec::with_capacity(dim);
+        for slot in &bytes[cursor..cursor + dim * 4].chunks_exact(4) {
+            vector.push(f32::from_le_bytes(slot.try_into().unwrap_or([0; 4])));
+        }
+        cursor += dim * 4;
+        result.insert(id.to_string(), vector);
+    }
+    result
+}
+
 fn load_index(repo_path: &str) -> AppResult<Option<RepoIndex>> {
     let path = index_path(repo_path)?;
     if !path.exists() {
@@ -171,27 +317,49 @@ fn load_index(repo_path: &str) -> AppResult<Option<RepoIndex>> {
             "Code index exceeds its storage limit; delete and rebuild it".into(),
         ));
     }
-    let value: RepoIndex = serde_json::from_slice(&fs::read(path)?)?;
+    // Sealed with DPAPI on Windows; legacy plaintext passes through and is
+    // re-sealed on the next save.
+    let raw = fs::read(path)?;
+    let bytes = crate::crypto::decrypt_at_rest(&raw)?;
+    let mut value: RepoIndex = serde_json::from_slice(&bytes)?;
     if value.version != FORMAT_VERSION || value.repo_path != repo_path {
         return Ok(None);
+    }
+    // Older builds kept the vectors inline in the JSON (serde default keeps
+    // those loading); fresh saves carry them in the binary sidecar instead.
+    let embeddings = read_embeddings(&embeddings_path(repo_path)?);
+    if !embeddings.is_empty() {
+        for chunk in &mut value.chunks {
+            if let Some(vector) = embeddings.get(&chunk.id) {
+                chunk.embedding = vector.clone();
+            }
+        }
     }
     Ok(Some(value))
 }
 
 fn save_index(index: &RepoIndex) -> AppResult<()> {
-    let bytes = serde_json::to_vec(index)?;
+    // Strip vectors out of the JSON payload — serializing millions of f32
+    // values as text is what pushed the index into its size cap.
+    let mut stripped = index.clone();
+    for chunk in &mut stripped.chunks {
+        chunk.embedding = Vec::new();
+    }
+    let bytes = serde_json::to_vec(&stripped)?;
     if bytes.len() as u64 > MAX_INDEX_BYTES {
         return Err(AppError::Config(
             "Code index exceeds the 128 MiB storage limit".into(),
         ));
     }
+    let sealed = crate::crypto::encrypt_at_rest(&bytes);
     AtomicFile::new(index_path(&index.repo_path)?, AllowOverwrite)
         .write(|file| {
-            file.write_all(&bytes)?;
+            file.write_all(&sealed)?;
             file.flush()?;
             file.sync_all()
         })
-        .map_err(|e| AppError::Config(format!("Failed to save code index atomically: {e}")))
+        .map_err(|e| AppError::Config(format!("Failed to save code index atomically: {e}")))?;
+    write_embeddings(&embeddings_path(&index.repo_path)?, &index.chunks)
 }
 
 fn embedding_key(config: &AppConfig) -> String {
@@ -305,30 +473,57 @@ fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|b| *b == 0) || std::str::from_utf8(bytes).is_err()
 }
 
-fn collect_snapshot(
-    repo_path: &str,
-    config: &AppConfig,
-    include_contents: bool,
-) -> AppResult<RepoSnapshot> {
-    let repo = git::repo::open_repo(repo_path)?;
-    let workdir = repo
-        .workdir()
-        .ok_or_else(|| AppError::General("Bare repository cannot be indexed".into()))?;
-    let max_file = (config.index.max_file_bytes as usize).clamp(1024, MAX_FILE_BYTES_HARD);
+/// Metadata fields that can be compared without reading any worktree file
+/// content: HEAD, the git-index tree digest, and config-derived keys.
+fn cheap_metadata(repo: &git2::Repository, config: &AppConfig) -> AppResult<CheapMeta> {
     let index = repo.index()?;
-    let mut tracked = BTreeSet::new();
     let mut index_fields = Vec::new();
     for entry in index.iter() {
         if let Ok(path) = String::from_utf8(entry.path.clone()) {
             let stage = ((entry.flags >> 12) & 0x3) as u8;
             index_fields.push(format!("{path}\0{}\0{stage}", entry.id));
-            if stage == 0 {
+        }
+    }
+    drop(index);
+    Ok(CheapMeta {
+        head: repo
+            .head()
+            .ok()
+            .and_then(|head| head.target())
+            .map(|oid| oid.to_string())
+            .unwrap_or_else(|| "unborn".into()),
+        index_snapshot: digest_fields(index_fields.iter().map(String::as_str)),
+        exclusion_key: exclusion_key(&config.index),
+        embedding_key: embedding_key(config),
+        tokenizer_version: TOKENIZER_VERSION.into(),
+        include_untracked: config.index.include_untracked,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct CheapMeta {
+    head: String,
+    index_snapshot: String,
+    exclusion_key: String,
+    embedding_key: String,
+    tokenizer_version: String,
+    include_untracked: bool,
+}
+
+/// Candidate files for indexing: tracked files (stage 0) plus untracked files
+/// when the config asks for them. Exclusion filtering happens per-use.
+fn candidate_paths(repo: &git2::Repository, config: &AppConfig) -> AppResult<BTreeSet<String>> {
+    let index = repo.index()?;
+    let mut tracked = BTreeSet::new();
+    for entry in index.iter() {
+        let stage = ((entry.flags >> 12) & 0x3) as u8;
+        if stage == 0 {
+            if let Ok(path) = String::from_utf8(entry.path.clone()) {
                 tracked.insert(path);
             }
         }
     }
     drop(index);
-
     let mut paths = tracked;
     if config.index.include_untracked {
         let mut options = git2::StatusOptions::new();
@@ -344,12 +539,34 @@ fn collect_snapshot(
             }
         }
     }
+    Ok(paths)
+}
 
+fn collect_snapshot(
+    repo_path: &str,
+    config: &AppConfig,
+    include_contents: bool,
+) -> AppResult<RepoSnapshot> {
+    let repo = git::repo::open_repo(repo_path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository cannot be indexed".into()))?;
+    let max_file = (config.index.max_file_bytes as usize).clamp(1024, MAX_FILE_BYTES_HARD);
+    let cheap = cheap_metadata(&repo, config)?;
+    let paths = candidate_paths(&repo, config)?;
+
+    let mut file_stats = BTreeMap::new();
     let mut files = Vec::new();
     let mut worktree_fields = Vec::new();
     for path in paths {
         if excluded(&path, &config.index.extra_excludes) {
             continue;
+        }
+        let full_path = workdir.join(&path);
+        if let Ok(metadata) = fs::metadata(&full_path) {
+            if metadata.is_file() {
+                file_stats.insert(path.clone(), stat_fingerprint(&metadata));
+            }
         }
         let Some(bytes) = read_worktree_file(workdir, &path, max_file) else {
             continue;
@@ -366,22 +583,48 @@ fn collect_snapshot(
         });
     }
 
-    let head = repo
-        .head()
-        .ok()
-        .and_then(|head| head.target())
-        .map(|oid| oid.to_string())
-        .unwrap_or_else(|| "unborn".into());
     let metadata = IndexMetadata {
-        head,
-        index_snapshot: digest_fields(index_fields.iter().map(String::as_str)),
+        head: cheap.head,
+        index_snapshot: cheap.index_snapshot,
         worktree_snapshot: digest_fields(worktree_fields.iter().map(String::as_str)),
-        exclusion_key: exclusion_key(&config.index),
-        embedding_key: embedding_key(config),
-        tokenizer_version: TOKENIZER_VERSION.into(),
-        include_untracked: config.index.include_untracked,
+        exclusion_key: cheap.exclusion_key,
+        embedding_key: cheap.embedding_key,
+        tokenizer_version: cheap.tokenizer_version,
+        include_untracked: cheap.include_untracked,
     };
-    Ok(RepoSnapshot { metadata, files })
+    Ok(RepoSnapshot {
+        metadata,
+        files,
+        file_stats,
+    })
+}
+
+/// Stat-only comparison of the current candidate file set against the last
+/// full scan. Reads no file contents; a mismatch (file added, deleted, or
+/// touched with a different mtime/size) simply falls back to the full rescan.
+fn worktree_stats_unchanged(
+    repo_path: &str,
+    config: &AppConfig,
+    cached: &BTreeMap<String, (i64, u64)>,
+) -> AppResult<bool> {
+    let repo = git::repo::open_repo(repo_path)?;
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| AppError::General("Bare repository cannot be indexed".into()))?;
+    let max_file = (config.index.max_file_bytes as usize).clamp(1024, MAX_FILE_BYTES_HARD);
+    let mut current = BTreeMap::new();
+    for path in candidate_paths(&repo, config)? {
+        if excluded(&path, &config.index.extra_excludes) {
+            continue;
+        }
+        let metadata = match fs::metadata(workdir.join(&path)) {
+            Ok(metadata) if metadata.is_file() && metadata.len() <= max_file as u64 => metadata,
+            Ok(_) => continue,
+            Err(_) => return Ok(false), // file vanished since the last scan
+        };
+        current.insert(path, stat_fingerprint(&metadata));
+    }
+    Ok(current == *cached)
 }
 
 fn stale_reason(
@@ -389,13 +632,53 @@ fn stale_reason(
     repo_path: &str,
     config: &AppConfig,
 ) -> AppResult<Option<String>> {
-    let current = collect_snapshot(repo_path, config, false)?.metadata;
-    if index.metadata == current {
+    const STALE_MESSAGE: &str = "Code index is stale because HEAD, index/worktree contents, exclusions, untracked-file policy, or embedding model changed; rebuild the index";
+
+    // 1) Cheap fields first: HEAD, git-index tree and config keys. None of
+    //    these read worktree file contents, so mismatches cost almost nothing.
+    let cheap = cheap_metadata(&git::repo::open_repo(repo_path)?, config)?;
+    let stored = &index.metadata;
+    if cheap.head != stored.head
+        || cheap.index_snapshot != stored.index_snapshot
+        || cheap.exclusion_key != stored.exclusion_key
+        || cheap.embedding_key != stored.embedding_key
+        || cheap.tokenizer_version != stored.tokenizer_version
+        || cheap.include_untracked != stored.include_untracked
+    {
+        return Ok(Some(STALE_MESSAGE.into()));
+    }
+
+    // 2) Stat-only fast path: compare per-file (mtime, size) against the last
+    //    full scan. Status queries on an unchanged worktree stop here instead
+    //    of re-reading and re-hashing every file.
+    if let Ok(cache) = worktree_cache().lock() {
+        if let Some(cached) = cache.get(repo_path) {
+            if worktree_stats_unchanged(repo_path, config, &cached.files)? {
+                return Ok(if cached.snapshot == stored.worktree_snapshot {
+                    None
+                } else {
+                    Some(STALE_MESSAGE.into())
+                });
+            }
+        }
+    }
+
+    // 3) Full rescan: read + hash every candidate file, then refresh the
+    //    stat cache for the next round.
+    let current = collect_snapshot(repo_path, config, false)?;
+    if let Ok(mut cache) = worktree_cache().lock() {
+        cache.insert(
+            repo_path.to_string(),
+            WorktreeFingerprint {
+                snapshot: current.metadata.worktree_snapshot.clone(),
+                files: current.file_stats,
+            },
+        );
+    }
+    if current.metadata == index.metadata {
         Ok(None)
     } else {
-        Ok(Some(
-            "Code index is stale because HEAD, index/worktree contents, exclusions, untracked-file policy, or embedding model changed; rebuild the index".into(),
-        ))
+        Ok(Some(STALE_MESSAGE.into()))
     }
 }
 
@@ -636,20 +919,16 @@ impl IndexManager {
     }
 
     fn save_if_current(&self, repo: &str, generation: u64, index: &RepoIndex) -> AppResult<bool> {
-        let jobs = self
-            .jobs
-            .lock()
-            .map_err(|_| AppError::General("Index manager unavailable".into()))?;
-        if jobs
-            .get(repo)
-            .is_some_and(|job| job.generation == generation)
-        {
-            // Holding the generation lock makes cancel/delete linearize after this write.
-            save_index(index)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        // The disk write can take seconds (up to the 128 MiB index cap), so it
+        // must not run while holding the jobs lock — that would stall status,
+        // cancel and rebuild for the whole write. Check the generation first,
+        // write unlocked, then re-check so a cancel that raced the write is
+        // still reported as not-current.
+        if !self.is_current(repo, generation) {
+            return Ok(false);
         }
+        save_index(index)?;
+        Ok(self.is_current(repo, generation))
     }
 
     pub fn status(&self, repo: &str) -> AppResult<IndexStatus> {
@@ -1068,5 +1347,61 @@ mod tests {
     fn lexical_terms_support_code_identifiers_and_unicode() {
         assert!(terms("find repo_path 代码索引").contains("repo_path"));
         assert!(terms("find repo_path 代码索引").contains("代码索引"));
+    }
+
+    fn embedding_chunk(id: &str, embedding: Vec<f32>) -> CodeChunk {
+        CodeChunk {
+            id: id.into(),
+            path: "a.rs".into(),
+            blob_oid: "hash".into(),
+            start_line: 1,
+            end_line: 2,
+            language: "rust".into(),
+            symbols: vec![],
+            text: "x".into(),
+            embedding,
+        }
+    }
+
+    #[test]
+    fn embeddings_sidecar_roundtrips_as_binary() {
+        let root = std::env::temp_dir().join(format!("aigit-emb-{}", now()));
+        fs::create_dir_all(&root).expect("temp dir");
+        let path = root.join("embeddings.bin");
+        let chunks = vec![
+            embedding_chunk("chunk-a", vec![0.25, -0.5, 1.0]),
+            embedding_chunk("chunk-b", vec![]),
+        ];
+
+        write_embeddings(&path, &chunks).expect("write sidecar");
+        let restored = read_embeddings(&path);
+        assert_eq!(restored.get("chunk-a"), Some(&vec![0.25, -0.5, 1.0]));
+        assert!(!restored.contains_key("chunk-b"));
+
+        // A rebuild without embeddings must not leave a stale sidecar behind.
+        let empty = vec![embedding_chunk("chunk-a", vec![])];
+        write_embeddings(&path, &empty).expect("write empty sidecar");
+        assert!(!path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn corrupt_embeddings_sidecar_is_quarantined() {
+        let root = std::env::temp_dir().join(format!("aigit-emb-bad-{}", now()));
+        fs::create_dir_all(&root).expect("temp dir");
+        let path = root.join("embeddings.bin");
+        fs::write(&path, b"AIGITEB1 garbage-not-a-record").expect("seed corrupt file");
+
+        let restored = read_embeddings(&path);
+        assert!(restored.is_empty());
+        assert!(!path.exists(), "corrupt sidecar must be moved aside");
+        assert!(fs::read_dir(&root)
+            .expect("list temp dir")
+            .any(|entry| entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .starts_with("embeddings.corrupt-")));
+        let _ = fs::remove_dir_all(root);
     }
 }

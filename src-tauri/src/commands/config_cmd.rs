@@ -1,5 +1,19 @@
+use std::sync::Mutex;
+
 use crate::config::{AppConfig, CredentialStore, SystemCredentialStore};
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
+
+/// Serializes config.toml read-modify-write sequences. Tauri runs commands on
+/// a thread pool, so without this lock concurrent commands (e.g. switching
+/// repo tabs while a repo is opened) would each load the file, modify it and
+/// save — the last writer wins and the other's update is silently lost.
+static CONFIG_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_config_writes() -> AppResult<std::sync::MutexGuard<'static, ()>> {
+    CONFIG_WRITE_LOCK
+        .lock()
+        .map_err(|_| AppError::Config("Config write lock is unavailable".into()))
+}
 
 #[tauri::command]
 pub fn get_config() -> AppResult<AppConfig> {
@@ -8,6 +22,7 @@ pub fn get_config() -> AppResult<AppConfig> {
 
 #[tauri::command]
 pub fn save_config(mut config: AppConfig) -> AppResult<AppConfig> {
+    let _guard = lock_config_writes()?;
     config.refresh_credential_status(&SystemCredentialStore)?;
     config.save()?;
     Ok(config)
@@ -33,6 +48,7 @@ pub fn delete_api_key(provider: String) -> AppResult<AppConfig> {
 
 #[tauri::command]
 pub fn add_recent_repo(path: String) -> AppResult<AppConfig> {
+    let _guard = lock_config_writes()?;
     let store = SystemCredentialStore;
     let mut config = AppConfig::load(&store)?;
     config.add_recent_repo(&path);
@@ -45,6 +61,7 @@ pub fn set_open_repos(
     open_repos: Vec<String>,
     active_repo: Option<String>,
 ) -> AppResult<AppConfig> {
+    let _guard = lock_config_writes()?;
     let store = SystemCredentialStore;
     let mut config = AppConfig::load(&store)?;
     let active = match active_repo {

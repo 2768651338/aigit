@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::{Arc, AtomicBool};
 
 use git2::Repository;
 
@@ -25,9 +26,66 @@ pub fn init_repo(path: &str) -> AppResult<()> {
     Ok(())
 }
 
-pub fn clone_repo(url: &str, target_path: &str) -> AppResult<()> {
-    Repository::clone(url, target_path)?;
+/// Clone via the git CLI instead of libgit2: the CLI uses the system
+/// credential helper (so private-repo HTTPS clones work exactly like
+/// push/pull do), honours a hard timeout, and can be cancelled mid-flight.
+/// The parent of `target_path` is created if missing.
+pub fn clone_repo(
+    url: &str,
+    target_path: &str,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> AppResult<()> {
+    validate_clone_url(url)?;
+    crate::git::cli::validate_arg(url, "clone url")?;
+    crate::git::cli::validate_non_option(target_path, "clone target path")?;
+    let target = Path::new(target_path);
+    let parent = target
+        .parent()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .ok_or_else(|| AppError::General("Invalid clone target path".into()))?;
+    std::fs::create_dir_all(parent)?;
+    let output = crate::git::cli::run_cancellable(
+        parent,
+        ["clone", "--progress", url, target_path],
+        crate::git::cli::REMOTE_TIMEOUT,
+        cancellation,
+    )?;
+    if !output.success() {
+        return Err(crate::git::cli::command_failed("Clone failed", &output));
+    }
     Ok(())
+}
+
+/// Restrict clone sources to remote transports. `https://` and `ssh://` are
+/// accepted, plus scp-like `git@host:path` syntax; plain local paths and
+/// `file://`/`http://`/`git://` are rejected (use "open" for local folders).
+fn validate_clone_url(url: &str) -> AppResult<()> {
+    if url.starts_with('-') {
+        return Err(AppError::General(
+            "Clone URL must not start with '-'".into(),
+        ));
+    }
+    if let Some(scheme_end) = url.find("://") {
+        let scheme = url[..scheme_end].to_ascii_lowercase();
+        if scheme == "https" || scheme == "ssh" {
+            return Ok(());
+        }
+        return Err(AppError::General(format!(
+            "Unsupported clone URL scheme '{scheme}': only https and ssh are allowed"
+        )));
+    }
+    // No "://": allow scp-like ssh syntax (user@host:path) only. The '@' must
+    // precede the ':' so a plain Windows path like `D:\repo` is rejected.
+    let colon = url.find(':');
+    let at = url.find('@');
+    if let (Some(colon), Some(at)) = (colon, at) {
+        if at < colon {
+            return Ok(());
+        }
+    }
+    Err(AppError::General(
+        "Clone URL must be https://, ssh:// or git@host:path".into(),
+    ))
 }
 
 pub fn get_repo_info(repo: &Repository) -> AppResult<RepoInfo> {
@@ -84,4 +142,71 @@ fn get_ahead_behind(repo: &Repository, branch_name: &str) -> AppResult<(usize, u
     let (ahead, behind) = repo.graph_ahead_behind(local_commit.id(), upstream_commit.id())?;
 
     Ok((ahead, behind))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{discover_repo, get_repo_info, init_repo, open_repo, validate_clone_url};
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_dir(name: &str) -> std::path::PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!("aigit-repo-{name}-{unique}"))
+    }
+
+    #[test]
+    fn clone_url_whitelist_accepts_remote_transports_only() {
+        assert!(validate_clone_url("https://example.com/repo.git").is_ok());
+        assert!(validate_clone_url("ssh://git@example.com/repo.git").is_ok());
+        assert!(validate_clone_url("git@example.com:repo.git").is_ok());
+
+        assert!(validate_clone_url("http://example.com/repo.git").is_err());
+        assert!(validate_clone_url("file:///C:/work/repo").is_err());
+        assert!(validate_clone_url("git://example.com/repo.git").is_err());
+        // A plain Windows path is not a remote URL.
+        assert!(validate_clone_url("D:\\work\\repo").is_err());
+        assert!(validate_clone_url("-odd-start").is_err());
+    }
+
+    #[test]
+    fn init_discover_and_repo_info_agree() {
+        let root = unique_dir("info");
+        fs::create_dir_all(&root).expect("create temp dir");
+
+        init_repo(root.to_str().expect("utf8")).expect("init repo");
+        assert!(root.join(".git").exists());
+
+        let expected = root.to_string_lossy().to_string();
+        // libgit2 may report the workdir with a trailing separator.
+        let with_slash = format!("{}{}", expected, std::path::MAIN_SEPARATOR);
+        let discovered = discover_repo(root.to_str().expect("utf8")).expect("discover");
+        assert!(
+            discovered == expected || discovered == with_slash,
+            "unexpected discovered path: {discovered}"
+        );
+
+        let repo = open_repo(root.to_str().expect("utf8")).expect("open");
+        let info = get_repo_info(&repo).expect("repo info");
+        assert!(info.path == expected || info.path == with_slash);
+        assert_eq!(
+            info.name,
+            root.file_name().expect("file name").to_string_lossy()
+        );
+        // Fresh repo: no commit yet, so no current branch.
+        assert_eq!(info.current_branch, None);
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn open_repo_rejects_non_repositories() {
+        let root = unique_dir("not-repo");
+        fs::create_dir_all(&root).expect("create temp dir");
+        assert!(open_repo(root.to_str().expect("utf8")).is_err());
+        let _ = fs::remove_dir_all(root);
+    }
 }

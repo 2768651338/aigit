@@ -276,7 +276,10 @@ pub fn validate_plan(plan: &CommitPlan, draft: &CommitPlanDraft) -> AppResult<()
     if plan.groups.is_empty() {
         return Err(AppError::AiResponse("计划至少需要一个提交组".into()));
     }
-    let conventional = Regex::new(r"^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\([A-Za-z0-9._/-]+\))?!?: .{1,72}").expect("regex");
+    static CONVENTIONAL: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let conventional = CONVENTIONAL.get_or_init(|| {
+        Regex::new(r"^(feat|fix|docs|style|refactor|perf|test|chore|build|ci)(\([A-Za-z0-9._/-]+\))?!?: .{1,72}").expect("regex")
+    });
     let expected: HashSet<&str> = draft.selections.iter().map(|s| s.id.as_str()).collect();
     let mut seen = HashSet::new();
     for group in &plan.groups {

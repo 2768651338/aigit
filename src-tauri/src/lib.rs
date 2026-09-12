@@ -3,6 +3,7 @@ mod chat_history;
 mod code_index;
 mod commands;
 mod config;
+mod crypto;
 mod error;
 mod git;
 mod github;
@@ -33,6 +34,7 @@ pub fn run() {
             git_cmd::discover_repo,
             git_cmd::init_repo,
             git_cmd::clone_repo,
+            git_cmd::clone_repo_task,
             git_cmd::get_repo_info,
             git_cmd::get_repository_insights,
             git_cmd::get_status,
@@ -81,6 +83,7 @@ pub fn run() {
             git_cmd::delete_remote_tag,
             // System integration
             system_cmd::open_repo_in_terminal,
+            system_cmd::open_repo_file,
             // GitHub pull request workflow
             github_cmd::github_remote,
             github_cmd::github_gh_status,

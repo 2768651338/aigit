@@ -4,8 +4,9 @@ use serde_json::{json, Value};
 
 use crate::ai::stream::SseDecoder;
 use crate::ai::{
-    http_client, prepare_input, read_json_limited, upstream_error, AiProvider, CancellationToken,
-    ChatMessage, ProviderEvent, ProviderEventSink, StreamFuture, MAX_RESPONSE_BYTES,
+    http_client, next_stream_chunk, prepare_input, read_json_limited, streaming_http_client,
+    upstream_error, AiProvider, CancellationToken, ChatMessage, ProviderEvent, ProviderEventSink,
+    StreamFuture, MAX_RESPONSE_BYTES, STREAM_IDLE_TIMEOUT,
 };
 use crate::config::AiProviderConfig;
 use crate::error::{AppError, AppResult};
@@ -20,6 +21,15 @@ impl ClaudeProvider {
         match &self.client {
             Some(client) => Ok(client),
             None => http_client(),
+        }
+    }
+
+    /// Streaming must not inherit the non-streaming total timeout; long
+    /// generations are bounded by the per-chunk idle timeout instead.
+    fn streaming_client(&self) -> AppResult<&reqwest::Client> {
+        match &self.client {
+            Some(client) => Ok(client),
+            None => streaming_http_client(),
         }
     }
 
@@ -109,10 +119,20 @@ impl AiProvider for ClaudeProvider {
                 "stream": true
             });
             let url = format!("{}/messages", config.claude_base_url.trim_end_matches('/'));
-            let response = tokio::select! {
-                _ = cancellation.cancelled() => return Err(AppError::Ai("AI request cancelled".into())),
-                response = self.client()?.post(url).header("x-api-key", api_key).header("anthropic-version", "2023-06-01").json(&body).send() => response?,
-            };
+            let response = tokio::time::timeout(
+                STREAM_IDLE_TIMEOUT,
+                tokio::select! {
+                    _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
+                    response = self.streaming_client()?.post(url).header("x-api-key", api_key).header("anthropic-version", "2023-06-01").json(&body).send() => response.map_err(AppError::Http),
+                },
+            )
+            .await
+            .map_err(|_| {
+                AppError::AiTimeout(format!(
+                    "no response from the AI service within {} seconds",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                ))
+            })??;
             if !response.status().is_success() {
                 return Err(upstream_error("claude", response).await);
             }
@@ -120,11 +140,9 @@ impl AiProvider for ClaudeProvider {
             let mut stream = response.bytes_stream();
             let mut received = 0usize;
             let mut completed = false;
-            while let Some(chunk) = tokio::select! {
-                _ = cancellation.cancelled() => return Err(AppError::Ai("AI request cancelled".into())),
-                chunk = stream.next() => chunk,
-            } {
-                let chunk = chunk?;
+            while let Some(chunk) =
+                next_stream_chunk(&mut stream, &cancellation, STREAM_IDLE_TIMEOUT).await?
+            {
                 received = received.saturating_add(chunk.len());
                 if received > MAX_RESPONSE_BYTES {
                     return Err(AppError::AiResponse(format!(

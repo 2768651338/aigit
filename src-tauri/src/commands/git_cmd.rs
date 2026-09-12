@@ -115,7 +115,22 @@ pub fn init_repo(path: String) -> AppResult<()> {
 
 #[tauri::command]
 pub async fn clone_repo(url: String, target_path: String) -> AppResult<()> {
-    run_git_blocking(move || git::repo::clone_repo(&url, &target_path)).await
+    run_git_blocking(move || git::repo::clone_repo(&url, &target_path, None)).await
+}
+
+/// Cancellable clone; pairs with `cancel_git_task`. Runs on the blocking pool
+/// with the standard 300s remote timeout and system credential helper.
+#[tauri::command]
+pub async fn clone_repo_task(
+    url: String,
+    target_path: String,
+    task_id: String,
+    registry: tauri::State<'_, GitTaskRegistry>,
+) -> AppResult<()> {
+    run_remote_task(registry.inner(), &task_id, move |cancellation| {
+        git::repo::clone_repo(&url, &target_path, Some(cancellation))
+    })
+    .await
 }
 
 #[tauri::command]
@@ -144,6 +159,9 @@ pub fn get_staged_diff(path: String, file_path: Option<String>) -> AppResult<Vec
 
 #[tauri::command]
 pub fn stage_files(path: String, files: Vec<String>) -> AppResult<()> {
+    for file in &files {
+        git::cli::validate_pathspec(file, "pathspec")?;
+    }
     let repo = git::repo::open_repo(&path)?;
     git::commit::stage_files(&repo, &files)
 }
@@ -156,6 +174,9 @@ pub fn stage_all(path: String) -> AppResult<()> {
 
 #[tauri::command]
 pub fn unstage_files(path: String, files: Vec<String>) -> AppResult<()> {
+    for file in &files {
+        git::cli::validate_pathspec(file, "pathspec")?;
+    }
     let repo = git::repo::open_repo(&path)?;
     git::commit::unstage_files(&repo, &files)
 }
@@ -250,14 +271,17 @@ pub fn list_branches(path: String) -> AppResult<Vec<git::BranchInfo>> {
 
 #[tauri::command]
 pub fn create_branch(path: String, name: String) -> AppResult<()> {
+    if !git2::Reference::is_valid_name(&format!("refs/heads/{name}")) {
+        return Err(AppError::General(format!("Invalid branch name: {name}")));
+    }
     let repo = git::repo::open_repo(&path)?;
     git::branch::create_branch(&repo, &name)
 }
 
 #[tauri::command]
-pub fn switch_branch(path: String, name: String) -> AppResult<()> {
+pub fn switch_branch(path: String, name: String, force: Option<bool>) -> AppResult<()> {
     let repo = git::repo::open_repo(&path)?;
-    git::branch::switch_branch(&repo, &name)
+    git::branch::switch_branch(&repo, &name, force.unwrap_or(false))
 }
 
 #[tauri::command]
@@ -269,7 +293,9 @@ pub fn delete_branch(path: String, name: String) -> AppResult<()> {
 #[tauri::command]
 pub fn get_log(path: String, limit: Option<usize>) -> AppResult<Vec<git::LogEntry>> {
     let repo = git::repo::open_repo(&path)?;
-    git::branch::get_log(&repo, limit.unwrap_or(100))
+    // Clamp the frontend-supplied limit so a bogus value cannot walk the
+    // entire commit graph in one call.
+    git::branch::get_log(&repo, limit.unwrap_or(100).min(1000))
 }
 
 #[tauri::command]

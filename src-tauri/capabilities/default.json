@@ -15,11 +15,9 @@
       "identifier": "opener:allow-open-url",
       "allow": [
         { "url": "https://*" },
-        { "url": "http://*" },
         { "url": "mailto:*" }
       ]
     },
-    "opener:allow-open-path",
     "fs:allow-write-text-file",
     "fs:allow-write-file",
     "dialog:allow-open",

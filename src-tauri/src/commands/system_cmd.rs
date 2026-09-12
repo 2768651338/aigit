@@ -60,6 +60,41 @@ pub fn open_repo_in_terminal(path: String) -> AppResult<()> {
     spawn_terminal(&dir)
 }
 
+/// Open a file that lives inside the opened repository with the OS default
+/// application. The webview supplies only a repository-relative path; the
+/// backend re-validates it (no absolute paths, no `..` segments, no symlink
+/// escape past the repository root) before opening, so this replaces the
+/// unrestricted `opener:allow-open-path` capability with a scoped command.
+#[tauri::command]
+pub fn open_repo_file(app: tauri::AppHandle, path: String, relative_path: String) -> AppResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+
+    if relative_path.is_empty()
+        || relative_path.starts_with('/')
+        || relative_path.starts_with('\\')
+        || relative_path
+            .split(['/', '\\'])
+            .any(|segment| segment == "..")
+    {
+        return Err(AppError::General(
+            "File path must be relative to the repository root".into(),
+        ));
+    }
+    let dir = validated_workdir(&path)?;
+    let target = dir.join(&relative_path);
+    let canonical = std::fs::canonicalize(&target)
+        .map_err(|e| AppError::General(format!("File does not exist: {e}")))?;
+    if !canonical.starts_with(&dir) {
+        return Err(AppError::General(
+            "File path escapes the repository directory".into(),
+        ));
+    }
+    app.opener()
+        .open_path(canonical.to_string_lossy(), None::<&str>)
+        .map_err(|e| AppError::General(format!("Cannot open file: {e}")))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

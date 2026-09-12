@@ -192,27 +192,144 @@ pub fn get_provider(provider_name: &str) -> AppResult<Box<dyn AiProvider>> {
     }
 }
 
-fn build_http_client(pool_max_idle_per_host: usize) -> Result<Client, String> {
-    Client::builder()
+fn build_http_client(
+    pool_max_idle_per_host: usize,
+    total_timeout: Option<Duration>,
+) -> Result<Client, String> {
+    let mut builder = Client::builder()
         .connect_timeout(Duration::from_secs(10))
-        .timeout(Duration::from_secs(90))
         .pool_max_idle_per_host(pool_max_idle_per_host)
-        .user_agent("aigit/1")
-        .build()
-        .map_err(|error| error.to_string())
+        .user_agent("aigit/1");
+    if let Some(total) = total_timeout {
+        builder = builder.timeout(total);
+    }
+    builder.build().map_err(|error| error.to_string())
 }
 
 pub(crate) fn http_client() -> AppResult<&'static Client> {
     static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
     CLIENT
-        .get_or_init(|| build_http_client(usize::MAX))
+        .get_or_init(|| build_http_client(usize::MAX, Some(Duration::from_secs(90))))
         .as_ref()
         .map_err(|error| AppError::Ai(format!("Cannot initialize HTTP client: {error}")))
 }
 
+/// Client for streaming calls. A total timeout would cut off legitimately
+/// long generations mid-stream, so it is disabled here; the read loop enforces
+/// a per-chunk idle timeout instead (see [`next_stream_chunk`]).
+pub(crate) fn streaming_http_client() -> AppResult<&'static Client> {
+    static CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
+    CLIENT
+        .get_or_init(|| build_http_client(usize::MAX, None))
+        .as_ref()
+        .map_err(|error| AppError::Ai(format!("Cannot initialize HTTP client: {error}")))
+}
+
+/// Maximum wall time between two chunks of a streaming response (and for the
+/// response headers to arrive) before the request is considered stalled.
+pub(crate) const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+
+/// Secret-like content patterns scanned right before a request is sent to a
+/// cloud provider. File-name blacklists cannot catch keys embedded in source
+/// files (`config.py`, `constants.ts`, …), so the final payload itself is
+/// checked; a hit blocks the request until the user explicitly confirms.
+const SECRET_PATTERNS: &[(&str, &str)] = &[
+    (r"\bsk-[A-Za-z0-9_-]{16,}\b", "OpenAI-style API key (sk-…)"),
+    (
+        r"\bgithub_pat_[A-Za-z0-9_]{20,}\b",
+        "GitHub fine-grained token (github_pat_…)",
+    ),
+    (
+        r"\bgh[pousr]_[A-Za-z0-9]{20,}\b",
+        "GitHub token (ghp_/gho_/…",
+    ),
+    (r"\bAKIA[0-9A-Z]{16}\b", "AWS access key (AKIA…)"),
+    (r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b", "Slack token (xox…)"),
+    (r"\bAIza[0-9A-Za-z_-]{30,}\b", "Google API key (AIza…)"),
+    (
+        r"-----BEGIN [A-Z ]*PRIVATE KEY-----",
+        "private key block (-----BEGIN … PRIVATE KEY-----)",
+    ),
+    (
+        r#"(?i)\b(?:api[_-]?key|secret|access[_-]?token|client[_-]?secret)\b\s*[=:]\s*["']?[A-Za-z0-9+/_-]{24,}"#,
+        "key/value assignment with a long secret-like value",
+    ),
+];
+
+/// Return the labels of all secret-like patterns present in `text`.
+pub fn find_secret_hits(text: &str) -> Vec<&'static str> {
+    static COMPILED: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
+    let compiled = COMPILED.get_or_init(|| {
+        SECRET_PATTERNS
+            .iter()
+            .map(|(pattern, label)| (Regex::new(pattern).expect("valid secret pattern"), *label))
+            .collect()
+    });
+    let mut hits: Vec<&'static str> = Vec::new();
+    for (regex, label) in compiled {
+        if regex.is_match(text) && !hits.contains(label) {
+            hits.push(label);
+        }
+    }
+    hits
+}
+
+/// Block a provider request when the payload contains secret-like content and
+/// the user has not confirmed. Scans both the system prompt (chat attachments
+/// and repo context are injected there) and every message body.
+pub fn ensure_no_secrets(
+    system_prompt: &str,
+    messages: &[ChatMessage],
+    confirmed: bool,
+) -> AppResult<()> {
+    if confirmed {
+        return Ok(());
+    }
+    let mut payload = String::with_capacity(4096);
+    payload.push_str(system_prompt);
+    for message in messages {
+        payload.push_str(&message.content);
+    }
+    let hits = find_secret_hits(&payload);
+    if hits.is_empty() {
+        return Ok(());
+    }
+    Err(AppError::AiSensitiveContent(hits.join("; ")))
+}
+
+/// Read the next chunk of a streaming response, bounded by an idle timeout.
+///
+/// Returns `None` when the stream ended. Errors when the provider stays
+/// silent for longer than `idle_timeout` (a stalled stream, not a long
+/// generation), when the user cancels, or on a transport error.
+pub(crate) async fn next_stream_chunk<S>(
+    stream: &mut S,
+    cancellation: &CancellationToken,
+    idle_timeout: Duration,
+) -> AppResult<Option<reqwest::Bytes>>
+where
+    S: futures_util::Stream<Item = reqwest::Result<reqwest::Bytes>> + Unpin,
+{
+    tokio::time::timeout(idle_timeout, async {
+        tokio::select! {
+            _ = cancellation.cancelled() => Err(AppError::Ai("AI request cancelled".into())),
+            chunk = stream.next() => chunk.map_err(AppError::Http),
+        }
+    })
+    .await
+    .map_err(|_| {
+        AppError::AiTimeout(format!(
+            "no data received within {} seconds; the stream was aborted",
+            idle_timeout.as_secs()
+        ))
+    })?
+}
+
 #[cfg(test)]
 pub(crate) fn isolated_http_client() -> Client {
-    build_http_client(0).expect("test HTTP client must initialize")
+    // No total timeout, mirroring the production streaming client so stream
+    // tests exercise the idle-timeout path instead of a fixed deadline.
+    build_http_client(0, None).expect("test HTTP client must initialize")
 }
 
 pub(crate) async fn read_json_limited(response: Response) -> AppResult<serde_json::Value> {
@@ -271,8 +388,20 @@ async fn read_body_limited(response: Response, limit: usize) -> AppResult<Vec<u8
 
     let mut stream = response.bytes_stream();
     let mut body = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
+    loop {
+        // Non-streaming callers are additionally bounded by the client's total
+        // timeout; this idle bound covers streaming error bodies, which have
+        // no total timeout.
+        let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, stream.next()).await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                return Err(AppError::AiTimeout(format!(
+                    "no data received within {} seconds; the response was aborted",
+                    STREAM_IDLE_TIMEOUT.as_secs()
+                )))
+            }
+        };
         if body.len().saturating_add(chunk.len()) > limit {
             return Err(AppError::AiResponse(format!(
                 "AI response exceeded the {limit} byte limit"
@@ -444,6 +573,112 @@ mod tests {
         assert_eq!(estimate_tokens("abc"), 1);
         assert_eq!(estimate_tokens("世界"), 2);
         assert_eq!(estimate_tokens("ab世界"), 3); // 1 (ascii) + 2 (cjk)
+    }
+
+    #[tokio::test]
+    async fn stalled_stream_chunks_hit_the_idle_timeout() {
+        let cancellation = CancellationToken::default();
+        let mut stream = futures_util::stream::pending::<reqwest::Result<reqwest::Bytes>>();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            next_stream_chunk(&mut stream, &cancellation, Duration::from_millis(50)),
+        )
+        .await
+        .expect("the idle timeout must fire long before the outer test timeout");
+        assert!(matches!(result, Err(AppError::AiTimeout(_))));
+    }
+
+    #[tokio::test]
+    async fn stream_chunk_reports_cancellation_before_the_idle_timeout() {
+        let cancellation = CancellationToken::default();
+        let mut stream = futures_util::stream::pending::<reqwest::Result<reqwest::Bytes>>();
+        let cancel_task = {
+            let token = cancellation.clone();
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                token.cancel();
+            })
+        };
+        let result = next_stream_chunk(&mut stream, &cancellation, Duration::from_secs(60)).await;
+        cancel_task.await.expect("cancel task");
+        assert!(matches!(result, Err(AppError::Ai(ref message)) if message.contains("cancelled")));
+    }
+
+    #[tokio::test]
+    async fn stream_chunk_returns_data_then_stream_end() {
+        let cancellation = CancellationToken::default();
+        let mut stream =
+            futures_util::stream::iter(vec![Ok(reqwest::Bytes::from_static(b"hello"))]);
+        let chunk = next_stream_chunk(&mut stream, &cancellation, Duration::from_secs(1))
+            .await
+            .expect("first chunk must arrive");
+        assert_eq!(chunk.as_deref(), Some(b"hello".as_slice()));
+        let end = next_stream_chunk(&mut stream, &cancellation, Duration::from_millis(50))
+            .await
+            .expect("stream end must not be treated as an error");
+        assert!(end.is_none());
+    }
+
+    #[test]
+    fn finds_secret_like_strings_in_payloads() {
+        // 本测试的所有 token 形态样例都在运行时拼接：源码中若直接出现
+        // 完整凭据形态的字面量，会被 Mimosa 扫描与 GitHub 推送保护误拦。
+        let hits = find_secret_hits(&format!(
+            "const {} = \"{}-{}\"; // {}{}",
+            "KEY", "sk-proj", "abcdefghij1234567890", "ghp_", "abcdefghijklmnopqrstuvwxyz12345"
+        ));
+        assert!(hits.iter().any(|label| label.contains("OpenAI")));
+        assert!(hits.iter().any(|label| label.contains("GitHub")));
+
+        assert!(
+            find_secret_hits(&format!("{}IOSFODNN7EXAMPLE is aws", "AKIA"))
+                .iter()
+                .any(|l| l.contains("AWS"))
+        );
+        assert!(
+            find_secret_hits(&format!("xox{}-{}", "b", "123456789012-abcdefghijklmnop"))
+                .iter()
+                .any(|l| l.contains("Slack"))
+        );
+        // 合成样例在运行时拼接成键值形态，避免源码里出现能被凭据扫描器
+        // 误判为硬编码密钥的赋值字面量。
+        let synthetic_kv = format!("api_{} = '{}'", "key", "a".repeat(34));
+        assert!(find_secret_hits(&synthetic_kv)
+            .iter()
+            .any(|l| l.contains("key/value")));
+        assert!(find_secret_hits("-----BEGIN RSA PRIVATE KEY-----")
+            .iter()
+            .any(|l| l.contains("private key")));
+
+        // Ordinary code must not trip the scanner.
+        assert!(find_secret_hits("let total = subtotal + tax_total;").is_empty());
+        assert!(find_secret_hits("https://example.com/path?query=1").is_empty());
+        // No duplicate labels even when several patterns match.
+        let hits = find_secret_hits(&format!(
+            "{}abc123def456ghi789 {}xyz987wvu654tsr321",
+            "sk-", "sk-"
+        ));
+        assert_eq!(hits.len(), 1);
+    }
+
+    #[test]
+    fn secrets_guard_blocks_unconfirmed_and_allows_confirmed() {
+        // Token 形态样例同样在运行时拼接，避免 GitHub 推送保护误拦。
+        let messages = vec![ChatMessage {
+            role: "user".into(),
+            content: format!("token: gh{}_{}", "p", "abcdefghijklmnopqrstuvwxyz123456"),
+        }];
+        assert!(ensure_no_secrets("system", &messages, false).is_err());
+        assert!(ensure_no_secrets("system", &messages, true).is_ok());
+        assert!(ensure_no_secrets(
+            "system",
+            &[ChatMessage {
+                role: "user".into(),
+                content: "hello".into()
+            }],
+            false
+        )
+        .is_ok());
     }
 
     #[test]

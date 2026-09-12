@@ -268,12 +268,17 @@ pub fn validate_pathspec(value: &str, name: &str) -> AppResult<()> {
 }
 
 fn sanitize_output(value: &str) -> String {
-    let url_credentials = regex::Regex::new(r"(?i)(https?://)[^\s/@:]+(?::[^\s/@]*)?@")
-        .expect("credential URL regex");
-    let sensitive = regex::Regex::new(
-        r"(?i)\b(authorization|token|password|passwd|api[_-]?key|secret)\s*[:=]\s*([^\s,;]+)",
-    )
-    .expect("sensitive field regex");
+    static URL_CREDENTIALS: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static SENSITIVE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let url_credentials = URL_CREDENTIALS.get_or_init(|| {
+        regex::Regex::new(r"(?i)(https?://)[^\s/@:]+(?::[^\s/@]*)?@").expect("credential URL regex")
+    });
+    let sensitive = SENSITIVE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)\b(authorization|token|password|passwd|api[_-]?key|secret)\s*[:=]\s*([^\s,;]+)",
+        )
+        .expect("sensitive field regex")
+    });
     let value = url_credentials.replace_all(value, "$1[REDACTED]@");
     sensitive.replace_all(&value, "$1=[REDACTED]").into_owned()
 }
