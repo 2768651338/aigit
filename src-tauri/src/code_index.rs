@@ -268,10 +268,10 @@ fn read_embeddings(path: &Path) -> HashMap<String, Vec<f32>> {
     };
     // 损坏即隔离文件并整体丢弃（clear），下一轮触发重建。
     macro_rules! bail_corrupt {
-        () => {{
+        ($result:ident) => {{
             quarantine(path);
-            result.clear();
-            return result;
+            $result.clear();
+            return $result;
         }};
     }
     if bytes.len() < 12 || &bytes[..8] != EMBEDDINGS_MAGIC {
