@@ -46,12 +46,16 @@ jobs:
         shell: pwsh
         run: |
           npm run check:version
+          npm run check:updater
           if (-not (Test-Path LICENSE)) { throw 'LICENSE file is missing' }
           if ((node -p "require('./package.json').license") -ne 'Apache-2.0') { throw 'package.json license mismatch' }
           if (-not (Select-String -Path src-tauri/Cargo.toml -Pattern '^license = "Apache-2.0"$' -Quiet)) { throw 'Cargo license mismatch' }
 
       - name: Run frontend tests
         run: npm test
+
+      - name: Lint frontend
+        run: npm run lint
 
       - name: Type-check frontend
         run: npm run typecheck
