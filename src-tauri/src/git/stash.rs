@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn stash_save_includes_untracked_files_when_requested() {
-        let (root, mut repo) = temp_repo("untracked");
+        let (root, repo) = temp_repo("untracked");
         fs::write(root.join("new.txt"), "new file\n").expect("untracked file");
 
         stash_save(&repo, Some("with untracked"), true, false).expect("stash save");

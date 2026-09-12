@@ -290,7 +290,7 @@ mod tests {
 
     #[test]
     fn clean_worktree_switches_without_force() {
-        let (root, repo) = temp_repo("clean");
+        let (_root, repo) = temp_repo("clean");
         create_branch_at_head(&repo, "other");
 
         switch_branch(&repo, "other", false).expect("switch on clean worktree");

@@ -250,6 +250,21 @@ fn write_embeddings(path: &Path, chunks: &[CodeChunk]) -> AppResult<()> {
 /// Parse the embeddings sidecar. A malformed file is quarantined and reported
 /// as empty — the index then behaves like "never embedded" and can be rebuilt.
 fn read_embeddings(path: &Path) -> HashMap<String, Vec<f32>> {
+    fn quarantine(path: &Path) {
+        let stamp = chrono::Utc::now().timestamp_millis();
+        let _ = fs::rename(
+            path,
+            path.with_file_name(format!("embeddings.corrupt-{stamp}.bin")),
+        );
+    }
+    // 部分解析成功后的失败同样全部丢弃（clear），保持"损坏即整体重建"。
+    macro_rules! bail_corrupt {
+        () => {{
+            quarantine(path);
+            result.clear();
+            return result;
+        }};
+    }
     let mut result = HashMap::new();
     let raw = match fs::read(path) {
         Ok(bytes) => bytes,
@@ -259,43 +274,30 @@ fn read_embeddings(path: &Path) -> HashMap<String, Vec<f32>> {
         Ok(bytes) => bytes,
         Err(_) => return result,
     };
-    let mut fail = |path: &Path| {
-        let stamp = chrono::Utc::now().timestamp_millis();
-        let _ = fs::rename(
-            path,
-            path.with_file_name(format!("embeddings.corrupt-{stamp}.bin")),
-        );
-        result.clear();
-    };
     if bytes.len() < 12 || &bytes[..8] != EMBEDDINGS_MAGIC {
-        fail(path);
-        return result;
+        bail_corrupt!();
     }
     let count = u32::from_le_bytes(bytes[8..12].try_into().unwrap_or([0; 4])) as usize;
     let mut cursor = 12usize;
     for _ in 0..count {
         if cursor + 4 > bytes.len() {
-            fail(path);
-            return result;
+            bail_corrupt!();
         }
         let id_len =
             u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap_or([0; 4])) as usize;
         cursor += 4;
         if cursor + id_len + 4 > bytes.len() {
-            fail(path);
-            return result;
+            bail_corrupt!();
         }
         let Ok(id) = std::str::from_utf8(&bytes[cursor..cursor + id_len]) else {
-            fail(path);
-            return result;
+            bail_corrupt!();
         };
         cursor += id_len;
         let dim =
             u32::from_le_bytes(bytes[cursor..cursor + 4].try_into().unwrap_or([0; 4])) as usize;
         cursor += 4;
         if dim == 0 || dim > 16_384 || cursor + dim * 4 > bytes.len() {
-            fail(path);
-            return result;
+            bail_corrupt!();
         }
         let mut vector = Vec::with_capacity(dim);
         for slot in bytes[cursor..cursor + dim * 4].chunks_exact(4) {
