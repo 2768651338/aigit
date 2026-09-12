@@ -189,7 +189,10 @@ mod tests {
             value
         }
 
-        let expected = normalize(&root.to_string_lossy());
+        // CI runner 的 TEMP 可能是 8.3 短名（如 RUNNER~1），libgit2 返回
+        // 规范真实路径；两边都 canonicalize 后再比较。
+        let canonical_root = fs::canonicalize(&root).unwrap_or_else(|_| root.clone());
+        let expected = normalize(&canonical_root.to_string_lossy());
         // libgit2 可能以尾部分隔符或平台相关斜杠报告 workdir，统一后比较。
         let discovered = discover_repo(root.to_str().expect("utf8")).expect("discover");
         assert_eq!(
