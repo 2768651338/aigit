@@ -2,6 +2,73 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
+## [1.0.11] - 2026-09-12
+
+### Added
+
+- Tauri 最小 CSP、受限外部 URL 与导出路径安全边界。
+- 项目贡献、安全和隐私文档。
+- AI 发送内容的内容级密钥检测：命中疑似凭据时中断请求，用户确认后才可继续发送。
+- 克隆支持取消（`clone_repo_task`），并改走系统 git CLI，私有仓库 HTTPS 克隆复用系统凭据助手。
+- 切换分支前的未提交改动防护：检测到脏工作区/暂存区时拒绝切换，用户确认丢弃后才强制执行。
+- 前端 ESLint 门禁（`npm run lint`，react-hooks 规则接入 CI）。
+- merge / stash / repo 模块与前端 IPC 契约层的回归测试。
+- 仓库内文件统一模态组件的键盘可达性：Esc 关闭、焦点陷阱与初始焦点；右键菜单支持 ↑↓/Home/End 导航。
+- 新增通用输入对话框（重命名会话等），替代无法本地化的 `window.prompt`。
+- 仓库洞察、错误提示与崩溃页文案接入 i18n；提交历史相对时间按界面语言本地化。
+- 聊天历史与代码索引在 Windows 上使用 DPAPI（当前用户范围）加密存储。
+
+### Changed
+
+- 移除前端通用 shell 权限和未使用的文件系统读/遍历权限。
+- 移除 `opener:allow-open-path` capability：仓库内文件打开改为后端命令并在服务端校验路径；外部链接仅允许 https 与 mailto。
+- AI 流式请求移除 90 秒总超时，改为逐块空闲超时，长回复不再被中途切断。
+- 大文件 diff 默认渐进渲染（超过 1500 行先显示前缀，可一键展开全部）。
+- 仓库状态订阅改为细粒度 selector，消除轮询期间的全量重渲染；聊天流式输出改为独立轻量状态，结束后一次性落库。
+- config.toml 与聊天历史存储串行化，消除并发读改写丢失更新的竞态。
+- 本地代码索引状态查询改用快速路径（stat 指纹缓存），索引与 embedding 写盘移出锁外；embedding 改为二进制 sidecar 存储，JSON 体积大幅缩小。
+- 代码索引 embedding 二进制 sidecar 与 AI 发送内容的密钥扫描接入 DPAPI 加密存储。
+- 仓库操作日志上限收紧（`get_log` 最多 1000 条）、单文件 diff 的 untracked 扫描按 pathspec 收窄、仓库洞察按日期剪枝提交图遍历。
+- diff 解析按文件增量定位，消除 O(n²) 文件查找；git 输出脱敏与提交计划校验的正则改为进程内只编译一次。
+- 启动恢复多仓库时并行校验保存的仓库路径，白屏时间不再随标签数线性增长。
+- diff 行与聊天消息气泡组件 memo 化：选中行、流式输出只重渲染受影响的条目。
+- 设置页拆分为独立 section 组件；仓库 store 的面板域操作（stash/tag/submodule/merge/history）拆分至 `repoStorePanels.ts`。
+- 破坏性操作确认统一走 Tauri 原生对话框；面板内错误只在内联横幅展示，不再与 toast 双显。
+- README/SECURITY/PRIVACY 不再写死版本号，CHANGELOG 按版本降序重排并补齐链接定义。
+
+### Fixed
+
+- 菜单图布局中的无效赋值（ESLint `no-useless-assignment` 发现）。
+- 仓库打开对话框的克隆地址校验与后端白名单对齐（拒绝 `http://`、`git://` 与本地路径）。
+- 切换分支成功提示在失败或用户取消时不再误报（store 返回布尔结果）。
+- 复制成功提示的定时器随组件卸载清理；会话标题按码点截断，emoji 不再显示为乱码。
+- 凭据扫描器的测试合成样例改为运行时拼接，消除静态扫描的硬编码凭据误报（Mimosa 复扫 0 发现）。
+- 崩溃兜底边界覆盖顶层 Provider 并展示诊断 ID；未暂存提交的错误文案引导先暂存。
+- 依赖升级：thiserror 2、dirs 6；tokio features 按实际使用收窄。
+- 新增 `check:updater` 构建断言：配置 updater endpoints 时必须同时配置 HTTPS 公钥。
+
+## [1.0.10] - 2026-09-11
+
+### Fixed
+
+- 关于页版本号改为构建期注入（`check:version` 保证与 tauri.conf/Cargo 同源），修复始终显示 v1.0.4、不随发版更新的问题。
+- 依赖安全修复：升级 h2 至 0.4.19（RUSTSEC-2026-0258，经 reqwest 引入）；npm 侧非破坏性升级 browserslist、nanoid（高危）与 postcss、baseline-browser-mapping；vitest 链的 2 个 moderate 需大版本升级，暂保留。
+- 恢复 CI 的 rustfmt/clippy 检查通过：全量 `cargo fmt` 格式化，`PathBuf` 导入移入测试模块。
+
+## [1.0.9] - 2026-09-11
+
+### Fixed
+
+- 历史详情面板展示提交的完整信息：主题完整换行显示，多行提交的正文不再被省略（此前仅显示首行截断）；历史搜索同时匹配正文内容。
+- 修复标题栏品牌区无法从 "aigit" 标签上发起窗口拖动的问题，并补齐 start-dragging 窗口权限。
+- 修复提交/amend/提交并推送流程中切换仓库标签导致忙碌与错误状态错位：状态现钉定在发起操作的仓库上。
+
+## [1.0.8] - 2026-08-28
+
+### Added
+
+- 侧边栏"打开的仓库"列表支持鼠标拖动调整排序：拖动中显示半透明行与插入位置指示线，顺序随打开仓库配置一并持久化；同时为窗口内 HTML5 拖放启用 Tauri `dragDropEnabled: false` 并全局兜底拦截外部文件拖入，防止 WebView 误导航。
+
 ## [1.0.7] - 2026-08-28
 
 ### Fixed
@@ -21,39 +88,6 @@
 
 - 打开的仓库列表从顶部标签栏移至侧边栏，支持分支名显示、悬停关闭与空状态引导，内容区高度相应增加。
 
-## [1.0.8] - 2026-08-28
-
-### Added
-
-- 侧边栏"打开的仓库"列表支持鼠标拖动调整排序：拖动中显示半透明行与插入位置指示线，顺序随打开仓库配置一并持久化；同时为窗口内 HTML5 拖放启用 Tauri `dragDropEnabled: false` 并全局兜底拦截外部文件拖入，防止 WebView 误导航。
-
-## [1.0.10] - 2026-09-11
-
-### Fixed
-
-- 关于页版本号改为构建期注入（`check:version` 保证与 tauri.conf/Cargo 同源），修复始终显示 v1.0.4、不随发版更新的问题。
-- 依赖安全修复：升级 h2 至 0.4.19（RUSTSEC-2026-0258，经 reqwest 引入）；npm 侧非破坏性升级 browserslist、nanoid（高危）与 postcss、baseline-browser-mapping；vitest 链的 2 个 moderate 需大版本升级，暂保留。
-- 恢复 CI 的 rustfmt/clippy 检查通过：全量 `cargo fmt` 格式化，`PathBuf` 导入移入测试模块。
-
-## [1.0.9] - 2026-09-11
-
-### Fixed
-
-- 历史详情面板展示提交的完整信息：主题完整换行显示，多行提交的正文不再被省略（此前仅显示首行截断）；历史搜索同时匹配正文内容。
-- 修复标题栏品牌区无法从 "aigit" 标签上发起窗口拖动的问题，并补齐 start-dragging 窗口权限。
-- 修复提交/amend/提交并推送流程中切换仓库标签导致忙碌与错误状态错位：状态现钉定在发起操作的仓库上。
-
-## [Unreleased]
-
-### Added
-
-- Tauri 最小 CSP、受限外部 URL 与导出路径安全边界。
-- 项目贡献、安全和隐私文档。
-
-### Changed
-
-- 移除前端通用 shell 权限和未使用的文件系统读/遍历权限。
-
 ## [1.0.4] - 2026-08-01
 
 ### Added
@@ -70,7 +104,10 @@
 - AI 与 GitHub 凭据保存在 Windows Credential Manager；支持迁移旧明文 API Key。
 - 对命令参数、remote/ref、审查输出、索引大小与敏感文件执行校验和限制。
 
-[Unreleased]: https://github.com/2768651338/aigit/compare/v1.0.10...HEAD
+[1.0.11]: https://github.com/2768651338/aigit/releases/tag/v1.0.11
 [1.0.10]: https://github.com/2768651338/aigit/releases/tag/v1.0.10
 [1.0.9]: https://github.com/2768651338/aigit/releases/tag/v1.0.9
+[1.0.8]: https://github.com/2768651338/aigit/releases/tag/v1.0.8
+[1.0.7]: https://github.com/2768651338/aigit/releases/tag/v1.0.7
+[1.0.5]: https://github.com/2768651338/aigit/releases/tag/v1.0.5
 [1.0.4]: https://github.com/2768651338/aigit/releases/tag/v1.0.4

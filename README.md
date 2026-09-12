@@ -1,6 +1,6 @@
 # aigit
 
-AI 驱动的 Windows 桌面 Git 客户端。当前版本 **1.0.4**，基于 Tauri 2、React 18 与 Rust 2021。
+AI 驱动的 Windows 桌面 Git 客户端，基于 Tauri 2、React 18 与 Rust 2021。当前版本见 [CHANGELOG.md](CHANGELOG.md)。
 
 > Git 与索引存储默认在本机完成；调用 OpenAI、Claude、DeepSeek 或任何自定义/云端兼容服务时，所选 diff、提交历史、问题、报告或索引片段会发送到该服务。使用前请阅读 [PRIVACY.md](PRIVACY.md)。
 
@@ -27,7 +27,7 @@ AI 驱动的 Windows 桌面 Git 客户端。当前版本 **1.0.4**，基于 Taur
 | WebView2 | Windows 10/11 通常自带 | 桌面 WebView |
 | GitHub CLI `gh` | 可选 | 完整 PR workflow；执行 `gh auth login` 后使用 |
 
-没有 `gh` 时，可使用存储在 Credential Manager 中的 GitHub PAT 调用 API；未配置任何认证时仍可打开 compare/create 页面。PR checkout 必须使用已认证的 `gh`，行内评论必须使用 PAT。
+没有 `gh` 时，可使用存储在 Credential Manager 中的 GitHub PAT 调用 API；未配置任何认证时仍可打开 compare/create 页面。PR checkout 必须使用已认证的 `gh`，行内评论必须使用 PAT。aigit 只需要仓库读写与 PR 读写权限：公共仓库建议 `public_repo`，私有仓库使用 `repo`，无需 gist/admin 等更高权限。
 
 ## 安装、开发与验证
 
@@ -47,7 +47,7 @@ npm run tauri build         # Windows MSI/NSIS
 
 ## 配置
 
-Windows 配置位于 `%APPDATA%\aigit\config.toml`。以下示例与 1.0.4 的序列化结构一致；`recent_repos`、`open_repos` 是 TOML 字符串数组，不是 array-of-tables。API Key/PAT 不属于该文件。
+Windows 配置位于 `%APPDATA%\aigit\config.toml`。以下示例与当前版本的序列化结构一致；`recent_repos`、`open_repos` 是 TOML 字符串数组，不是 array-of-tables。API Key/PAT 不属于该文件。
 
 ```toml
 recent_repos = []
@@ -125,7 +125,7 @@ max_context_tokens = 8000
 3. 从可信发布页下载并覆盖安装；仓库、Git 配置和系统凭据不会随卸载包迁移。
 4. 启动后运行必要的索引重建；索引格式升级时旧缓存可能被忽略。
 
-1.0.4 已注册 updater 组件，但没有 endpoint、公钥，且不生成 updater artifacts，因此**不会自动联网检查或静默升级**。启用自动升级前必须配置 HTTPS endpoint、签名公钥和签名发布流程，并更新隐私/安全文档。
+aigit 已注册 updater 组件，但没有 endpoint、公钥，且不生成 updater artifacts，因此**不会自动联网检查或静默升级**。启用自动升级前必须配置 HTTPS endpoint、签名公钥和签名发布流程，并更新隐私/安全文档。
 
 ## 许可证
 
