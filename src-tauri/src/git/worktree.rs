@@ -150,9 +150,9 @@ mod tests {
         )
         .expect("branch");
 
+        // libgit2 的 worktrees() 只列举链接的 worktree，不包含主仓库目录。
         let before = list_worktrees(&repo).expect("list");
-        assert_eq!(before.len(), 1);
-        assert!(before[0].is_current);
+        assert!(before.is_empty());
 
         let wt_path = root.join("wt-feature");
         let created =
@@ -161,19 +161,16 @@ mod tests {
         assert!(created.contains("feature-wt"));
 
         let listed = list_worktrees(&repo).expect("list after add");
-        assert_eq!(listed.len(), 2);
-        let added = listed
-            .iter()
-            .find(|w| w.name == "feature-wt")
-            .expect("entry");
+        assert_eq!(listed.len(), 1);
+        let added = &listed[0];
+        assert_eq!(added.name, "feature-wt");
         assert!(added.path.contains("feature-wt"));
+        assert!(!added.is_current);
 
         remove_worktree(&repo, "feature-wt", true).expect("prune");
         assert!(!wt_path.exists());
         let after = list_worktrees(&repo).expect("list after prune");
-        // libgit2 对主 worktree 在剪除后的列举行为有差异，这里只断言
-        // 被剪除的 worktree 不再出现。
-        assert!(!after.iter().any(|w| w.name == "feature-wt"));
+        assert!(after.is_empty());
 
         fs::remove_dir_all(&root).ok();
     }
