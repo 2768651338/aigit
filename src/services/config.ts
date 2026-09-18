@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppConfig, CredentialProvider, DefaultPrompts } from "@/types";
+import type { AppConfig, CredentialProvider, DefaultPrompts, ModelProfile } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
 function ensureTauri(): void {
@@ -39,6 +39,32 @@ export const configService = {
   setOpenRepos: (openRepos: string[], activeRepo: string | null) => {
     ensureTauri();
     return invoke<AppConfig>("set_open_repos", { openRepos, activeRepo });
+  },
+
+  switchModelProfile: (profileId: string) => {
+    ensureTauri();
+    return invoke<AppConfig>("switch_model_profile", { profileId });
+  },
+
+  /** `apiKey` null/empty keeps the profile's existing key state. */
+  upsertModelProfile: (profile: ModelProfile, apiKey?: string | null) => {
+    ensureTauri();
+    return invoke<AppConfig>("upsert_model_profile", { profile, apiKey: apiKey ?? null });
+  },
+
+  deleteModelProfile: (profileId: string) => {
+    ensureTauri();
+    return invoke<AppConfig>("delete_model_profile", { profileId });
+  },
+
+  duplicateModelProfile: (profileId: string, newName: string) => {
+    ensureTauri();
+    return invoke<AppConfig>("duplicate_model_profile", { profileId, newName });
+  },
+
+  deleteProfileApiKey: (profileId: string) => {
+    ensureTauri();
+    return invoke<AppConfig>("delete_profile_api_key", { profileId });
   },
 
   getDefaultPrompts: () => {

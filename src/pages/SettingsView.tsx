@@ -3,13 +3,23 @@ import { useTranslation } from "react-i18next";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
-import type { AppConfig, AiProviderConfig, CredentialProvider, PromptsConfig } from "@/types";
+import type { AppConfig, AiProviderConfig, CredentialProvider, ModelProfile, PromptsConfig } from "@/types";
 import { configService } from "@/services/config";
-import { CheckIcon, AlertCircleIcon, SpinnerIcon } from "@/components/common/Icons";
+import { CheckIcon, AlertCircleIcon, SpinnerIcon, CopyIcon, TrashIcon, PlusIcon } from "@/components/common/Icons";
+import { InputDialog } from "@/components/common/InputDialog";
 import { PromptEditor } from "@/components/settings/PromptEditor";
 import { openExternalUrl } from "@/utils/externalUrl";
 import { SUPPORTED_LANGUAGES, type AppLanguage } from "@/i18n";
 import { applyTheme, type ThemeMode } from "@/utils/theme";
+import { formatError } from "@/utils/error";
+import { confirmDialog } from "@/utils/dialog";
+import {
+  activeProfileOf,
+  isModelSectionDirty,
+  profileFromAi,
+  providerLabel,
+} from "@/utils/modelProfile";
+import { useModelProfileSwitch } from "@/hooks/useModelProfileSwitch";
 import clsx from "clsx";
 import { Field } from "@/components/settings/Field";
 import { IndexSettingsSection } from "@/components/settings/IndexSettingsSection";
@@ -34,9 +44,14 @@ const THEMES: { id: ThemeMode; labelKey: string }[] = [
 
 export function SettingsView() {
   const { t, i18n } = useTranslation();
-  const { config, loadConfig, saveConfig, setApiKey, deleteApiKey, error } = useSettingsStore();
+  const {
+    config, loadConfig, saveConfig, setApiKey, deleteApiKey, error,
+    setModelDirty, upsertModelProfile, deleteModelProfile, duplicateModelProfile,
+    deleteProfileApiKey,
+  } = useSettingsStore();
   const currentPath = useRepoStore((s) => s.currentPath);
   const toast = useToastStore();
+  const switchProfile = useModelProfileSwitch();
   const [local, setLocal] = useState<AppConfig | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<CredentialProvider, string>>({
     openai: "",
@@ -47,6 +62,9 @@ export function SettingsView() {
   });
   const [saving, setSaving] = useState(false);
   const [embeddingKey, setEmbeddingKey] = useState("");
+  const [profileName, setProfileName] = useState("");
+  const [saveAsOpen, setSaveAsOpen] = useState(false);
+  const [duplicateSource, setDuplicateSource] = useState<ModelProfile | null>(null);
 
   useEffect(() => {
     if (!config) {
@@ -55,6 +73,26 @@ export function SettingsView() {
       setLocal(config);
     }
   }, [config, loadConfig]);
+
+  // The settings form edits the active profile; keep the name input in sync
+  // with whatever config the backend last returned.
+  useEffect(() => {
+    setProfileName(activeProfileOf(config)?.name ?? "");
+  }, [config]);
+
+  // Sidebar switch offers a confirm only when this form has unsaved edits,
+  // so publish the dirty state (AI fields + profile name) and clear it when
+  // leaving the view.
+  useEffect(() => {
+    const nameDirty = profileName !== (activeProfileOf(config)?.name ?? "");
+    setModelDirty(
+      Boolean(config && local && (nameDirty || isModelSectionDirty(config, local)))
+    );
+  }, [config, local, profileName, setModelDirty]);
+  useEffect(() => () => setModelDirty(false), [setModelDirty]);
+
+  const activeProfile = activeProfileOf(local);
+  const activeHasOwnKey = activeProfile?.has_own_key ?? false;
 
   const update = (partial: Partial<AiProviderConfig>) => {
     if (!local) return;
@@ -95,30 +133,95 @@ export function SettingsView() {
         }
       }
 
-      for (const provider of ["openai", "claude", "deepseek", "custom"] as const) {
-        const apiKey = apiKeys[provider].trim();
-        if (apiKey) await setApiKey(provider, apiKey);
-      }
+      // The form edits the active profile, so persist it alongside `ai` —
+      // otherwise a later one-click switch would resurrect stale values.
+      const provider = local.ai.active_provider as CredentialProvider;
+      const name = profileName.trim().slice(0, 64) || providerLabel(local.ai.active_provider);
+      const profile = profileFromAi(local.ai, activeProfile?.id ?? "", name, activeHasOwnKey);
+      const typedKey = apiKeys[provider]?.trim() ?? "";
+      await upsertModelProfile(profile, typedKey || null);
+      if (typedKey) updateApiKey(provider, "");
+
       if (embeddingKey.trim()) await setApiKey("embedding_openai", embeddingKey.trim());
       setEmbeddingKey("");
       setApiKeys({ openai: "", claude: "", deepseek: "", custom: "", embedding_openai: "" });
       toast.success(t("settings.saved"));
     } catch (e) {
-      toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
+      toast.error(useSettingsStore.getState().error ?? formatError(e), t("settings.saveFailed"));
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteApiKey = async (provider: CredentialProvider) => {
-    if (saving) return;
+  // The API key belongs to the active model profile; profiles without their
+  // own key still read the provider slot, so delete whichever is in play.
+  const handleDeleteActiveKey = async () => {
+    if (!local || saving) return;
+    const provider = local.ai.active_provider as CredentialProvider;
     setSaving(true);
     try {
-      await deleteApiKey(provider);
+      if (activeHasOwnKey && activeProfile) {
+        await deleteProfileApiKey(activeProfile.id);
+      } else {
+        await deleteApiKey(provider);
+      }
       updateApiKey(provider, "");
       toast.success(t("settings.apiKeyDeleted"));
     } catch (e) {
-      toast.error(useSettingsStore.getState().error ?? String(e), t("settings.saveFailed"));
+      toast.error(useSettingsStore.getState().error ?? formatError(e), t("settings.saveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSwitchProfile = (profileId: string) => {
+    if (saving) return;
+    void switchProfile(profileId);
+  };
+
+  const handleSaveAsNew = async (name: string) => {
+    if (!local || saving) return;
+    setSaving(true);
+    try {
+      const provider = local.ai.active_provider as CredentialProvider;
+      const typedKey = apiKeys[provider]?.trim() ?? "";
+      const profile = profileFromAi(local.ai, "", name, false);
+      await upsertModelProfile(profile, typedKey || null);
+      if (typedKey) updateApiKey(provider, "");
+      toast.success(t("settings.profileCreated", { name }));
+    } catch (e) {
+      toast.error(useSettingsStore.getState().error ?? formatError(e), t("settings.profileSaveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDuplicateProfile = async (source: ModelProfile, name: string) => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      await duplicateModelProfile(source.id, name);
+      toast.success(t("settings.profileCreated", { name }));
+    } catch (e) {
+      toast.error(useSettingsStore.getState().error ?? formatError(e), t("settings.profileSaveFailed"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteProfile = async (profile: ModelProfile) => {
+    if (!local || saving) return;
+    const confirmed = await confirmDialog(
+      t("settings.profileDeleteTitle"),
+      t("settings.profileDeleteConfirm", { name: profile.name })
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      await deleteModelProfile(profile.id);
+      toast.success(t("settings.profileDeleted", { name: profile.name }));
+    } catch (e) {
+      toast.error(useSettingsStore.getState().error ?? formatError(e), t("settings.profileDeleteFailed"));
     } finally {
       setSaving(false);
     }
@@ -172,6 +275,102 @@ export function SettingsView() {
           </div>
         )}
 
+        {/* Model profiles: saved connection snapshots with one-click switch */}
+        <section>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-base font-semibold text-text-primary">
+              {t("settings.profilesTitle")}
+            </h3>
+            <button
+              type="button"
+              onClick={() => setSaveAsOpen(true)}
+              disabled={saving}
+              className="btn-secondary"
+            >
+              <PlusIcon size={14} /> {t("settings.profileSaveAsNew")}
+            </button>
+          </div>
+          <p className="text-xs text-text-muted mb-4">{t("settings.profilesHint")}</p>
+          <div className="space-y-2">
+            {local.profiles.map((profile) => {
+              const isActive = profile.id === local.ai.active_profile_id;
+              const deleteBlockedReason = isActive
+                ? t("settings.profileDeleteActiveHint")
+                : local.profiles.length <= 1
+                  ? t("settings.profileDeleteLastHint")
+                  : undefined;
+              return (
+                <div
+                  key={profile.id}
+                  className={clsx(
+                    "flex items-center gap-2 px-4 py-3 rounded border text-sm transition-colors",
+                    isActive
+                      ? "border-border-strong bg-bg-hover"
+                      : "border-border bg-bg-elevated"
+                  )}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-text-primary">{profile.name}</span>
+                      {isActive && (
+                        <span className="flex items-center gap-1 text-2xs px-1.5 py-0.5 rounded bg-bg-hover text-text-secondary border border-border">
+                          <CheckIcon size={10} /> {t("settings.profileCurrent")}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-text-muted truncate">
+                      {providerLabel(profile.provider)} · {profile.model || "—"}
+                    </div>
+                  </div>
+                  {!isActive && (
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchProfile(profile.id)}
+                      disabled={saving}
+                      className="btn-secondary shrink-0"
+                    >
+                      {t("settings.profileSwitch")}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setDuplicateSource(profile)}
+                    disabled={saving}
+                    className="btn-ghost shrink-0"
+                    title={t("settings.profileDuplicateTitle")}
+                    aria-label={t("settings.profileDuplicateTitle")}
+                  >
+                    <CopyIcon size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteProfile(profile)}
+                    disabled={saving || Boolean(deleteBlockedReason)}
+                    className="btn-ghost text-danger shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title={deleteBlockedReason ?? t("settings.profileDeleteTitle")}
+                    aria-label={t("settings.profileDeleteTitle")}
+                  >
+                    <TrashIcon size={14} />
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-4">
+            <Field label={t("settings.profileName")}>
+              <input
+                type="text"
+                value={profileName}
+                maxLength={64}
+                onChange={(e) => setProfileName(e.target.value)}
+                className="input"
+                placeholder={providerLabel(local.ai.active_provider)}
+              />
+              <p className="mt-1.5 text-xs text-text-muted">{t("settings.profileNameHint")}</p>
+            </Field>
+          </div>
+        </section>
+
         {/* AI Provider Selection */}
         <section>
           <h3 className="text-base font-semibold text-text-primary mb-4">
@@ -198,16 +397,16 @@ export function SettingsView() {
           </div>
         </section>
 
-        {/* Provider-specific settings */}
+        {/* Provider-specific settings (fields of the active profile) */}
         {local.ai.active_provider === "openai" && (
           <ProviderFields
             title={t("settings.openaiConfig")}
             apiKey={apiKeys.openai}
-            hasApiKey={local.ai.credential_status.openai}
+            hasApiKey={activeHasOwnKey || local.ai.credential_status.openai}
             model={local.ai.openai_model}
             baseUrl={local.ai.openai_base_url}
             onApiKey={(v) => updateApiKey("openai", v)}
-            onDeleteApiKey={() => handleDeleteApiKey("openai")}
+            onDeleteApiKey={() => void handleDeleteActiveKey()}
             onModel={(v) => update({ openai_model: v })}
             onBaseUrl={(v) => update({ openai_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -218,11 +417,11 @@ export function SettingsView() {
           <ProviderFields
             title={t("settings.claudeConfig")}
             apiKey={apiKeys.claude}
-            hasApiKey={local.ai.credential_status.claude}
+            hasApiKey={activeHasOwnKey || local.ai.credential_status.claude}
             model={local.ai.claude_model}
             baseUrl={local.ai.claude_base_url}
             onApiKey={(v) => updateApiKey("claude", v)}
-            onDeleteApiKey={() => handleDeleteApiKey("claude")}
+            onDeleteApiKey={() => void handleDeleteActiveKey()}
             onModel={(v) => update({ claude_model: v })}
             onBaseUrl={(v) => update({ claude_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -233,11 +432,11 @@ export function SettingsView() {
           <ProviderFields
             title={t("settings.deepseekConfig")}
             apiKey={apiKeys.deepseek}
-            hasApiKey={local.ai.credential_status.deepseek}
+            hasApiKey={activeHasOwnKey || local.ai.credential_status.deepseek}
             model={local.ai.deepseek_model}
             baseUrl={local.ai.deepseek_base_url}
             onApiKey={(v) => updateApiKey("deepseek", v)}
-            onDeleteApiKey={() => handleDeleteApiKey("deepseek")}
+            onDeleteApiKey={() => void handleDeleteActiveKey()}
             onModel={(v) => update({ deepseek_model: v })}
             onBaseUrl={(v) => update({ deepseek_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -248,11 +447,11 @@ export function SettingsView() {
           <ProviderFields
             title={t("settings.customConfig")}
             apiKey={apiKeys.custom}
-            hasApiKey={local.ai.credential_status.custom ?? false}
+            hasApiKey={activeHasOwnKey || (local.ai.credential_status.custom ?? false)}
             model={local.ai.custom_model ?? ""}
             baseUrl={local.ai.custom_base_url ?? ""}
             onApiKey={(v) => updateApiKey("custom", v)}
-            onDeleteApiKey={() => handleDeleteApiKey("custom")}
+            onDeleteApiKey={() => void handleDeleteActiveKey()}
             onModel={(v) => update({ custom_model: v })}
             onBaseUrl={(v) => update({ custom_base_url: v })}
             labels={{ apiKey: t("settings.apiKey"), model: t("settings.model"), baseUrl: t("settings.baseUrl") }}
@@ -504,6 +703,32 @@ export function SettingsView() {
         <AboutSection />
 
       </div>
+
+      <InputDialog
+        open={saveAsOpen}
+        title={t("settings.profileSaveAsTitle")}
+        placeholder={t("settings.profileNamePlaceholder")}
+        onConfirm={(name) => {
+          setSaveAsOpen(false);
+          void handleSaveAsNew(name);
+        }}
+        onCancel={() => setSaveAsOpen(false)}
+      />
+      <InputDialog
+        open={duplicateSource !== null}
+        title={t("settings.profileDuplicateTitle")}
+        initialValue={
+          duplicateSource
+            ? `${duplicateSource.name} - ${t("settings.profileCopySuffix")}`
+            : ""
+        }
+        onConfirm={(name) => {
+          const source = duplicateSource;
+          setDuplicateSource(null);
+          if (source) void handleDuplicateProfile(source, name);
+        }}
+        onCancel={() => setDuplicateSource(null)}
+      />
     </div>
   );
 }

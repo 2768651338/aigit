@@ -8,10 +8,103 @@ use std::path::{Path, PathBuf};
 use super::CredentialStore;
 use crate::error::{AppError, AppResult};
 
+/// Chat providers a model profile may target. `embedding_openai` and
+/// `github_pat` credentials are unrelated to chat profiles.
+pub const CHAT_PROVIDERS: [&str; 5] = ["openai", "claude", "deepseek", "custom", "ollama"];
+
+/// Hard cap on saved profiles. Creating more is rejected with a clear error
+/// instead of silently dropping user-created data.
+pub const MAX_PROFILES: usize = 20;
+
+/// Language-neutral display labels for chat providers; also used as the
+/// auto-generated name of the first migrated profile.
+fn provider_label(provider: &str) -> &'static str {
+    match provider {
+        "claude" => "Claude",
+        "deepseek" => "DeepSeek",
+        "ollama" => "Ollama",
+        "custom" => "Custom",
+        _ => "OpenAI",
+    }
+}
+
+/// A saved snapshot of the AI connection ("model profile"): provider, model,
+/// endpoint and generation parameters, plus a flag for whether the profile has
+/// its own API key in the system credential store (entry `profile.<id>`).
+/// Profiles never hold key material — config.toml stays secret-free.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ModelProfile {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub model: String,
+    pub base_url: String,
+    pub temperature: f64,
+    pub max_tokens: u32,
+    pub max_context_tokens: u32,
+    pub has_own_key: bool,
+}
+
+impl Default for ModelProfile {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            name: String::new(),
+            provider: "openai".to_string(),
+            model: String::new(),
+            base_url: String::new(),
+            temperature: 0.7,
+            max_tokens: 2048,
+            max_context_tokens: 131_072,
+            has_own_key: false,
+        }
+    }
+}
+
+impl ModelProfile {
+    /// Credential-store entry name holding this profile's API key.
+    pub fn key_entry(id: &str) -> String {
+        format!("profile.{id}")
+    }
+
+    pub fn validate(&self) -> AppResult<()> {
+        let name = self.name.trim();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(AppError::Config(
+                "Profile name must be 1-64 characters".into(),
+            ));
+        }
+        if !CHAT_PROVIDERS.contains(&self.provider.as_str()) {
+            return Err(AppError::Config(format!(
+                "Unsupported model profile provider: {}",
+                self.provider
+            )));
+        }
+        if uuid::Uuid::parse_str(&self.id).is_err() {
+            return Err(AppError::Config("Model profile id must be a UUID".into()));
+        }
+        validate_endpoint(&self.base_url, &format!("Profile '{name}' endpoint"))?;
+        if !(0.0..=2.0).contains(&self.temperature) {
+            return Err(AppError::Config(format!(
+                "Profile '{name}' temperature must be between 0 and 2"
+            )));
+        }
+        if !(4_096..=2_097_152).contains(&self.max_context_tokens) {
+            return Err(AppError::Config(format!(
+                "Profile '{name}' max_context_tokens must be between 4096 and 2097152"
+            )));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
     pub ai: AiProviderConfig,
+    #[serde(default)]
+    pub profiles: Vec<ModelProfile>,
     #[serde(default)]
     pub ui: UiConfig,
     #[serde(default)]
@@ -115,6 +208,9 @@ pub struct AiProviderConfig {
     /// automatically truncated to this minus `max_tokens` before sending, so
     /// oversized diffs/attachments no longer fail upstream with HTTP 400.
     pub max_context_tokens: u32,
+    /// Id of the model profile currently applied to these fields, if any.
+    #[serde(default)]
+    pub active_profile_id: Option<String>,
     #[serde(default)]
     pub credential_status: CredentialStatus,
 }
@@ -177,8 +273,55 @@ impl Default for AiProviderConfig {
             temperature: 0.7,
             max_tokens: 2048,
             max_context_tokens: 131_072,
+            active_profile_id: None,
             credential_status: CredentialStatus::default(),
         }
+    }
+}
+
+impl AiProviderConfig {
+    /// (model, base_url) slot pair for a chat provider.
+    pub fn provider_fields(&self, provider: &str) -> (String, String) {
+        match provider {
+            "openai" => (self.openai_model.clone(), self.openai_base_url.clone()),
+            "claude" => (self.claude_model.clone(), self.claude_base_url.clone()),
+            "deepseek" => (self.deepseek_model.clone(), self.deepseek_base_url.clone()),
+            "custom" => (self.custom_model.clone(), self.custom_base_url.clone()),
+            "ollama" => (self.ollama_model.clone(), self.ollama_base_url.clone()),
+            _ => (String::new(), String::new()),
+        }
+    }
+
+    /// Copy a profile into the effective fields. Only the profile's provider
+    /// slots are written; the other providers keep their dormant values.
+    pub fn apply_profile(&mut self, profile: &ModelProfile) {
+        match profile.provider.as_str() {
+            "openai" => {
+                self.openai_model = profile.model.clone();
+                self.openai_base_url = profile.base_url.clone();
+            }
+            "claude" => {
+                self.claude_model = profile.model.clone();
+                self.claude_base_url = profile.base_url.clone();
+            }
+            "deepseek" => {
+                self.deepseek_model = profile.model.clone();
+                self.deepseek_base_url = profile.base_url.clone();
+            }
+            "custom" => {
+                self.custom_model = profile.model.clone();
+                self.custom_base_url = profile.base_url.clone();
+            }
+            "ollama" => {
+                self.ollama_model = profile.model.clone();
+                self.ollama_base_url = profile.base_url.clone();
+            }
+            _ => {}
+        }
+        self.active_provider = profile.provider.clone();
+        self.temperature = profile.temperature;
+        self.max_tokens = profile.max_tokens;
+        self.max_context_tokens = profile.max_context_tokens;
     }
 }
 
@@ -217,6 +360,8 @@ impl AppConfig {
         if !path.exists() {
             let mut config = Self::default();
             config.refresh_credential_status(store)?;
+            config.import_initial_profile(store)?;
+            config.materialize_active_profile();
             config.save_to(path)?;
             return Ok(config);
         }
@@ -232,7 +377,9 @@ impl AppConfig {
 
         let migrated = migrate_legacy_secrets(&legacy.ai, store)?;
         config.refresh_credential_status(store)?;
-        if migrated {
+        let imported = config.import_initial_profile(store)?;
+        config.materialize_active_profile();
+        if migrated || imported {
             config.save_to(path)?;
         }
         Ok(config)
@@ -265,6 +412,9 @@ impl AppConfig {
             return Err(AppError::Config(
                 "max_context_tokens must be between 4096 and 2097152".into(),
             ));
+        }
+        for profile in &self.profiles {
+            profile.validate()?;
         }
         Ok(())
     }
@@ -310,6 +460,67 @@ impl AppConfig {
     pub fn set_open_repos(&mut self, open_repos: Vec<String>, active_repo: Option<String>) {
         self.open_repos = open_repos;
         self.active_repo = active_repo;
+    }
+
+    /// The profile currently applied to `ai`, if its id resolves.
+    pub fn active_profile(&self) -> Option<&ModelProfile> {
+        let id = self.ai.active_profile_id.as_deref()?;
+        self.profiles.iter().find(|profile| profile.id == id)
+    }
+
+    /// Copy the active profile's values into `ai` so every consumer (AI
+    /// requests, sidebar, command responses) sees the effective connection
+    /// without knowing about profiles. In-memory only; persistence flows
+    /// through the normal save paths.
+    pub fn materialize_active_profile(&mut self) {
+        if let Some(profile) = self.active_profile().cloned() {
+            self.ai.apply_profile(&profile);
+        }
+    }
+
+    /// One-time upgrade: turn the pre-profile single AI config into the first
+    /// profile, carrying over the provider-slot API key. Idempotent: on later
+    /// runs it only repairs a dangling `active_profile_id`.
+    fn import_initial_profile(&mut self, store: &dyn CredentialStore) -> AppResult<bool> {
+        if !self.profiles.is_empty() {
+            let dangling = self
+                .ai
+                .active_profile_id
+                .as_deref()
+                .map_or(true, |id| !self.profiles.iter().any(|p| p.id == id));
+            if dangling {
+                self.ai.active_profile_id = self.profiles.first().map(|p| p.id.clone());
+                return Ok(true);
+            }
+            return Ok(false);
+        }
+
+        let provider = if CHAT_PROVIDERS.contains(&self.ai.active_provider.as_str()) {
+            self.ai.active_provider.clone()
+        } else {
+            "openai".to_string()
+        };
+        let (model, base_url) = self.ai.provider_fields(&provider);
+        let mut profile = ModelProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: provider_label(&provider).to_string(),
+            provider,
+            model,
+            base_url,
+            temperature: self.ai.temperature,
+            max_tokens: self.ai.max_tokens,
+            max_context_tokens: self.ai.max_context_tokens,
+            has_own_key: false,
+        };
+        if profile.provider != "ollama" {
+            if let Some(key) = store.get(&profile.provider)? {
+                store.set(&ModelProfile::key_entry(&profile.id), &key)?;
+                profile.has_own_key = true;
+            }
+        }
+        self.ai.active_profile_id = Some(profile.id.clone());
+        self.profiles.push(profile);
+        Ok(true)
     }
 }
 
@@ -635,6 +846,213 @@ mod tests {
         assert!(!saved.contains("api_key"));
         assert!(!saved.contains("credential_status"));
         assert!(toml::from_str::<AppConfig>(&saved).is_ok());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn first_load_imports_current_ai_as_profile_and_copies_key() {
+        let path = test_path("profile-import");
+        fs::write(
+            &path,
+            legacy_ai_config(&[
+                ("active_provider", "deepseek"),
+                ("deepseek_model", "deepseek-chat"),
+                ("deepseek_base_url", "https://api.deepseek.test/v1"),
+            ]),
+        )
+        .expect("write legacy config");
+        // 运行时拼装，避免源码出现明文密钥字面量被凭据扫描器误判。
+        let slot_key = format!("ds-{}", "secret");
+        let store = MemoryCredentialStore::default();
+        store.set("deepseek", &slot_key).unwrap();
+
+        let config = AppConfig::load_from(&path, &store).expect("load and import");
+        assert_eq!(config.profiles.len(), 1);
+        let profile = &config.profiles[0];
+        assert_eq!(profile.name, "DeepSeek");
+        assert_eq!(profile.provider, "deepseek");
+        assert_eq!(profile.model, "deepseek-chat");
+        assert_eq!(profile.base_url, "https://api.deepseek.test/v1");
+        assert!(profile.has_own_key);
+        assert_eq!(
+            config.ai.active_profile_id.as_deref(),
+            Some(profile.id.as_str())
+        );
+        let stored = store
+            .get(&ModelProfile::key_entry(&profile.id))
+            .unwrap()
+            .expect("profile key copied");
+        assert_eq!(stored, slot_key);
+
+        // 幂等：第二次加载不再新增方案。
+        let reloaded = AppConfig::load_from(&path, &store).expect("reload");
+        assert_eq!(reloaded.profiles.len(), 1);
+        assert_eq!(reloaded.profiles[0].id, profile.id);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn first_load_imports_ollama_profile_without_key() {
+        let path = test_path("profile-import-ollama");
+        fs::write(
+            &path,
+            legacy_ai_config(&[
+                ("active_provider", "ollama"),
+                ("ollama_model", "qwen2.5-coder:7b"),
+                ("ollama_base_url", "http://localhost:11434"),
+            ]),
+        )
+        .expect("write legacy config");
+        let store = MemoryCredentialStore::default();
+
+        let config = AppConfig::load_from(&path, &store).expect("load and import");
+
+        assert_eq!(config.profiles.len(), 1);
+        assert!(!config.profiles[0].has_own_key);
+        assert!(store.get("ollama").unwrap().is_none());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn fresh_config_starts_with_a_default_profile() {
+        let path = test_path("fresh-profile");
+        let store = MemoryCredentialStore::default();
+
+        let config = AppConfig::load_from(&path, &store).expect("fresh config");
+
+        assert_eq!(config.profiles.len(), 1);
+        assert_eq!(config.profiles[0].name, "OpenAI");
+        assert_eq!(
+            config.ai.active_profile_id.as_deref(),
+            Some(config.profiles[0].id.as_str())
+        );
+        assert!(!config.profiles[0].has_own_key);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn repairs_dangling_active_profile_id() {
+        let path = test_path("profile-dangling");
+        fs::write(
+            &path,
+            format!(
+                "{}\nactive_profile_id = \"00000000-0000-0000-0000-000000000000\"\n",
+                legacy_ai_config(&[("active_provider", "openai")])
+            ),
+        )
+        .expect("write config");
+        let store = MemoryCredentialStore::default();
+
+        // 手改的 profiles 为空但 active_profile_id 悬空：首次导入会一并修复。
+        let config = AppConfig::load_from(&path, &store).expect("load");
+        assert_eq!(config.profiles.len(), 1);
+        assert_eq!(
+            config.ai.active_profile_id.as_deref(),
+            Some(config.profiles[0].id.as_str())
+        );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn materialize_applies_active_profile_to_effective_fields() {
+        let mut config = AppConfig::default();
+        config.profiles.push(ModelProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Relay".into(),
+            provider: "custom".into(),
+            model: "glm-4".into(),
+            base_url: "https://relay.example.test/v1".into(),
+            temperature: 0.2,
+            max_tokens: 4096,
+            max_context_tokens: 65_536,
+            has_own_key: true,
+        });
+        config.ai.active_profile_id = Some(config.profiles[0].id.clone());
+
+        config.materialize_active_profile();
+
+        assert_eq!(config.ai.active_provider, "custom");
+        assert_eq!(config.ai.custom_model, "glm-4");
+        assert_eq!(config.ai.custom_base_url, "https://relay.example.test/v1");
+        assert_eq!(config.ai.temperature, 0.2);
+        assert_eq!(config.ai.max_tokens, 4096);
+        assert_eq!(config.ai.max_context_tokens, 65_536);
+        // 非 active provider 的槽位保持原值。
+        assert_eq!(config.ai.openai_model, "gpt-4o-mini");
+        // 未指向有效方案时不动 ai。
+        let mut plain = AppConfig::default();
+        plain.ai.active_profile_id = Some(uuid::Uuid::new_v4().to_string());
+        plain.materialize_active_profile();
+        assert_eq!(plain.ai.temperature, 0.7);
+    }
+
+    #[test]
+    fn profile_validation_rejects_bad_name_provider_endpoint_and_range() {
+        let valid = ModelProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "ok".into(),
+            provider: "openai".into(),
+            model: "gpt-test".into(),
+            base_url: "https://api.example.test/v1".into(),
+            temperature: 0.7,
+            max_tokens: 2048,
+            max_context_tokens: 65_536,
+            has_own_key: false,
+        };
+        valid.validate().expect("valid profile");
+
+        let mut bad = valid.clone();
+        bad.name = "  ".into();
+        assert!(bad.validate().is_err());
+
+        bad = valid.clone();
+        bad.provider = "embedding_openai".into();
+        assert!(bad.validate().is_err());
+
+        bad = valid.clone();
+        bad.id = "not-a-uuid".into();
+        assert!(bad.validate().is_err());
+
+        bad = valid.clone();
+        bad.base_url = "http://api.example.test/v1".into();
+        assert!(bad.validate().is_err());
+
+        bad = valid.clone();
+        bad.temperature = 3.0;
+        assert!(bad.validate().is_err());
+
+        bad = valid.clone();
+        bad.max_context_tokens = 1_000;
+        assert!(bad.validate().is_err());
+    }
+
+    #[test]
+    fn saved_profiles_round_trip_and_stay_key_free() {
+        let path = test_path("profiles-round-trip");
+        let mut config = AppConfig::default();
+        config.profiles.push(ModelProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: "Main".into(),
+            provider: "claude".into(),
+            model: "claude-test".into(),
+            base_url: "https://claude.test/v1".into(),
+            temperature: 0.5,
+            max_tokens: 1024,
+            max_context_tokens: 65_536,
+            has_own_key: true,
+        });
+        config.ai.active_profile_id = Some(config.profiles[0].id.clone());
+        config.save_to(&path).expect("save config");
+        let saved = fs::read_to_string(&path).expect("read config");
+
+        assert!(!saved.contains("api_key"));
+        // has_own_key 只是标志位，允许持久化；密钥本体绝不能出现。
+        assert!(saved.contains("has_own_key = true"));
+        assert!(toml::from_str::<AppConfig>(&saved).is_ok());
+        let reloaded = AppConfig::load_from(&path, &MemoryCredentialStore::default())
+            .expect("reload with profiles");
+        assert_eq!(reloaded.profiles.len(), 1);
+        assert_eq!(reloaded.profiles[0].name, "Main");
         let _ = fs::remove_file(path);
     }
 }

@@ -190,6 +190,11 @@ pub fn run() {
             config_cmd::delete_api_key,
             config_cmd::add_recent_repo,
             config_cmd::set_open_repos,
+            config_cmd::switch_model_profile,
+            config_cmd::upsert_model_profile,
+            config_cmd::delete_model_profile,
+            config_cmd::duplicate_model_profile,
+            config_cmd::delete_profile_api_key,
             updater_cmd::updater_availability,
         ])
         .run(tauri::generate_context!())

@@ -2,7 +2,7 @@ import { create } from "zustand";
 import i18n from "@/i18n";
 import type {
   AppConfig, ChatAttachment, ChatAttachmentMetadata, ChatMessage, ChatSession,
-  CredentialProvider, FindingStatus, PersistedChatSession, ReviewReport,
+  CredentialProvider, FindingStatus, ModelProfile, PersistedChatSession, ReviewReport,
 } from "@/types";
 import { aiService, type AiRequestKind, type AiStreamEvent } from "@/services/ai";
 import { chatHistoryService } from "@/services/chatHistory";
@@ -15,15 +15,23 @@ interface SettingsState {
   config: AppConfig | null;
   loading: boolean;
   error: string | null;
+  /** UI-only: the settings form's AI section has edits not yet saved. */
+  modelDirty: boolean;
   loadConfig: () => Promise<void>;
   saveConfig: (config: AppConfig) => Promise<boolean>;
   setApiKey: (provider: CredentialProvider, apiKey: string) => Promise<void>;
   deleteApiKey: (provider: CredentialProvider) => Promise<void>;
   setConfig: (config: AppConfig) => void;
+  setModelDirty: (dirty: boolean) => void;
+  switchModelProfile: (profileId: string) => Promise<void>;
+  upsertModelProfile: (profile: ModelProfile, apiKey?: string | null) => Promise<void>;
+  deleteModelProfile: (profileId: string) => Promise<void>;
+  duplicateModelProfile: (profileId: string, newName: string) => Promise<void>;
+  deleteProfileApiKey: (profileId: string) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
-  config: null, loading: false, error: null,
+  config: null, loading: false, error: null, modelDirty: false,
   loadConfig: async () => {
     set({ loading: true });
     try { set({ config: await configService.getConfig(), loading: false, error: null }); }
@@ -42,6 +50,27 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     catch (e) { set({ error: formatError(e) }); throw e; }
   },
   setConfig: (config) => set({ config }),
+  setModelDirty: (dirty) => set({ modelDirty: dirty }),
+  switchModelProfile: async (profileId) => {
+    try { set({ config: await configService.switchModelProfile(profileId), error: null, modelDirty: false }); }
+    catch (e) { set({ error: formatError(e) }); throw e; }
+  },
+  upsertModelProfile: async (profile, apiKey) => {
+    try { set({ config: await configService.upsertModelProfile(profile, apiKey), error: null, modelDirty: false }); }
+    catch (e) { set({ error: formatError(e) }); throw e; }
+  },
+  deleteModelProfile: async (profileId) => {
+    try { set({ config: await configService.deleteModelProfile(profileId), error: null }); }
+    catch (e) { set({ error: formatError(e) }); throw e; }
+  },
+  duplicateModelProfile: async (profileId, newName) => {
+    try { set({ config: await configService.duplicateModelProfile(profileId, newName), error: null }); }
+    catch (e) { set({ error: formatError(e) }); throw e; }
+  },
+  deleteProfileApiKey: async (profileId) => {
+    try { set({ config: await configService.deleteProfileApiKey(profileId), error: null }); }
+    catch (e) { set({ error: formatError(e) }); throw e; }
+  },
 }));
 
 export const DEFAULT_CONTEXT_LIMIT = 32_000;

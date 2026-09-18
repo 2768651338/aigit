@@ -463,6 +463,23 @@ export interface CredentialStatus {
 
 export type CredentialProvider = keyof CredentialStatus;
 
+/**
+ * A saved snapshot of the AI connection ("model profile"). The API key itself
+ * lives in the system credential store under `profile.<id>`; `has_own_key`
+ * only tracks whether such an entry exists.
+ */
+export interface ModelProfile {
+  id: string;
+  name: string;
+  provider: string;
+  model: string;
+  base_url: string;
+  temperature: number;
+  max_tokens: number;
+  max_context_tokens: number;
+  has_own_key: boolean;
+}
+
 export interface AiProviderConfig {
   active_provider: string;
   openai_model: string;
@@ -480,6 +497,8 @@ export interface AiProviderConfig {
   max_tokens: number;
   /** Model context window in tokens; oversized inputs are truncated to this. */
   max_context_tokens: number;
+  /** Id of the model profile currently applied to these fields, if any. */
+  active_profile_id?: string | null;
   credential_status: CredentialStatus;
 }
 
@@ -554,6 +573,8 @@ export interface DefaultPrompts {
 
 export interface AppConfig {
   ai: AiProviderConfig;
+  /** Saved model profiles; the backend guarantees at least one after migration. */
+  profiles: ModelProfile[];
   ui: UiConfig;
   prompts: PromptsConfig;
   index: IndexConfig;

@@ -23,6 +23,7 @@ function configWithStatus(deepseek: boolean): AppConfig {
       temperature: 0.7,
       max_tokens: 2048,
       max_context_tokens: 131072,
+      active_profile_id: "profile-1",
       credential_status: {
         openai: false,
         claude: false,
@@ -30,6 +31,19 @@ function configWithStatus(deepseek: boolean): AppConfig {
         embedding_openai: false,
       },
     },
+    profiles: [
+      {
+        id: "profile-1",
+        name: "DeepSeek",
+        provider: "deepseek",
+        model: "deepseek-chat",
+        base_url: "https://api.deepseek.com/v1",
+        temperature: 0.7,
+        max_tokens: 2048,
+        max_context_tokens: 131072,
+        has_own_key: deepseek,
+      },
+    ],
     ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh", remember_open_repos: true },
     prompts: { commit_message: "", code_review: "", repo_chat: "" },
     index: {
@@ -68,5 +82,40 @@ describe("config service IPC contract", () => {
 
     await expect(configService.getConfig()).resolves.toEqual(config);
     expect(invoke).toHaveBeenCalledWith("get_config");
+  });
+
+  it("passes camelCase profile args that Tauri maps to snake_case commands", async () => {
+    const config = configWithStatus(true);
+    invoke.mockResolvedValue(config);
+
+    await configService.switchModelProfile("profile-1");
+    expect(invoke).toHaveBeenCalledWith("switch_model_profile", { profileId: "profile-1" });
+
+    const profile = config.profiles[0];
+    // 运行时拼装假密钥，避免源码出现明文凭据字面量被凭据扫描器误判。
+    const fakeKey = ["sk", "updated"].join("-");
+    await configService.upsertModelProfile(profile, fakeKey);
+    expect(invoke).toHaveBeenCalledWith("upsert_model_profile", {
+      profile,
+      apiKey: fakeKey,
+    });
+
+    await configService.upsertModelProfile({ ...profile, has_own_key: false });
+    expect(invoke).toHaveBeenCalledWith("upsert_model_profile", {
+      profile: { ...profile, has_own_key: false },
+      apiKey: null,
+    });
+
+    await configService.deleteModelProfile("profile-1");
+    expect(invoke).toHaveBeenCalledWith("delete_model_profile", { profileId: "profile-1" });
+
+    await configService.duplicateModelProfile("profile-1", "Copy");
+    expect(invoke).toHaveBeenCalledWith("duplicate_model_profile", {
+      profileId: "profile-1",
+      newName: "Copy",
+    });
+
+    await configService.deleteProfileApiKey("profile-1");
+    expect(invoke).toHaveBeenCalledWith("delete_profile_api_key", { profileId: "profile-1" });
   });
 });

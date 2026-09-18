@@ -1,6 +1,6 @@
 use crate::ai::stream::{AiStreamEvent, CancellationRegistry, RegistrationGuard};
 use crate::ai::{self, ChatMessage, ProviderEvent};
-use crate::config::{AppConfig, CredentialStore, SystemCredentialStore};
+use crate::config::{AppConfig, CredentialStore, ModelProfile, SystemCredentialStore};
 use crate::error::{AppError, AppResult};
 use crate::git;
 use crate::review::{self, FindingStatus, ReviewReport};
@@ -1143,9 +1143,15 @@ async fn build_repo_context(
 fn load_ai_context() -> AppResult<(AppConfig, Option<String>)> {
     let store = SystemCredentialStore;
     let config = AppConfig::load(&store)?;
-    let api_key = match config.ai.active_provider.as_str() {
-        "ollama" => None,
-        provider => store.get(provider)?,
+    // The active profile's own key wins; profiles without one (e.g. migrated
+    // on a machine without a usable keyring) fall back to the provider slot.
+    let api_key = match config.active_profile() {
+        Some(profile) if profile.provider == "ollama" => None,
+        Some(profile) if profile.has_own_key => store.get(&ModelProfile::key_entry(&profile.id))?,
+        _ => match config.ai.active_provider.as_str() {
+            "ollama" => None,
+            provider => store.get(provider)?,
+        },
     };
     Ok((config, api_key))
 }

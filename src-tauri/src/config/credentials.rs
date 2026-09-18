@@ -49,13 +49,22 @@ impl CredentialStore for SystemCredentialStore {
 }
 
 fn validate_provider(provider: &str) -> AppResult<()> {
-    if PROVIDERS.contains(&provider) {
+    if PROVIDERS.contains(&provider) || is_profile_entry(provider) {
         Ok(())
     } else {
         Err(AppError::Credential(format!(
             "Unsupported credential provider: {provider}"
         )))
     }
+}
+
+/// Profile-scoped keyring entries are named `profile.<uuid>`. The strict UUID
+/// shape keeps arbitrary names from being written into the OS keyring.
+fn is_profile_entry(provider: &str) -> bool {
+    provider
+        .strip_prefix("profile.")
+        .and_then(|id| uuid::Uuid::parse_str(id).ok())
+        .is_some()
 }
 
 #[cfg(windows)]
@@ -126,6 +135,19 @@ pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    #[test]
+    fn profile_key_entries_require_uuid_shape() {
+        let uuid = uuid::Uuid::new_v4().to_string();
+        assert!(validate_provider(&format!("profile.{uuid}")).is_ok());
+        assert!(validate_provider("profile.not-a-uuid").is_err());
+        assert!(validate_provider("profile.").is_err());
+        assert!(validate_provider("profile/00000000-0000-0000-0000-000000000000").is_err());
+        // 既有白名单不受影响。
+        assert!(validate_provider("openai").is_ok());
+        assert!(validate_provider("github_pat").is_ok());
+        assert!(validate_provider("arbitrary").is_err());
+    }
 
     pub struct MemoryCredentialStore {
         values: Mutex<HashMap<String, String>>,

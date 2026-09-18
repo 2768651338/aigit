@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppConfig } from "@/types";
 
-const { getConfig, saveConfig, setApiKey, deleteApiKey } = vi.hoisted(() => ({
+const { getConfig, saveConfig, setApiKey, deleteApiKey, switchModelProfile } = vi.hoisted(() => ({
   getConfig: vi.fn(),
   saveConfig: vi.fn(),
   setApiKey: vi.fn(),
   deleteApiKey: vi.fn(),
+  switchModelProfile: vi.fn(),
 }));
 
 vi.mock("@/services/config", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/services/config", () => ({
     saveConfig,
     setApiKey,
     deleteApiKey,
+    switchModelProfile,
   },
 }));
 
@@ -41,8 +43,22 @@ const config: AppConfig = {
     temperature: 0.7,
     max_tokens: 2048,
     max_context_tokens: 131072,
+    active_profile_id: "profile-1",
     credential_status: { openai: false, claude: false, deepseek: false, embedding_openai: false },
   },
+  profiles: [
+    {
+      id: "profile-1",
+      name: "OpenAI",
+      provider: "openai",
+      model: "gpt-4o-mini",
+      base_url: "https://api.openai.com/v1",
+      temperature: 0.7,
+      max_tokens: 2048,
+      max_context_tokens: 131072,
+      has_own_key: false,
+    },
+  ],
   ui: { theme: "system", font_size: 14, show_diff_inline: true, language: "zh", remember_open_repos: true },
   prompts: { commit_message: "", code_review: "", repo_chat: "" },
   index: {
@@ -59,7 +75,7 @@ const config: AppConfig = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  useSettingsStore.setState({ config: null, loading: false, error: "old error" });
+  useSettingsStore.setState({ config: null, loading: false, error: "old error", modelDirty: false });
 });
 
 describe("settings store secure configuration", () => {
@@ -83,6 +99,30 @@ describe("settings store secure configuration", () => {
     expect(setApiKey).toHaveBeenCalledWith("openai", "temporary-secret");
     expect(useSettingsStore.getState()).toMatchObject({ config: saved, error: null });
     expect(JSON.stringify(useSettingsStore.getState().config)).not.toContain("temporary-secret");
+  });
+
+  it("switching the model profile stores the returned config and clears model dirty", async () => {
+    useSettingsStore.setState({ config, modelDirty: true, error: "old error" });
+    const switched = {
+      ...config,
+      ai: { ...config.ai, active_provider: "deepseek", active_profile_id: "profile-2" },
+    };
+    switchModelProfile.mockResolvedValue(switched);
+
+    await useSettingsStore.getState().switchModelProfile("profile-2");
+
+    expect(switchModelProfile).toHaveBeenCalledWith("profile-2");
+    expect(useSettingsStore.getState()).toMatchObject({ config: switched, error: null, modelDirty: false });
+  });
+
+  it("rethrows switch failures while keeping the error message", async () => {
+    useSettingsStore.setState({ config, error: null });
+    switchModelProfile.mockRejectedValue(new Error("profile missing"));
+
+    await expect(useSettingsStore.getState().switchModelProfile("profile-x")).rejects.toThrow(
+      "profile missing"
+    );
+    expect(useSettingsStore.getState().error).toContain("profile missing");
   });
 });
 

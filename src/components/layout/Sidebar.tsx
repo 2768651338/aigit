@@ -3,6 +3,9 @@ import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useSettingsStore } from "@/stores/aiStore";
+import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
+import { useModelProfileSwitch } from "@/hooks/useModelProfileSwitch";
+import { activeProfileOf, providerLabel } from "@/utils/modelProfile";
 import { useRepoEntry } from "@/components/git/RepoEntryDialog";
 import { pathLeaf } from "@/utils/path";
 import type { ViewType } from "@/types";
@@ -67,6 +70,9 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   );
   const { config } = useSettingsStore();
   const { showRepoEntry } = useRepoEntry();
+  const { show: showContextMenu } = useContextMenu();
+  const switchProfile = useModelProfileSwitch();
+  const activeProfile = activeProfileOf(config);
   const changedCount = fileStatuses.length;
   const [recentCollapsed, setRecentCollapsed] = useState(false);
   // Drag-to-reorder state for the open-repo list. `draggingPath` is the row
@@ -82,6 +88,27 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
   const clearDragState = () => {
     setDraggingPath(null);
     setDropHint(null);
+  };
+
+  // Footer menu: one-click switch between saved model profiles.
+  const showProfileMenu = (e: React.MouseEvent) => {
+    const profiles = config?.profiles ?? [];
+    const items: MenuItem[] = profiles.map((profile) => ({
+      label: profile.name,
+      title: `${providerLabel(profile.provider)} · ${profile.model || profile.base_url}`,
+      icon:
+        profile.id === config?.ai.active_profile_id ? (
+          <CheckIcon size={14} />
+        ) : undefined,
+      onClick: () => void switchProfile(profile.id),
+    }));
+    items.push({ type: "separator" });
+    items.push({
+      label: t("sidebar.modelSettings"),
+      icon: <SettingsIcon size={14} />,
+      onClick: () => onViewChange("settings"),
+    });
+    showContextMenu(e, items);
   };
 
   // Show up to 5 recent repos. Already-open repos are still listed (with a
@@ -318,11 +345,26 @@ export function Sidebar({ activeView, onViewChange }: SidebarProps) {
 
       </div>
 
-      {/* Footer: AI provider status */}
-      <div className="px-4 py-3 border-t border-border">
-        <div className="text-xs text-text-muted truncate">
-          {config?.ai.active_provider ?? t("sidebar.notSet")}
-        </div>
+      {/* Footer: active model profile with a one-click switcher */}
+      <div className="px-2 py-2 border-t border-border">
+        <button
+          type="button"
+          onClick={showProfileMenu}
+          aria-haspopup="menu"
+          title={t("sidebar.modelProfiles")}
+          aria-label={t("sidebar.modelProfiles")}
+          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-text-muted hover:text-text-primary hover:bg-bg-hover transition-colors"
+        >
+          <span className="flex-1 text-left truncate">
+            {activeProfile?.name ?? config?.ai.active_provider ?? t("sidebar.notSet")}
+          </span>
+          {activeProfile && (
+            <span className="shrink-0 text-2xs">
+              {providerLabel(activeProfile.provider)}
+            </span>
+          )}
+          <ChevronDownIcon size={12} className="shrink-0" />
+        </button>
       </div>
     </aside>
   );
