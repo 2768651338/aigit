@@ -458,11 +458,8 @@ mod tests {
         assert_eq!(messages, vec!["c2"]);
 
         // Annotated end tag resolves; base=None walks the full history.
-        let full: Vec<&str> = get_log_range(&repo, None, Some("v2"), 100)
-            .expect("full")
-            .iter()
-            .map(|e| e.message.as_str())
-            .collect();
+        let full_entries = get_log_range(&repo, None, Some("v2"), 100).expect("full");
+        let full: Vec<&str> = full_entries.iter().map(|e| e.message.as_str()).collect();
         assert_eq!(full, vec!["c2", "initial"]);
 
         // The end tag resolves to the same commit the raw hash points at.

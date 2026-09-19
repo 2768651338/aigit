@@ -101,14 +101,6 @@ pub fn collect_health(
     let mut truncated = HealthTruncation::default();
     let mut scanned = 0usize;
 
-    let mut push_capped = |list: &mut Vec<BranchHealth>, entry: BranchHealth| {
-        if list.len() < MAX_LIST_ENTRIES {
-            list.push(entry);
-        } else {
-            truncated.branches = true;
-        }
-    };
-
     let local_branches = repo.branches(Some(BranchType::Local))?;
     for branch in local_branches {
         scanned += 1;
@@ -135,7 +127,7 @@ pub fn collect_health(
             occupied_by_worktree: occupied.contains(&name),
         };
         if entry.last_commit_date < stale_cutoff {
-            push_capped(&mut stale_branches, entry.clone());
+            push_capped_branch(&mut stale_branches, entry.clone(), &mut truncated);
         }
         if let Some(default_tip) = default_tip {
             let tip = commit.id();
@@ -144,7 +136,7 @@ pub fn collect_health(
             let is_merged =
                 tip == default_tip || repo.graph_descendant_of(default_tip, tip).unwrap_or(false);
             if is_merged {
-                push_capped(&mut merged_local_branches, entry);
+                push_capped_branch(&mut merged_local_branches, entry, &mut truncated);
             }
         }
     }
@@ -178,7 +170,7 @@ pub fn collect_health(
         };
         let tip = commit.id();
         if tip != default_tip && !repo.graph_descendant_of(default_tip, tip).unwrap_or(false) {
-            push_capped(
+            push_capped_branch(
                 &mut unmerged_remote_branches,
                 BranchHealth {
                     name,
@@ -186,6 +178,7 @@ pub fn collect_health(
                     last_commit_message: commit.summary().unwrap_or("").to_string(),
                     occupied_by_worktree: false,
                 },
+                &mut truncated,
             );
         }
     }
@@ -212,6 +205,20 @@ pub fn collect_health(
         stash: stash_health,
         truncated,
     })
+}
+
+/// Append to a health list unless it already hit the per-list cap, in which
+/// case the report is flagged truncated instead of growing unboundedly.
+fn push_capped_branch(
+    list: &mut Vec<BranchHealth>,
+    entry: BranchHealth,
+    truncated: &mut HealthTruncation,
+) {
+    if list.len() < MAX_LIST_ENTRIES {
+        list.push(entry);
+    } else {
+        truncated.branches = true;
+    }
 }
 
 /// Oversized tracked files from the index. Reads blob sizes straight from the
@@ -273,6 +280,19 @@ fn branch_tip(repo: &Repository, name: &str) -> Option<Oid> {
         .map(|c| c.id())
 }
 
+/// git2 0.19 does not wrap libgit2's `git_repository_commondir`. Linked
+/// worktrees record the path to the shared `.git` directory in a `commondir`
+/// file inside their per-worktree git dir; a plain repository has no such
+/// file and its git dir *is* the common dir.
+fn repository_common_dir(repo: &Repository) -> std::path::PathBuf {
+    let git_dir = repo.path();
+    if let Ok(content) = std::fs::read_to_string(git_dir.join("commondir")) {
+        let joined = git_dir.join(content.trim());
+        return joined.canonicalize().unwrap_or(joined);
+    }
+    git_dir.to_path_buf()
+}
+
 /// Branches checked out in any worktree, parsed from the on-disk HEAD files
 /// (libgit2's `Worktree` does not expose the checked-out reference). Covers
 /// the main worktree, linked worktrees, and a repository opened *from* a
@@ -286,11 +306,12 @@ fn worktree_checked_out_branches(repo: &Repository) -> HashSet<String> {
             }
         }
     };
+    let common_dir = repository_common_dir(repo);
     // Common dir HEAD is the main worktree; repo path HEAD wins when the
     // repository itself was opened from a linked worktree.
-    add_head(std::fs::read_to_string(repo.commondir().join("HEAD")).ok());
+    add_head(std::fs::read_to_string(common_dir.join("HEAD")).ok());
     add_head(std::fs::read_to_string(repo.path().join("HEAD")).ok());
-    let worktrees_dir = repo.commondir().join("worktrees");
+    let worktrees_dir = common_dir.join("worktrees");
     if let Ok(entries) = std::fs::read_dir(&worktrees_dir) {
         for entry in entries.flatten() {
             add_head(std::fs::read_to_string(entry.path().join("HEAD")).ok());
