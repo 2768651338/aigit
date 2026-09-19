@@ -383,6 +383,34 @@ export interface StashInfo {
   date: number;
 }
 
+/** One branch in the repo health report (mirrors `git::health::BranchHealth`). */
+export interface BranchHealth {
+  name: string;
+  /** Unix seconds. */
+  last_commit_date: number;
+  last_commit_message: string;
+  /** Checked out by some worktree — deletion must not be offered. */
+  occupied_by_worktree: boolean;
+}
+
+/** Oversized tracked file (mirrors `git::health::LargeFileEntry`). */
+export interface LargeFileEntry {
+  path: string;
+  size_bytes: number;
+}
+
+/** Aggregated repo health report (mirrors `git::health::RepoHealth`). */
+export interface RepoHealth {
+  /** Detected integration branch; `null` means "cannot determine". */
+  default_branch: string | null;
+  stale_branches: BranchHealth[];
+  merged_local_branches: BranchHealth[];
+  unmerged_remote_branches: BranchHealth[];
+  large_files: LargeFileEntry[];
+  stash: { count: number; oldest_date: number | null };
+  truncated: { branches: boolean; files: boolean };
+}
+
 /** Tag descriptor (mirrors `git::TagInfo`). */
 export interface TagInfo {
   name: string;
@@ -571,6 +599,18 @@ export interface DefaultPrompts {
   repo_chat: string;
 }
 
+/** Display thresholds for the repo health panel (mirrors `config::HealthConfig`). */
+export interface HealthConfig {
+  /** Stale branch threshold in days. */
+  stale_days: number;
+  /** Large file threshold in MB. */
+  large_file_min_mb: number;
+  /** Large file top N. */
+  large_file_top_n: number;
+  /** Scan budget safety valve; only editable in config.toml. */
+  max_scan_entries: number;
+}
+
 export interface AppConfig {
   ai: AiProviderConfig;
   /** Saved model profiles; the backend guarantees at least one after migration. */
@@ -578,6 +618,7 @@ export interface AppConfig {
   ui: UiConfig;
   prompts: PromptsConfig;
   index: IndexConfig;
+  health: HealthConfig;
   recent_repos: string[];
   /** Paths of repos currently open as tabs. */
   open_repos: string[];

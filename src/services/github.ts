@@ -61,6 +61,11 @@ export const githubService = {
     ensureTauri();
     return invoke<string>("github_issue_create", { path, remote, title, body });
   },
+  /** Create a DRAFT release from the release notes editor; returns its URL. */
+  releaseCreate(path: string, tagName: string, name: string, body: string, remote?: string) {
+    ensureTauri();
+    return invoke<string>("github_release_create", { path, remote, tagName, name, body });
+  },
   setPat(token: string) {
     ensureTauri();
     return invoke<void>("set_github_pat", { token });

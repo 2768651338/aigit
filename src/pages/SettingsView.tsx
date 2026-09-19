@@ -23,6 +23,7 @@ import { useModelProfileSwitch } from "@/hooks/useModelProfileSwitch";
 import clsx from "clsx";
 import { Field } from "@/components/settings/Field";
 import { IndexSettingsSection } from "@/components/settings/IndexSettingsSection";
+import { HealthSettingsSection } from "@/components/settings/HealthSettingsSection";
 import { ChatPrivacySection } from "@/components/settings/ChatPrivacySection";
 import { RecentReposSection } from "@/components/settings/RecentReposSection";
 import { UpdaterSection } from "@/components/settings/UpdaterSection";
@@ -689,6 +690,9 @@ export function SettingsView() {
           onEmbeddingKey={setEmbeddingKey}
           currentPath={currentPath}
         />
+
+        {/* Repo health check */}
+        <HealthSettingsSection local={local} onLocal={setLocal} />
 
         {/* Local chat privacy */}
         <ChatPrivacySection />

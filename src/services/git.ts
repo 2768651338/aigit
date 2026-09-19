@@ -23,6 +23,7 @@ import type {
   RemoteInfo,
   ReflogEntry,
   RepositoryInsights,
+  RepoHealth,
   TagInfo,
   TrackingInfo,
 } from "@/types";
@@ -162,6 +163,17 @@ export const gitService = {
     return invoke<BranchInfo[]>("list_branches", { path });
   },
 
+  /** Aggregated repo health report; display thresholds come from settings. */
+  getRepoHealth: (path: string, thresholds: { staleDays: number; largeFileMinMb: number; largeFileTopN: number }) => {
+    ensureTauri();
+    return invoke<RepoHealth>("get_repo_health", {
+      path,
+      staleDays: thresholds.staleDays,
+      largeFileMinMb: thresholds.largeFileMinMb,
+      largeFileTopN: thresholds.largeFileTopN,
+    });
+  },
+
   createBranch: (path: string, name: string, startPoint?: string) => {
     ensureTauri();
     return invoke<void>("create_branch", { path, name, startPoint });
@@ -180,6 +192,12 @@ export const gitService = {
   getLog: (path: string, limit?: number, offset?: number) => {
     ensureTauri();
     return invoke<LogEntry[]>("get_log", { path, limit, offset });
+  },
+
+  /** Commits between two rev expressions (tags/branches/hashes) for release notes. */
+  getLogRange: (path: string, base?: string, head?: string, limit?: number) => {
+    ensureTauri();
+    return invoke<LogEntry[]>("get_log_range", { path, base, head, limit });
   },
 
   /** Recent HEAD movements for the recovery panel. */

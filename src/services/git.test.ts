@@ -110,4 +110,22 @@ describe("gitService secure command contract", () => {
     const resetArgs = invokeMock.mock.calls[3]?.[1] as Record<string, unknown>;
     expect(resetArgs).toMatchObject({ path: "D:/repo", hash: "abc123", mode: "hard" });
   });
+
+  it("maps the release-notes range log to get_log_range with optional bounds", async () => {
+    await gitService.getLogRange("D:/repo", "v1.0.0", "v1.1.0", 500);
+    await gitService.getLogRange("D:/repo", undefined, undefined, undefined);
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "get_log_range", {
+      path: "D:/repo",
+      base: "v1.0.0",
+      head: "v1.1.0",
+      limit: 500,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "get_log_range", {
+      path: "D:/repo",
+      base: undefined,
+      head: undefined,
+      limit: undefined,
+    });
+  });
 });

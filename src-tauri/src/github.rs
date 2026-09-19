@@ -129,6 +129,20 @@ pub struct CreatePullRequest {
     pub draft: bool,
 }
 
+/// Payload for creating a GitHub release. `draft` is always driven to `true`
+/// by the aigit command layer — publishing stays a manual step on GitHub.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRelease {
+    pub tag_name: String,
+    pub name: String,
+    pub body: String,
+    #[serde(default)]
+    pub draft: bool,
+    /// Branch or SHA the tag is cut from when the tag does not exist yet.
+    #[serde(default)]
+    pub target_commitish: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowResult {
     pub pull_request: Option<PullRequest>,
@@ -728,6 +742,46 @@ pub fn gh_create(
     })
 }
 
+/// Create a GitHub release via the `gh` CLI; returns the release URL printed
+/// by `gh` (empty output falls back to the web URL of the tag).
+pub fn gh_release_create(
+    workdir: &Path,
+    remote: &GitHubRemote,
+    input: &CreateRelease,
+) -> AppResult<String> {
+    validate_ref(&input.tag_name)?;
+    let mut args = vec![
+        "release".into(),
+        "create".into(),
+        input.tag_name.clone(),
+        "--repo".into(),
+        remote.repository(),
+        "--title".into(),
+        input.name.clone(),
+        "--notes".into(),
+        input.body.clone(),
+    ];
+    if input.draft {
+        args.push("--draft".into());
+    }
+    if let Some(target) = &input.target_commitish {
+        args.push("--target".into());
+        args.push(target.clone());
+    }
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
+    if !ok {
+        return Err(AppError::General(format!(
+            "GitHub CLI failed: {}",
+            stderr.trim()
+        )));
+    }
+    let url = stdout.trim().to_string();
+    if url.is_empty() {
+        return Ok(remote.web_url() + "/releases");
+    }
+    Ok(url)
+}
+
 pub fn gh_checkout(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<String> {
     let args = vec![
         "pr".into(),
@@ -968,6 +1022,38 @@ impl GitHubApi {
             .response(
                 self.request(reqwest::Method::POST, url)
                     .json(&NewIssue { title, body })
+                    .send()
+                    .await?,
+            )
+            .await?;
+        Ok(created.html_url)
+    }
+    /// Create a draft release via the REST API; returns the release URL.
+    pub async fn release_create(&self, input: &CreateRelease) -> AppResult<String> {
+        #[derive(Serialize)]
+        struct NewRelease<'a> {
+            tag_name: &'a str,
+            name: &'a str,
+            body: &'a str,
+            draft: bool,
+        }
+        let url = self.endpoint(&format!(
+            "/repos/{}/{}/releases",
+            self.remote.owner, self.remote.repo
+        ))?;
+        #[derive(Deserialize)]
+        struct CreatedRelease {
+            html_url: String,
+        }
+        let created: CreatedRelease = self
+            .response(
+                self.request(reqwest::Method::POST, url)
+                    .json(&NewRelease {
+                        tag_name: &input.tag_name,
+                        name: &input.name,
+                        body: &input.body,
+                        draft: input.draft,
+                    })
                     .send()
                     .await?,
             )
@@ -1303,5 +1389,45 @@ mod tests {
             assert!(!s.authenticated);
             assert!(s.error.is_some())
         }
+    }
+
+    #[test]
+    fn release_create_rejects_unsafe_tag_before_spawning_gh() {
+        let remote = GitHubRemote {
+            remote_name: "origin".into(),
+            host: "github.com".into(),
+            owner: "owner".into(),
+            repo: "repo".into(),
+            web_base_url: "https://github.com/owner/repo".into(),
+            api_base_url: "https://api.github.com".into(),
+            is_enterprise: false,
+        };
+        let input = CreateRelease {
+            tag_name: "--upload-package".into(),
+            name: "r".into(),
+            body: "b".into(),
+            draft: true,
+            target_commitish: None,
+        };
+        // The flag-looking tag must fail validation before any gh invocation.
+        let result = gh_release_create(Path::new("."), &remote, &input);
+        assert!(matches!(result, Err(AppError::General(_))));
+    }
+
+    #[test]
+    fn create_release_serializes_draft_payload() {
+        let input = CreateRelease {
+            tag_name: "v1.2.3".into(),
+            name: "Release 1.2.3".into(),
+            body: "## 新功能\n- foo".into(),
+            draft: true,
+            target_commitish: Some("main".into()),
+        };
+        let value = serde_json::to_value(&input).unwrap();
+        assert_eq!(value["tag_name"], "v1.2.3");
+        assert_eq!(value["draft"], true);
+        assert_eq!(value["target_commitish"], "main");
+        let parsed: CreateRelease = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.name, "Release 1.2.3");
     }
 }

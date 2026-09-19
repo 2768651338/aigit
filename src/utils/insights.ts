@@ -120,3 +120,43 @@ export function generateProjectIntroduction(insights: RepositoryInsights, labels
     .replace("{{tags}}", String(insights.tag_count));
   return `# ${insights.repository_name} ${labels.projectSummary}\n\n- ${labels.period}：${insightPeriod(insights)}\n\n${description}`;
 }
+
+export interface ReleaseNotesLabels {
+  featuresTitle: string;
+  fixesTitle: string;
+  performanceTitle: string;
+  otherTitle: string;
+  noCommits: string;
+}
+
+/**
+ * Deterministic offline release-notes draft: group commit subjects by
+ * conventional-commit type (feat/fix/perf, everything else into "other").
+ * Subjects outside the convention keep their full text so no information is
+ * silently dropped; AI polish can restructure them afterwards.
+ */
+export function generateReleaseNotes(commits: { message: string }[], labels: ReleaseNotesLabels): string {
+  if (commits.length === 0) return labels.noCommits;
+  const conventional = /^(feat|fix|perf|refactor|docs|test|build|chore|style|ci|revert)(?:\(([^)]*)\))?!?:\s*(.+)$/i;
+  const groups: Record<"features" | "fixes" | "performance" | "other", string[]> = {
+    features: [], fixes: [], performance: [], other: [],
+  };
+  for (const commit of commits) {
+    const subject = commit.message.split("\n")[0].trim();
+    const match = subject.match(conventional);
+    if (!match) { groups.other.push(`- ${subject}`); continue; }
+    const scope = match[2];
+    const bullet = scope ? `- **${scope}**: ${match[3]}` : `- ${match[3]}`;
+    const type = match[1].toLowerCase();
+    if (type === "feat") groups.features.push(bullet);
+    else if (type === "fix") groups.fixes.push(bullet);
+    else if (type === "perf") groups.performance.push(bullet);
+    else groups.other.push(bullet);
+  }
+  const sections: string[] = [];
+  if (groups.features.length) sections.push(`## ${labels.featuresTitle}\n${groups.features.join("\n")}`);
+  if (groups.fixes.length) sections.push(`## ${labels.fixesTitle}\n${groups.fixes.join("\n")}`);
+  if (groups.performance.length) sections.push(`## ${labels.performanceTitle}\n${groups.performance.join("\n")}`);
+  if (groups.other.length) sections.push(`## ${labels.otherTitle}\n${groups.other.join("\n")}`);
+  return sections.join("\n\n") || labels.noCommits;
+}

@@ -103,6 +103,38 @@ pub async fn get_repository_insights(
     .map_err(|e| crate::error::AppError::General(format!("Insights task failed: {e}")))?
 }
 
+/// 聚合仓库健康检查数据：stale / 已合并分支分类、未合并 remote 分支、
+/// 大文件 Top N 与 stash 积压。展示阈值来自前端（设置页），命令侧再 clamp
+/// 兜底；扫描预算的安全阀只从 config.toml 读取，避免调用方抬高上限。
+#[tauri::command]
+pub async fn get_repo_health(
+    path: String,
+    stale_days: u32,
+    large_file_min_mb: u32,
+    large_file_top_n: usize,
+) -> AppResult<git::health::RepoHealth> {
+    let stale_days = stale_days.clamp(1, 3650);
+    let large_file_min_bytes = (large_file_min_mb.clamp(1, 10_240) as u64) * 1024 * 1024;
+    let large_file_top_n = large_file_top_n.clamp(1, 200);
+    run_git_blocking(move || {
+        let mut repo = git::repo::open_repo(&path)?;
+        let max_scan_entries =
+            crate::config::AppConfig::load(&crate::config::SystemCredentialStore)
+                .map(|config| (config.health.max_scan_entries as usize).clamp(1_000, 1_000_000))
+                .unwrap_or(git::health::MAX_SCAN_ENTRIES);
+        git::health::collect_health(
+            &mut repo,
+            &git::health::HealthThresholds {
+                stale_days,
+                large_file_min_bytes,
+                large_file_top_n,
+                max_scan_entries,
+            },
+        )
+    })
+    .await
+}
+
 #[tauri::command]
 pub fn discover_repo(path: String) -> AppResult<String> {
     git::repo::discover_repo(&path)
@@ -322,6 +354,24 @@ pub fn get_log(
         &repo,
         limit.unwrap_or(100).min(1000),
         offset.unwrap_or(0).min(100_000),
+    )
+}
+
+/// Commits between two rev-parse expressions (tags, branches or hashes) for
+/// release notes. `base`/`head` default to "full history of HEAD".
+#[tauri::command]
+pub fn get_log_range(
+    path: String,
+    base: Option<String>,
+    head: Option<String>,
+    limit: Option<usize>,
+) -> AppResult<Vec<git::LogEntry>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::branch::get_log_range(
+        &repo,
+        base.as_deref(),
+        head.as_deref(),
+        limit.unwrap_or(1000).min(1000),
     )
 }
 

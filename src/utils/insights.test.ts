@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { applyAuthorAliases, branchCounts, contributionIntensity, createTimelineFrames, fillDateRange, generateProjectIntroduction, generateWeeklyReport, insightPeriod, sanitizeFileName } from "./insights";
+import { applyAuthorAliases, branchCounts, contributionIntensity, createTimelineFrames, fillDateRange, generateProjectIntroduction, generateReleaseNotes, generateWeeklyReport, insightPeriod, sanitizeFileName } from "./insights";
 import type { ContributorInsights, RepositoryInsights } from "@/types";
-import type { InsightReportLabels } from "./insights";
+import type { InsightReportLabels, ReleaseNotesLabels } from "./insights";
 
 const labels: InsightReportLabels = {
   weeklyTitle: "周报", projectSummary: "项目介绍", period: "统计区间", commits: "提交数", contributors: "贡献者", branches: "分支", localBranches: "本地分支", remoteBranches: "远程分支", commitSummary: "提交摘要", noCommits: "暂无提交记录", noContributors: "暂无记录", projectDescription: "提交 {{commits}}，贡献者 {{contributors}}，主要贡献者 {{top}}，分支 {{branches}}，标签 {{tags}}。",
+};
+
+const releaseLabels: ReleaseNotesLabels = {
+  featuresTitle: "新功能", fixesTitle: "问题修复", performanceTitle: "性能优化", otherTitle: "其他变更", noCommits: "该范围内没有提交。",
 };
 
 const contributor = (name: string, email: string, count: number): ContributorInsights => ({ name, email, commit_count: count, active_days: 1, first_date: "2024-01-01", last_date: "2024-01-01", activity: [count] });
@@ -31,4 +35,27 @@ describe("insights utilities", () => {
     expect(insightPeriod({ ...insights, start_date: null, end_date: null })).toBe("—");
   });
   it("sanitizes export names", () => expect(sanitizeFileName("a:b?.txt")).toBe("a-b-.txt"));
+  it("groups release-notes commits by conventional type and keeps unconventioned subjects", () => {
+    const notes = generateReleaseNotes(
+      [
+        { message: "feat(ui): 支持拖拽排序" },
+        { message: "fix!: 修复崩溃" },
+        { message: "perf(index): 加快检索" },
+        { message: "chore(release): 发布 1.2.0" },
+        { message: "手工整理的普通提交主题" },
+      ],
+      releaseLabels,
+    );
+    expect(notes).toContain("## 新功能\n- **ui**: 支持拖拽排序");
+    expect(notes).toContain("## 问题修复\n- 修复崩溃");
+    expect(notes).toContain("## 性能优化\n- **index**: 加快检索");
+    expect(notes).toContain("## 其他变更\n- **release**: 发布 1.2.0");
+    expect(notes).toContain("- 手工整理的普通提交主题");
+  });
+  it("reports empty release ranges and omits empty groups", () => {
+    expect(generateReleaseNotes([], releaseLabels)).toBe("该范围内没有提交。");
+    const onlyFixes = generateReleaseNotes([{ message: "fix: a" }], releaseLabels);
+    expect(onlyFixes).not.toContain("新功能");
+    expect(onlyFixes).toContain("## 问题修复\n- a");
+  });
 });

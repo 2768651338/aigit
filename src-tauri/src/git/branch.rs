@@ -152,6 +152,71 @@ pub fn get_log(repo: &Repository, limit: usize, offset: usize) -> AppResult<Vec<
     Ok(entries)
 }
 
+/// Commits reachable from `head` (default HEAD) but not from `base`, oldest
+/// description first by time. `base`/`head` accept any rev-parse expression
+/// (branch, tag — lightweight or annotated —, or raw hash), so release notes
+/// can span `v1.0.0..v1.1.0` or `v1.0.0..HEAD`. With `base = None` the walk
+/// covers the full history of `head`.
+pub fn get_log_range(
+    repo: &Repository,
+    base: Option<&str>,
+    head: Option<&str>,
+    limit: usize,
+) -> AppResult<Vec<LogEntry>> {
+    if let Some(base) = base {
+        super::cli::validate_non_option(base, "base")?;
+    }
+    if let Some(head) = head {
+        super::cli::validate_non_option(head, "head")?;
+    }
+
+    let head_commit = match head {
+        Some(head) => repo.revparse_single(head)?.peel_to_commit()?,
+        None => repo.head()?.peel_to_commit()?,
+    };
+    let base_commit = match base {
+        Some(base) => Some(repo.revparse_single(base)?.peel_to_commit()?),
+        None => None,
+    };
+
+    let mut revwalk = repo.revwalk()?;
+    revwalk.push(head_commit.id())?;
+    if let Some(base_commit) = base_commit {
+        revwalk.hide(base_commit.id())?;
+    }
+    revwalk.set_sorting(git2::Sort::TIME)?;
+
+    let ref_map = build_ref_map(repo)?;
+
+    let mut entries = Vec::new();
+    for oid in revwalk {
+        if entries.len() >= limit {
+            break;
+        }
+        let oid = oid?;
+        let commit = repo.find_commit(oid)?;
+        let hash = oid.to_string();
+        let short_hash = hash[..7].to_string();
+        let parents: Vec<String> = commit.parent_ids().map(|p| p.to_string()).collect();
+        let refs = ref_map.get(&hash).cloned().unwrap_or_default();
+        let body = extract_message_body(commit.message().unwrap_or(""));
+
+        entries.push(LogEntry {
+            hash,
+            short_hash,
+            author: commit.author().name().unwrap_or("").to_string(),
+            email: commit.author().email().unwrap_or("").to_string(),
+            message: commit.summary().unwrap_or("").to_string(),
+            body,
+            timestamp: commit.time().seconds(),
+            parents,
+            refs,
+        });
+    }
+
+    Ok(entries)
+}
+
 /// 从完整提交信息中提取正文：去掉首行（主题）与随后的空行，剩余部分即为正文。
 /// 单行信息或仅主题加空行时返回空字符串。
 pub(crate) fn extract_message_body(full_message: &str) -> String {
@@ -354,5 +419,58 @@ mod tests {
     fn trims_surrounding_whitespace_of_body() {
         let full = "subject\n\r\n  缩进的正文  \n\r\n";
         assert_eq!(extract_message_body(full), "缩进的正文");
+    }
+
+    #[test]
+    fn log_range_hides_base_and_resolves_lightweight_and_annotated_tags() {
+        let (_root, repo) = temp_repo("log-range");
+        use super::get_log_range;
+
+        // Fixture history: initial (tagged v1, lightweight) <- c2 (tagged v2, annotated).
+        let c2 = {
+            let sig = Signature::now("Test User", "test@example.com").expect("sig");
+            let mut index = repo.index().expect("index");
+            let tree_id = index.write_tree().expect("tree");
+            let tree = repo.find_tree(tree_id).expect("find tree");
+            let parent = repo.head().expect("head").peel_to_commit().expect("parent");
+            repo.commit(Some("HEAD"), &sig, &sig, "c2", &tree, &[&parent])
+                .expect("commit")
+        };
+        let head_obj = repo.revparse_single("HEAD").expect("head object");
+        repo.tag_lightweight(
+            "v1",
+            &repo.revparse_single("HEAD~1").expect("base object"),
+            false,
+        )
+        .expect("lightweight tag");
+        repo.tag(
+            "v2",
+            &head_obj,
+            &Signature::now("Test User", "test@example.com").expect("sig"),
+            "release v2",
+            false,
+        )
+        .expect("annotated tag");
+
+        // v1..HEAD excludes the base commit itself.
+        let ranged = get_log_range(&repo, Some("v1"), None, 100).expect("range");
+        let messages: Vec<&str> = ranged.iter().map(|e| e.message.as_str()).collect();
+        assert_eq!(messages, vec!["c2"]);
+
+        // Annotated end tag resolves; base=None walks the full history.
+        let full: Vec<&str> = get_log_range(&repo, None, Some("v2"), 100)
+            .expect("full")
+            .iter()
+            .map(|e| e.message.as_str())
+            .collect();
+        assert_eq!(full, vec!["c2", "initial"]);
+
+        // The end tag resolves to the same commit the raw hash points at.
+        let by_hash = get_log_range(&repo, Some("v1"), Some(&c2.to_string()), 100).expect("hash");
+        assert_eq!(by_hash[0].message, "c2");
+
+        // Limit truncates instead of erroring.
+        let truncated = get_log_range(&repo, None, None, 1).expect("limit");
+        assert_eq!(truncated.len(), 1);
     }
 }

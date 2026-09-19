@@ -4,6 +4,7 @@ pub(crate) mod cli;
 pub mod commit;
 pub mod conflict;
 pub mod diff;
+pub mod health;
 pub mod history;
 pub mod hooks;
 pub mod ignore;

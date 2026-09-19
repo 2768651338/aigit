@@ -54,6 +54,7 @@ function configWith(overrides: {
       max_file_bytes: 524288, max_chunks: 20000, chunk_lines: 120, chunk_overlap: 20,
       max_embedding_chars: 12000, top_k: 6, max_context_tokens: 8000,
     },
+    health: { stale_days: 30, large_file_min_mb: 5, large_file_top_n: 20, max_scan_entries: 50000 },
     recent_repos: [],
     open_repos: [],
     active_repo: null,

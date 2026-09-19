@@ -281,6 +281,52 @@ pub async fn github_issue_create(
     ))
 }
 
+/// Create a DRAFT GitHub release from the release notes editor. Publishing is
+/// deliberately left to the user on GitHub; the aigit command always sends
+/// `draft: true`. When the tag does not exist on the remote yet, GitHub
+/// creates it from the repository's default branch.
+#[tauri::command]
+pub async fn github_release_create(
+    path: String,
+    remote: Option<String>,
+    tag_name: String,
+    name: String,
+    body: String,
+) -> AppResult<String> {
+    if tag_name.trim().is_empty() {
+        return Err(AppError::General("Release tag must not be empty".into()));
+    }
+    if name.trim().is_empty() {
+        return Err(AppError::General("Release name must not be empty".into()));
+    }
+    if name.len() > 1_000 || body.len() > 64 * 1024 {
+        return Err(AppError::General("Release name/body too long".into()));
+    }
+    let (repo, remote) = context(&path, remote.as_deref())?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
+    let input = github::CreateRelease {
+        tag_name,
+        name,
+        body,
+        draft: true,
+        target_commitish: None,
+    };
+    if status.installed && status.authenticated {
+        return tokio::task::spawn_blocking(move || {
+            github::gh_release_create(&workdir, &remote, &input)
+        })
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?;
+    }
+    if let Some(api) = GitHubApi::from_store(remote)? {
+        return api.release_create(&input).await;
+    }
+    Err(AppError::Credential(
+        "Authenticate GitHub CLI or store a GitHub PAT to draft a release".into(),
+    ))
+}
+
 #[tauri::command]
 pub fn set_github_pat(token: String) -> AppResult<()> {
     use crate::config::{CredentialStore, SystemCredentialStore};

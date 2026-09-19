@@ -112,6 +112,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub index: IndexConfig,
     #[serde(default)]
+    pub health: HealthConfig,
+    #[serde(default)]
     pub recent_repos: Vec<String>,
     #[serde(default)]
     pub open_repos: Vec<String>,
@@ -171,6 +173,32 @@ impl Default for IndexConfig {
             max_embedding_chars: 12_000,
             top_k: 6,
             max_context_tokens: 8_000,
+        }
+    }
+}
+
+/// 仓库健康检查面板的展示阈值。`max_scan_entries` 是安全阀，设置页不
+/// 暴露，仅可在 config.toml 中调整。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HealthConfig {
+    /// stale 分支阈值（天）。
+    pub stale_days: u32,
+    /// 大文件阈值（MB）。
+    pub large_file_min_mb: u32,
+    /// 大文件 Top N。
+    pub large_file_top_n: u32,
+    /// 单次扫描的条目预算（分支枚举 + 索引遍历），超出即截断并提示。
+    pub max_scan_entries: u32,
+}
+
+impl Default for HealthConfig {
+    fn default() -> Self {
+        Self {
+            stale_days: 30,
+            large_file_min_mb: 5,
+            large_file_top_n: 20,
+            max_scan_entries: 50_000,
         }
     }
 }
@@ -418,6 +446,26 @@ impl AppConfig {
         }
         for profile in &self.profiles {
             profile.validate()?;
+        }
+        if !(1..=3650).contains(&self.health.stale_days) {
+            return Err(AppError::Config(
+                "health.stale_days must be between 1 and 3650".into(),
+            ));
+        }
+        if !(1..=10_240).contains(&self.health.large_file_min_mb) {
+            return Err(AppError::Config(
+                "health.large_file_min_mb must be between 1 and 10240".into(),
+            ));
+        }
+        if !(1..=200).contains(&self.health.large_file_top_n) {
+            return Err(AppError::Config(
+                "health.large_file_top_n must be between 1 and 200".into(),
+            ));
+        }
+        if !(1_000..=1_000_000).contains(&self.health.max_scan_entries) {
+            return Err(AppError::Config(
+                "health.max_scan_entries must be between 1000 and 1000000".into(),
+            ));
         }
         Ok(())
     }

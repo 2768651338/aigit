@@ -16,6 +16,7 @@ import { IssuesPanel } from "@/components/git/IssuesPanel";
 import { WorktreesPanel } from "@/components/git/WorktreesPanel";
 import { HooksPanel } from "@/components/git/HooksPanel";
 import { BisectPanel } from "@/components/git/BisectPanel";
+import { RepoHealthPanel } from "@/components/git/RepoHealthPanel";
 import {
   GitBranchIcon,
   TagIcon,
@@ -29,12 +30,13 @@ import {
   SearchIcon,
   AlertCircleIcon,
   PlayIcon,
+  ScanSearchIcon,
 } from "@/components/common/Icons";
 import { useContextMenu, type MenuItem } from "@/components/common/ContextMenu";
 import { confirmDialog } from "@/utils/dialog";
 import clsx from "clsx";
 
-type SubTab = "branches" | "pullRequests" | "issues" | "worktrees" | "hooks" | "bisect" | "tags" | "stashes" | "submodules";
+type SubTab = "branches" | "pullRequests" | "issues" | "worktrees" | "hooks" | "bisect" | "tags" | "stashes" | "submodules" | "health";
 
 export function BranchesView() {
   const { t } = useTranslation();
@@ -183,6 +185,7 @@ export function BranchesView() {
     { id: "tags", label: t("branches.tabTags"), icon: TagIcon },
     { id: "stashes", label: t("branches.tabStashes"), icon: ArchiveIcon },
     { id: "submodules", label: t("branches.tabSubmodules"), icon: PackageIcon },
+    { id: "health", label: t("branches.tabHealth"), icon: ScanSearchIcon },
   ];
 
   // Delegate the whole panel to the dedicated component for non-branch tabs.
@@ -194,6 +197,7 @@ export function BranchesView() {
   if (subTab === "tags") return <TagPanel />;
   if (subTab === "stashes") return <StashPanel />;
   if (subTab === "submodules") return <SubmodulePanel />;
+  if (subTab === "health") return <RepoHealthPanel onOpenStash={() => setSubTab("stashes")} />;
 
   return (
     <div className="flex h-full">

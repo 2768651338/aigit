@@ -11,6 +11,7 @@ import { DeveloperActivityHeatmap } from "@/components/insights/DeveloperActivit
 import { ProgressTimeline } from "@/components/insights/ProgressTimeline";
 import { IdentityMergeDialog } from "@/components/insights/IdentityMergeDialog";
 import { ReportGenerator } from "@/components/insights/ReportGenerator";
+import { ReleaseNotesGenerator } from "@/components/insights/ReleaseNotesGenerator";
 import { RefreshIcon, SpinnerIcon } from "@/components/common/Icons";
 import type { RepositoryInsights } from "@/types";
 
@@ -111,6 +112,7 @@ export function InsightsView() {
       <ContributionCalendar values={data.daily_contributions} />
       <div className="grid gap-4 lg:grid-cols-2"><DeveloperActivityHeatmap contributors={contributors} /><ProgressTimeline timeline={data.timeline} milestones={data.milestones} /></div>
       <ReportGenerator insights={{ ...data, contributors }} config={config} repoPath={currentPath} />
+      <ReleaseNotesGenerator config={config} repoPath={currentPath} />
     </div>}
     <IdentityMergeDialog open={mergeOpen} contributors={data?.contributors || []} onClose={() => setMergeOpen(false)} onSave={handleMerge} />
   </div>;
