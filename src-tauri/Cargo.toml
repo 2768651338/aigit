@@ -1,6 +1,6 @@
 [package]
 name = "aigit"
-version = "1.0.12"
+version = "1.0.13"
 description = "AI-Driven Git Tool"
 authors = ["aigit"]
 license = "Apache-2.0"

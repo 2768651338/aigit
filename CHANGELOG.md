@@ -2,7 +2,7 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
-## [Unreleased]
+## [1.0.13] - 2026-09-19
 
 ### Added
 
