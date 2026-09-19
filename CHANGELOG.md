@@ -2,6 +2,13 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
+## [1.0.14] - 2026-09-19
+
+### Added
+
+- 仓库健康检查面板（分支视图新子标签）：stale 分支、已合并可删分支（确认后可单个或批量删除）、未合并远端分支、大文件 Top N、stash 积压一屏尽览；被 worktree 占用的分支自动移出可删清单；可一键生成 AI 清理建议（密钥检测通道复用）。展示阈值（stale 天数、大文件 MB、Top N）为设置项，扫描预算 `health.max_scan_entries` 仅可在 config.toml 调整，超限自动截断并提示。
+- Release Notes 生成器（Insights 页新卡片）：按标签范围取提交日志，本地按 conventional commit 前缀分组生成结构化草稿（离线可用），支持 AI 润色与 Markdown 导出；可一键起草 GitHub Draft Release（gh CLI 与 PAT 双通道，仅创建草稿，发布动作留在 GitHub；远端缺标签时会按其默认分支自动创建）。
+
 ## [1.0.13] - 2026-09-19
 
 ### Added
@@ -136,6 +143,8 @@
 - AI 与 GitHub 凭据保存在 Windows Credential Manager；支持迁移旧明文 API Key。
 - 对命令参数、remote/ref、审查输出、索引大小与敏感文件执行校验和限制。
 
+[1.0.14]: https://github.com/2768651338/aigit/releases/tag/v1.0.14
+[1.0.13]: https://github.com/2768651338/aigit/releases/tag/v1.0.13
 [1.0.12]: https://github.com/2768651338/aigit/releases/tag/v1.0.12
 [1.0.11]: https://github.com/2768651338/aigit/releases/tag/v1.0.11
 [1.0.10]: https://github.com/2768651338/aigit/releases/tag/v1.0.10
