@@ -379,7 +379,10 @@ impl AppConfig {
         config.refresh_credential_status(store)?;
         let imported = config.import_initial_profile(store)?;
         config.materialize_active_profile();
-        if migrated || imported {
+        // Never rewrite the file while the keyring is unavailable: legacy
+        // plaintext keys that exist only on disk would be stripped by the
+        // typed round-trip with no keyring copy to back them up.
+        if (migrated || imported) && store.is_available() {
             config.save_to(path)?;
         }
         Ok(config)
@@ -927,6 +930,31 @@ mod tests {
             Some(config.profiles[0].id.as_str())
         );
         assert!(!config.profiles[0].has_own_key);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn import_without_keyring_stays_in_memory_and_preserves_file() {
+        let path = test_path("import-unavailable");
+        fs::write(
+            &path,
+            legacy_ai_config(&[
+                ("active_provider", "openai"),
+                ("openai_api_key", "must-remain"),
+            ]),
+        )
+        .expect("write legacy config");
+        let store = MemoryCredentialStore::unavailable();
+
+        let config = AppConfig::load_from(&path, &store).expect("load without keyring");
+
+        // 方案在内存中创建（本会话可用），但没有 keyring 可复制密钥。
+        assert_eq!(config.profiles.len(), 1);
+        assert!(!config.profiles[0].has_own_key);
+        // 文件保持原样：仅存于磁盘的遗留明文密钥绝不因类型化重写而丢失。
+        let saved = fs::read_to_string(&path).unwrap();
+        assert!(saved.contains("must-remain"));
+        assert!(!saved.contains("profiles"));
         let _ = fs::remove_file(path);
     }
 
