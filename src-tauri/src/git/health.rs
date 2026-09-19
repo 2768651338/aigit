@@ -187,7 +187,7 @@ pub fn collect_health(
     stale_branches.sort_by_key(|b| b.last_commit_date);
     merged_local_branches.sort_by_key(|b| b.last_commit_date);
     // Freshest work first: recent unmerged remote branches matter most.
-    unmerged_remote_branches.sort_by(|a, b| b.last_commit_date.cmp(&a.last_commit_date));
+    unmerged_remote_branches.sort_by_key(|b| std::cmp::Reverse(b.last_commit_date));
 
     let large_files = collect_large_files(repo, thresholds, &mut truncated)?;
     let stashes = stash::list_stashes(repo)?;
@@ -246,7 +246,7 @@ fn collect_large_files(
             });
         }
     }
-    files.sort_by(|a, b| b.size_bytes.cmp(&a.size_bytes));
+    files.sort_by_key(|f| std::cmp::Reverse(f.size_bytes));
     files.truncate(thresholds.large_file_top_n);
     Ok(files)
 }
