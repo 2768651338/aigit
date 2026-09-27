@@ -556,7 +556,7 @@ mod tests {
         let report: ReviewReport = serde_json::from_str(legacy).unwrap();
         assert_eq!(report.pull_number, None);
         let value = serde_json::to_value(
-            &finish_report(valid_json(), None, "d".into(), false, None, Some(3)).unwrap(),
+            finish_report(valid_json(), None, "d".into(), false, None, Some(3)).unwrap(),
         )
         .unwrap();
         assert_eq!(value["pull_number"], 3);

@@ -185,9 +185,6 @@ pub struct PrDiffPayload {
     pub title: String,
     pub body: String,
     pub diff_text: String,
-    pub file_count: usize,
-    pub truncated: bool,
-    pub backend: String,
 }
 
 /// Fetch a pull request's diff for AI review. Prefers the authenticated `gh`
@@ -217,30 +214,22 @@ pub(crate) async fn fetch_pr_diff(
         })
         .await
         .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))??;
-        let (diff_text, truncated) = github::cap_diff_text(raw);
-        let file_count = diff_text.matches("diff --git ").count();
+        let (diff_text, _) = github::cap_diff_text(raw);
         return Ok(PrDiffPayload {
             head_sha: meta.head_sha,
             title: meta.title,
             body: meta.body,
             diff_text,
-            file_count,
-            truncated,
-            backend: "gh".into(),
         });
     }
     if let Some(api) = GitHubApi::from_store(remote)? {
         let snapshot = api.pull_request_snapshot(number).await?;
-        let file_count = snapshot.files.len();
-        let (diff_text, truncated) = github::assemble_pr_diff_text(&snapshot.files);
+        let (diff_text, _) = github::assemble_pr_diff_text(&snapshot.files);
         return Ok(PrDiffPayload {
             head_sha: snapshot.head_sha,
             title: snapshot.title,
             body: snapshot.body,
             diff_text,
-            file_count,
-            truncated,
-            backend: "api".into(),
         });
     }
     Err(AppError::Credential(

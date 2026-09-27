@@ -802,6 +802,7 @@ async fn finish_streamed_review(
 }
 
 /// Prepared input for a PR review: fetched diff + PR context + snapshot hashes.
+/// Truncation is announced inside the diff text itself, so no flag is carried.
 struct PrReviewPrep {
     head_sha: String,
     diff_text: String,
@@ -809,7 +810,6 @@ struct PrReviewPrep {
     pull_number: u64,
     title: String,
     body: String,
-    truncated: bool,
 }
 
 /// PR body participates in the prompt as untrusted context and is bounded.
@@ -830,7 +830,6 @@ async fn prepare_pr_review(repo_path: &str, pull_number: u64) -> AppResult<PrRev
         pull_number,
         title: payload.title,
         body: payload.body,
-        truncated: payload.truncated,
     })
 }
 
