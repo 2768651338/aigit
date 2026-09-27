@@ -4,22 +4,17 @@ import clsx from "clsx";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore, useSettingsStore } from "@/stores/aiStore";
 import { ScanSearchIcon, SpinnerIcon, XIcon } from "@/components/common/Icons";
+import { InputDialog } from "@/components/common/InputDialog";
 import { MarkdownRenderer } from "@/components/common/MarkdownRenderer";
 import { githubService } from "@/services/github";
 import { gitService } from "@/services/git";
 import { useToastStore } from "@/stores/toastStore";
 import { confirmDialog } from "@/utils/dialog";
 import { formatError } from "@/utils/error";
+import { severityClasses } from "@/utils/reviewSeverity";
 import type { FindingStatus, ReviewFinding, ReviewSeverity } from "@/types";
 
 const severities: ReviewSeverity[] = ["critical", "high", "medium", "low", "info"];
-const severityClasses: Record<ReviewSeverity, string> = {
-  critical: "bg-danger/20 text-danger",
-  high: "bg-danger/15 text-danger",
-  medium: "bg-warning/20 text-warning",
-  low: "bg-accent/15 text-accent",
-  info: "bg-bg-hover text-text-secondary",
-};
 
 export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => void }) {
   const { t } = useTranslation();
@@ -42,6 +37,7 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
   const [reviewedFile, setReviewedFile] = useState<string | undefined>();
   const [severity, setSeverity] = useState<ReviewSeverity | "all">("all");
   const [status, setStatus] = useState<FindingStatus | "all">("open");
+  const [publishPrompt, setPublishPrompt] = useState<ReviewFinding | null>(null);
 
   const statusFingerprint = useMemo(
     () => fileStatuses.map((file) => `${file.path}\u0000${file.old_path ?? ""}\u0000${file.status}\u0000${file.staged}`).sort().join("\u0001"),
@@ -98,27 +94,36 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
       toast.error(formatError(error), t("review.fixApplyFailed"));
     }
   };
-  const publishFinding = async (finding: ReviewFinding) => {
+  // 发布行内评论：先用 InputDialog 询问 PR 编号（替代无法本地化的 window.prompt），
+  // 再经确认弹窗逐条发布；仅报告 id 通过 IPC，行号/内容由后端从报告解析。
+  const publishFinding = (finding: ReviewFinding) => {
     if (!currentPath || !report?.head_hash || !finding.line) return;
-    const pullNumber = Number(window.prompt(t("review.pullNumberPrompt")));
-    if (!Number.isSafeInteger(pullNumber) || pullNumber <= 0) return;
-    const confirmed = await confirmDialog(
-      t("review.publishTitle"),
-      t("review.publishConfirm", { file: finding.file, line: finding.line, title: finding.title }),
-      "warning",
-    );
-    if (!confirmed) return;
-    try {
-      await githubService.publishInlineComment(currentPath, {
-        pull_number: pullNumber,
-        report_id: report.id,
-        finding_id: finding.id,
-        confirmed: true,
-      });
-      toast.success(t("review.published"));
-    } catch (error) {
-      toast.error(formatError(error), t("review.publishFailed"));
-    }
+    setPublishPrompt(finding);
+  };
+  const confirmPublish = (value: string) => {
+    const finding = publishPrompt;
+    setPublishPrompt(null);
+    const pullNumber = Number(value);
+    if (!finding || !currentPath || !report || !Number.isSafeInteger(pullNumber) || pullNumber <= 0) return;
+    void (async () => {
+      const confirmed = await confirmDialog(
+        t("review.publishTitle"),
+        t("review.publishConfirm", { file: finding.file, line: finding.line, title: finding.title }),
+        "warning",
+      );
+      if (!confirmed) return;
+      try {
+        await githubService.publishInlineComment(currentPath, {
+          pull_number: pullNumber,
+          report_id: report.id,
+          finding_id: finding.id,
+          confirmed: true,
+        });
+        toast.success(t("review.published"));
+      } catch (error) {
+        toast.error(formatError(error), t("review.publishFailed"));
+      }
+    })();
   };
   const exportMarkdown = () => {
     if (!report) return;
@@ -159,5 +164,12 @@ export function ReviewView({ onNavigateChanges }: { onNavigateChanges: () => voi
         {findingsByFile.map(([file, findings]) => <section key={file} className="border border-border rounded overflow-hidden"><h3 className="px-4 py-2 bg-bg-elevated font-mono text-sm">{file} <span className="text-text-muted">({findings.length})</span></h3><div className="divide-y divide-border">{findings.map((finding) => <article key={finding.id} className="p-4 space-y-2"><div className="flex gap-2 items-start"><span className={clsx("px-2 py-0.5 rounded text-2xs font-semibold uppercase", severityClasses[finding.severity])}>{t(`review.severities.${finding.severity}`)}</span><span className="text-xs text-text-muted">{finding.category} · {Math.round(finding.confidence * 100)}%</span><div className="flex-1" /><button onClick={() => jumpToFinding(finding)} className="btn-ghost text-xs">{finding.line ? `:${finding.line}` : t("review.openDiff")}</button></div><h4 className="font-medium text-sm">{finding.title}</h4><p className="text-sm text-text-secondary">{finding.description}</p><div className="bg-bg-elevated rounded p-3 text-sm"><b>{t("review.suggestion")}</b><p className="mt-1 whitespace-pre-wrap">{finding.suggestion}</p><button onClick={() => copySuggestion(finding.suggestion)} className="btn-ghost text-xs mt-2">{t("review.copySuggestion")}</button></div><div className="flex gap-2"><button onClick={() => void applyFix(finding)} disabled={!finding.patch || report.stale} className="btn-ghost text-xs">{t("review.applyFix")}</button><button onClick={() => publishFinding(finding)} disabled={!finding.line || report.stale} className="btn-ghost text-xs">{t("review.publishInline")}</button><button onClick={() => updateStatus(finding.id, "resolved")} className="btn-ghost text-xs">{t("review.resolve")}</button><button onClick={() => updateStatus(finding.id, "false_positive")} className="btn-ghost text-xs">{t("review.markFalsePositive")}</button></div></article>)}</div></section>)}
       </section>}
     </div>
+    <InputDialog
+      open={publishPrompt !== null}
+      title={t("review.pullNumberPrompt")}
+      placeholder={t("review.pullNumberPlaceholder")}
+      onConfirm={confirmPublish}
+      onCancel={() => setPublishPrompt(null)}
+    />
   </div>;
 }

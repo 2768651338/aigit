@@ -744,7 +744,8 @@
     "publishTitle": "Publish review finding?",
     "publishConfirm": "Publish this finding to {{file}}:{{line}}? Each finding is sent separately and nothing is published by default.\n\n{{title}}",
     "published": "Inline review comment published",
-    "publishFailed": "Failed to publish inline comment"
+    "publishFailed": "Failed to publish inline comment",
+    "pullNumberPlaceholder": "e.g. 42"
   },
   "chat": {
     "title": "Repository Assistant",
@@ -941,7 +942,19 @@
     "createDraft": "Create as draft",
     "aiGenerate": "Generate with AI",
     "create": "Create pull request",
-    "browserFallback": "Without GitHub authentication, Create safely opens the compare/create page in your browser."
+    "browserFallback": "Without GitHub authentication, Create safely opens the compare/create page in your browser.",
+    "aiReview": "AI Review",
+    "aiReviewAgain": "Re-run review",
+    "reviewSection": "AI review findings",
+    "reviewEmpty": "No AI review yet. Click \"AI Review\" to let AI analyze this pull request's changes.",
+    "reviewStale": "This pull request has new commits and the review is stale. Re-run the review before publishing.",
+    "publishAll": "Publish all commentable",
+    "publishAllTitle": "Publish all inline comments?",
+    "publishAllConfirm": "This will publish {{count}} inline comments one by one to the exact lines of pull request #{{number}}. A failed item does not affect the rest; no summary comment is posted. Continue?",
+    "publishingAll": "Publishing {{current}}/{{total}}…",
+    "publishAllDone": "Publishing finished: {{ok}} succeeded, {{failed}} failed",
+    "publishAllNone": "No commentable findings (only findings with a line number can be published).",
+    "publishAllFailures": "The following {{failed}} findings failed to publish:"
   },
   "health": {
     "title": "Repo health check",

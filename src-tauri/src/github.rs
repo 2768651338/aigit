@@ -84,6 +84,10 @@ pub struct PullRequest {
     pub author: String,
     pub head: String,
     pub base: String,
+    /// HEAD commit SHA when the backend provides it (gh `headRefOid` or REST
+    /// `head.sha`); used to detect PR review-report staleness.
+    #[serde(default)]
+    pub head_sha: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub additions: Option<u64>,
@@ -157,11 +161,18 @@ pub struct InlineCommentRequest {
     pub report_id: String,
     pub finding_id: String,
     pub confirmed: bool,
+    /// When true, the report is loaded from the PR-scoped review file
+    /// (`aigit-review-pr-{pull_number}.json`) instead of the local one;
+    /// staleness is then enforced by the publish-time snapshot head check.
+    #[serde(default)]
+    pub pull_review: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct PullRequestSnapshot {
     pub head_sha: String,
+    pub title: String,
+    pub body: String,
     pub files: Vec<PullRequestFile>,
 }
 
@@ -585,6 +596,7 @@ pub fn gh_list(workdir: &Path, remote: &GitHubRemote) -> AppResult<Vec<PullReque
             author: p.author.login,
             head: p.head_ref_name,
             base: p.base_ref_name,
+            head_sha: None,
             created_at: p.created_at,
             updated_at: p.updated_at,
             additions: None,
@@ -616,8 +628,9 @@ pub fn gh_view(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<
         additions: u64,
         deletions: u64,
         changed_files: u64,
+        head_ref_oid: String,
     }
-    let args=vec!["pr".into(),"view".into(),number.to_string(),"--repo".into(),remote.repository(),"--json".into(),"number,title,body,state,isDraft,url,author,headRefName,baseRefName,createdAt,updatedAt,additions,deletions,changedFiles".into()];
+    let args=vec!["pr".into(),"view".into(),number.to_string(),"--repo".into(),remote.repository(),"--json".into(),"number,title,body,state,isDraft,url,author,headRefName,baseRefName,createdAt,updatedAt,additions,deletions,changedFiles,headRefOid".into()];
     let p: GhPr = gh_json(workdir, args)?;
     let pr = PullRequest {
         number: p.number,
@@ -629,6 +642,7 @@ pub fn gh_view(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<
         author: p.author.login,
         head: p.head_ref_name,
         base: p.base_ref_name,
+        head_sha: Some(p.head_ref_oid),
         created_at: p.created_at,
         updated_at: p.updated_at,
         additions: Some(p.additions),
@@ -734,6 +748,7 @@ pub fn gh_create(
         author: String::new(),
         head: input.head.clone(),
         base: input.base.clone(),
+        head_sha: None,
         created_at: String::new(),
         updated_at: String::new(),
         additions: None,
@@ -800,6 +815,116 @@ pub fn gh_checkout(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppRes
             err.trim()
         )))
     }
+}
+
+/// Pull request metadata needed for the AI review input (head SHA, title, body).
+#[derive(Debug, Clone)]
+pub struct PrMeta {
+    pub head_sha: String,
+    pub title: String,
+    pub body: String,
+}
+
+/// Fetch PR metadata via `gh` in a single JSON call.
+pub fn gh_pr_meta(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<PrMeta> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct GhMeta {
+        head_ref_oid: String,
+        title: String,
+        #[serde(default)]
+        body: String,
+    }
+    let args = vec![
+        "pr".into(),
+        "view".into(),
+        number.to_string(),
+        "--repo".into(),
+        remote.repository(),
+        "--json".into(),
+        "headRefOid,title,body".into(),
+    ];
+    let meta: GhMeta = gh_json(workdir, args)?;
+    Ok(PrMeta {
+        head_sha: meta.head_ref_oid,
+        title: meta.title,
+        body: meta.body,
+    })
+}
+
+/// Fetch the full unified diff of a pull request via `gh`.
+pub fn gh_pr_diff(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<String> {
+    let args = vec![
+        "pr".into(),
+        "diff".into(),
+        number.to_string(),
+        "--repo".into(),
+        remote.repository(),
+    ];
+    let (ok, stdout, stderr) = run_gh_process(workdir, &args, GH_TIMEOUT)?;
+    if !ok {
+        return Err(AppError::General(format!(
+            "GitHub CLI failed: {}",
+            stderr.trim()
+        )));
+    }
+    Ok(stdout)
+}
+
+/// Hard cap for the PR diff text used as AI review input. Larger diffs are
+/// truncated with a visible notice instead of erroring (auto-degrade).
+pub const PR_DIFF_CHAR_CAP: usize = 300_000;
+
+const PR_DIFF_TRUNCATION_NOTICE: &str = "\n[PR diff too large; truncated]\n";
+
+/// Cap a ready-made diff text (gh `pr diff` output) at `PR_DIFF_CHAR_CAP`.
+/// Returns `(text, truncated)`.
+pub fn cap_diff_text(text: String) -> (String, bool) {
+    if text.chars().count() <= PR_DIFF_CHAR_CAP {
+        return (text, false);
+    }
+    let mut cut: String = text.chars().take(PR_DIFF_CHAR_CAP).collect();
+    cut.push_str(PR_DIFF_TRUNCATION_NOTICE);
+    (cut, true)
+}
+
+/// Assemble per-file REST patches into a unified-diff text for AI review.
+/// Files without a text patch (binary etc.) are noted so the model knows they
+/// exist but cannot be line-verified. Returns `(text, truncated)`.
+pub fn assemble_pr_diff_text(files: &[PullRequestFile]) -> (String, bool) {
+    let mut text = String::new();
+    let mut count = 0usize;
+    let mut truncated = false;
+    for file in files {
+        let name = &file.filename;
+        let mut piece = String::new();
+        match &file.patch {
+            Some(patch) => {
+                piece.push_str(&format!("diff --git a/{name} b/{name}\n"));
+                piece.push_str(patch);
+                if !patch.ends_with('\n') {
+                    piece.push('\n');
+                }
+            }
+            None => piece.push_str(&format!(
+                "diff --git a/{name} b/{name}\n(binary file or no text patch; skipped)\n"
+            )),
+        }
+        piece.push('\n');
+        let piece_chars = piece.chars().count();
+        if count + piece_chars > PR_DIFF_CHAR_CAP {
+            let remaining = PR_DIFF_CHAR_CAP.saturating_sub(count);
+            text.extend(piece.chars().take(remaining));
+            truncated = true;
+            break;
+        }
+        count += piece_chars;
+        text.push_str(&piece);
+    }
+    if truncated {
+        text.push_str(PR_DIFF_TRUNCATION_NOTICE);
+    }
+    (text, truncated)
 }
 
 pub struct GitHubApi {
@@ -1095,6 +1220,8 @@ impl GitHubApi {
         }
         Ok(PullRequestSnapshot {
             head_sha: api.head.sha,
+            title: api.title,
+            body: api.body.unwrap_or_default(),
             files,
         })
     }
@@ -1184,6 +1311,7 @@ impl From<ApiPr> for PullRequest {
             url: p.html_url,
             author: p.user.login,
             head: p.head.r#ref,
+            head_sha: Some(p.head.sha),
             base: p.base.r#ref,
             created_at: p.created_at,
             updated_at: p.updated_at,
@@ -1303,6 +1431,8 @@ mod tests {
     fn validates_inline_comment_against_pr_head_file_and_right_side_line() {
         let snapshot = PullRequestSnapshot {
             head_sha: "abc123".into(),
+            title: String::new(),
+            body: String::new(),
             files: vec![PullRequestFile {
                 filename: "src/main.rs".into(),
                 patch: Some("@@ -10,2 +10,3 @@\n context\n-old\n+new\n trailing".into()),
@@ -1318,6 +1448,8 @@ mod tests {
     fn rejects_deleted_only_lines_and_unverifiable_patches() {
         let deleted = PullRequestSnapshot {
             head_sha: "abc123".into(),
+            title: String::new(),
+            body: String::new(),
             files: vec![PullRequestFile {
                 filename: "src/main.rs".into(),
                 patch: Some("@@ -4,2 +4,1 @@\n-deleted\n context".into()),
@@ -1327,6 +1459,8 @@ mod tests {
         assert!(validate_inline_target(&deleted, "abc123", "src/main.rs", 5).is_err());
         let missing_patch = PullRequestSnapshot {
             head_sha: "abc123".into(),
+            title: String::new(),
+            body: String::new(),
             files: vec![PullRequestFile {
                 filename: "src/main.rs".into(),
                 patch: None,
@@ -1345,6 +1479,7 @@ mod tests {
         }))
         .unwrap();
         assert_eq!(request.report_id, "report-1");
+        assert!(!request.pull_review);
         assert!(
             serde_json::from_value::<InlineCommentRequest>(serde_json::json!({
                 "pull_number": 7,
@@ -1355,6 +1490,44 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn assembles_pr_diff_text_with_headers_and_binary_notes() {
+        let files = vec![
+            PullRequestFile {
+                filename: "src/lib.rs".into(),
+                patch: Some("@@ -1,2 +1,3 @@\n-old\n+new\n context".into()),
+            },
+            PullRequestFile {
+                filename: "assets/logo.png".into(),
+                patch: None,
+            },
+        ];
+        let (text, truncated) = assemble_pr_diff_text(&files);
+        assert!(!truncated);
+        assert!(text.contains("diff --git a/src/lib.rs b/src/lib.rs"));
+        assert!(text.contains("+new"));
+        assert!(text.contains("(binary file or no text patch; skipped)"));
+    }
+
+    #[test]
+    fn truncates_oversized_pr_diff_with_notice() {
+        let big = "x".repeat(PR_DIFF_CHAR_CAP + 10);
+        let (text, truncated) = cap_diff_text(big);
+        assert!(truncated);
+        assert!(text.contains("[PR diff too large; truncated]"));
+        assert!(text.chars().count() <= PR_DIFF_CHAR_CAP + 40);
+
+        let files: Vec<PullRequestFile> = (0..3)
+            .map(|i| PullRequestFile {
+                filename: format!("f{i}.txt"),
+                patch: Some("@@ -1 +1 @@\n-a\n+b".into()),
+            })
+            .collect();
+        let (text, truncated) = assemble_pr_diff_text(&files);
+        assert!(!truncated);
+        assert_eq!(text.matches("diff --git").count(), 3);
     }
 
     #[test]

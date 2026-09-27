@@ -137,6 +137,8 @@ export interface PullRequest {
   author: string;
   head: string;
   base: string;
+  /** PR 当前 HEAD SHA（gh headRefOid / REST head.sha），用于审查报告过期判断。 */
+  head_sha: string | null;
   created_at: string;
   updated_at: string;
   additions: number | null;
@@ -169,6 +171,8 @@ export interface InlineCommentRequest {
   report_id: string;
   finding_id: string;
   confirmed: boolean;
+  /** true 时从 PR 审查报告（aigit-review-pr-{n}.json）加载并发布。 */
+  pull_review?: boolean;
 }
 
 export interface PullRequestWorkflowResult {
@@ -321,6 +325,8 @@ export interface ReviewReport {
   diff_hash: string;
   staged_only: boolean;
   file_path: string | null;
+  /** 非 null 时表示这是 PR 审查报告（head_hash 为 PR HEAD SHA）。 */
+  pull_number: number | null;
   stale: boolean;
 }
 

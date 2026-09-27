@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReviewReport } from "@/types";
 import "@/i18n";
@@ -39,6 +39,7 @@ const report: ReviewReport = {
   diff_hash: "diff123",
   staged_only: true,
   file_path: null,
+  pull_number: null,
   stale: true,
 };
 
@@ -76,7 +77,6 @@ describe("structured review interactions", () => {
     publishInlineComment.mockResolvedValue("https://github.com/comment");
     confirmDialog.mockResolvedValue(true);
     reviewState.stale = true;
-    vi.spyOn(window, "prompt").mockReturnValue("17");
   });
 
   it("loads the repository report, surfaces staleness, and updates finding status", async () => {
@@ -94,6 +94,11 @@ describe("structured review interactions", () => {
     reviewState.stale = false;
     render(<ReviewView onNavigateChanges={navigate} />);
     fireEvent.click(screen.getByRole("button", { name: /发布行内评论|Publish inline/ }));
+
+    // PR 编号经 InputDialog 询问（替代 window.prompt），确认后才发布。
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "17" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /确定|OK/ }));
 
     await waitFor(() => expect(confirmDialog).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(publishInlineComment).toHaveBeenCalledWith("D:/repo", {

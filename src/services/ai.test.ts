@@ -58,6 +58,28 @@ describe("aiService secure command contract", () => {
     });
   });
 
+  it("scopes PR review commands by pull number without local review params", async () => {
+    await aiService.reviewPullRequest("D:/repo", 42);
+    await aiService.loadPrReviewReport("D:/repo", 42);
+    await aiService.updatePrReviewFinding("D:/repo", 42, "finding-1", "resolved");
+
+    expect(invokeMock).toHaveBeenNthCalledWith(1, "review_pull_request", {
+      repoPath: "D:/repo",
+      pullNumber: 42,
+      confirmSecrets: undefined,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(2, "load_pr_review_report", {
+      repoPath: "D:/repo",
+      pullNumber: 42,
+    });
+    expect(invokeMock).toHaveBeenNthCalledWith(3, "update_pr_review_finding", {
+      repoPath: "D:/repo",
+      pullNumber: 42,
+      findingId: "finding-1",
+      status: "resolved",
+    });
+  });
+
   it("routes stream events by requestId and sends cancellation without credentials", async () => {
     invokeMock.mockImplementation(async (command: string, args: { requestId?: string }) => {
       if (command === "repo_chat_stream") {

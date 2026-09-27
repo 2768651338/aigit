@@ -4,8 +4,10 @@ import clsx from "clsx";
 import { aiService } from "@/services/ai";
 import { githubService } from "@/services/github";
 import { useRepoStore } from "@/stores/repoStore";
+import { useAiStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
+import { PrReviewCard } from "@/components/git/PrReviewCard";
 import type { GhStatus, PullRequest, PullRequestDetail } from "@/types";
 
 export function PullRequestsPanel({ onBack }: { onBack?: () => void }) {
@@ -13,6 +15,8 @@ export function PullRequestsPanel({ onBack }: { onBack?: () => void }) {
   const path = useRepoStore((s) => s.currentPath);
   const repoInfo = useRepoStore((s) => s.repoInfo);
   const toast = useToastStore();
+  const reviewPullRequest = useAiStore((s) => s.reviewPullRequest);
+  const prReviewLoading = useAiStore((s) => (path ? Boolean(s.activeRequestByScope?.[`${path}\u0000pr-review`]) : false));
   const [items, setItems] = useState<PullRequest[]>([]);
   const [detail, setDetail] = useState<PullRequestDetail | null>(null);
   const [status, setStatus] = useState<GhStatus | null>(null);
@@ -47,9 +51,19 @@ export function PullRequestsPanel({ onBack }: { onBack?: () => void }) {
   const select = async (number: number) => {
     if (!path) return;
     setLoading(true);
-    try { setDetail(await githubService.view(path, number)); }
+    try {
+      setDetail(await githubService.view(path, number));
+      // 选中 PR 后加载已保存的 PR 审查报告（如无则清空卡片）。
+      void useAiStore.getState().loadPrReview(path, number);
+    }
     catch (error) { toast.error(formatError(error), t("pullRequests.viewFailed")); }
     finally { setLoading(false); }
+  };
+
+  const runPrReview = async () => {
+    if (!path || !detail) return;
+    try { await reviewPullRequest(path, detail.pull_request.number); }
+    catch { /* store 已提示失败 */ }
   };
 
   const generate = async () => {
@@ -99,9 +113,10 @@ export function PullRequestsPanel({ onBack }: { onBack?: () => void }) {
       </aside>
       <main className="flex-1 overflow-auto p-5">
         {detail ? <section className="max-w-4xl space-y-4">
-          <div className="flex justify-between gap-3"><div><h2 className="text-xl font-semibold">{detail.pull_request.title}</h2><p className="text-xs text-text-muted">#{detail.pull_request.number} · {detail.pull_request.head} → {detail.pull_request.base}</p></div><button className="btn-secondary" onClick={() => checkout(detail.pull_request.number)}>{t("pullRequests.checkout")}</button></div>
+          <div className="flex justify-between gap-3"><div><h2 className="text-xl font-semibold">{detail.pull_request.title}</h2><p className="text-xs text-text-muted">#{detail.pull_request.number} · {detail.pull_request.head} → {detail.pull_request.base}</p></div><div className="flex gap-2 shrink-0"><button className="btn-primary" onClick={() => void runPrReview()} disabled={prReviewLoading} aria-busy={prReviewLoading}>{prReviewLoading ? t("common.loading") : t("pullRequests.aiReview")}</button><button className="btn-secondary" onClick={() => checkout(detail.pull_request.number)}>{t("pullRequests.checkout")}</button></div></div>
           <div className="card p-4 whitespace-pre-wrap text-sm">{detail.pull_request.body || t("pullRequests.noDescription")}</div>
           <div className="card p-4"><h3 className="font-semibold mb-3">{t("pullRequests.checks")}</h3>{detail.checks.length ? detail.checks.map((check) => <div key={check.name} className="flex justify-between py-2 border-b last:border-0 border-border-subtle text-sm"><span>{check.name}</span><span className={clsx(check.conclusion === "success" ? "text-success" : check.conclusion ? "text-danger" : "text-text-muted")}>{check.conclusion || check.status}</span></div>) : <p className="text-sm text-text-muted">{t("pullRequests.noChecks")}</p>}</div>
+          <PrReviewCard repoPath={path ?? ""} pullNumber={detail.pull_request.number} />
           <button className="btn-secondary" onClick={() => setDetail(null)}>{t("pullRequests.new")}</button>
         </section> : <section className="max-w-3xl space-y-4">
           <h2 className="text-xl font-semibold">{t("pullRequests.new")}</h2>

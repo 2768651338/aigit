@@ -177,6 +177,107 @@ pub async fn github_pr_checkout(
         .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?
 }
 
+/// PR diff snapshot prepared for AI review: head SHA + unified diff text plus
+/// the PR title/body used as review context.
+#[derive(Debug, Clone)]
+pub struct PrDiffPayload {
+    pub head_sha: String,
+    pub title: String,
+    pub body: String,
+    pub diff_text: String,
+    pub file_count: usize,
+    pub truncated: bool,
+    pub backend: String,
+}
+
+/// Fetch a pull request's diff for AI review. Prefers the authenticated `gh`
+/// CLI (also covers Enterprise hosts, where the stored PAT is never forwarded);
+/// falls back to the stored PAT REST snapshot. The `gh` 1 MiB output cap and
+/// `PR_DIFF_CHAR_CAP` both bound the result.
+pub(crate) async fn fetch_pr_diff(
+    path: &str,
+    remote: Option<String>,
+    number: u64,
+) -> AppResult<PrDiffPayload> {
+    let (repo, remote) = context(path, remote.as_deref())?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
+    if status.installed && status.authenticated {
+        let meta_workdir = workdir.clone();
+        let meta_remote = remote.clone();
+        let meta = tokio::task::spawn_blocking(move || {
+            github::gh_pr_meta(&meta_workdir, &meta_remote, number)
+        })
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))??;
+        let diff_workdir = workdir.clone();
+        let diff_remote = remote.clone();
+        let raw = tokio::task::spawn_blocking(move || {
+            github::gh_pr_diff(&diff_workdir, &diff_remote, number)
+        })
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))??;
+        let (diff_text, truncated) = github::cap_diff_text(raw);
+        let file_count = diff_text.matches("diff --git ").count();
+        return Ok(PrDiffPayload {
+            head_sha: meta.head_sha,
+            title: meta.title,
+            body: meta.body,
+            diff_text,
+            file_count,
+            truncated,
+            backend: "gh".into(),
+        });
+    }
+    if let Some(api) = GitHubApi::from_store(remote)? {
+        let snapshot = api.pull_request_snapshot(number).await?;
+        let file_count = snapshot.files.len();
+        let (diff_text, truncated) = github::assemble_pr_diff_text(&snapshot.files);
+        return Ok(PrDiffPayload {
+            head_sha: snapshot.head_sha,
+            title: snapshot.title,
+            body: snapshot.body,
+            diff_text,
+            file_count,
+            truncated,
+            backend: "api".into(),
+        });
+    }
+    Err(AppError::Credential(
+        "Authenticate GitHub CLI or store a GitHub PAT to review a pull request".into(),
+    ))
+}
+
+/// Best-effort current head SHA of a pull request (gh first, then PAT).
+/// Returns `None` when it cannot be determined — the publish path re-validates
+/// against a live snapshot, so staleness is a UI hint only.
+pub(crate) async fn current_pr_head(
+    path: &str,
+    remote: Option<String>,
+    number: u64,
+) -> AppResult<Option<String>> {
+    let (repo, remote) = context(path, remote.as_deref())?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &remote.host).await?;
+    if status.installed && status.authenticated {
+        let meta_remote = remote.clone();
+        let result =
+            tokio::task::spawn_blocking(move || github::gh_pr_meta(&workdir, &meta_remote, number))
+                .await
+                .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")));
+        if let Ok(Ok(meta)) = result {
+            return Ok(Some(meta.head_sha));
+        }
+    }
+    if let Some(api) = GitHubApi::from_store(remote)? {
+        return Ok(match api.view(number).await {
+            Ok(detail) => detail.pull_request.head_sha,
+            Err(_) => None,
+        });
+    }
+    Ok(None)
+}
+
 #[tauri::command]
 pub async fn github_publish_inline_comment(
     path: String,
@@ -189,18 +290,34 @@ pub async fn github_publish_inline_comment(
         ));
     }
     let (repo, remote) = context(&path, remote.as_deref())?;
-    let mut report = review::load_report(&repo)?
-        .ok_or_else(|| AppError::General("No saved review report".into()))?;
+    let mut report = if input.pull_review {
+        review::load_pr_report(&repo, input.pull_number)?.ok_or_else(|| {
+            AppError::General("No saved review report for this pull request".into())
+        })?
+    } else {
+        review::load_report(&repo)?
+            .ok_or_else(|| AppError::General("No saved review report".into()))?
+    };
     if report.id != input.report_id {
         return Err(AppError::General(
             "The selected review report is no longer current".into(),
         ));
     }
-    review::recompute_stale(&repo, &mut report)?;
-    if report.stale {
-        return Err(AppError::General(
-            "The review report is stale; run the review again".into(),
-        ));
+    if input.pull_review {
+        if report.pull_number != Some(input.pull_number) {
+            return Err(AppError::General(
+                "The review report does not match this pull request".into(),
+            ));
+        }
+        // PR-scoped staleness is enforced below by the publish-time snapshot
+        // head check; the local-worktree recompute does not apply here.
+    } else {
+        review::recompute_stale(&repo, &mut report)?;
+        if report.stale {
+            return Err(AppError::General(
+                "The review report is stale; run the review again".into(),
+            ));
+        }
     }
     let finding = report
         .findings

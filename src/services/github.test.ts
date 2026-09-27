@@ -29,4 +29,26 @@ describe("githubService command contract", () => {
     await githubService.ghStatus("D:/repo");
     expect(invokeMock).toHaveBeenCalledWith("github_gh_status", { path: "D:/repo", remote: undefined });
   });
+
+  it("publishes PR inline comments with explicit confirmation and PR review source", async () => {
+    await githubService.publishInlineComment("D:/repo", {
+      pull_number: 42,
+      report_id: "report-1",
+      finding_id: "finding-1",
+      confirmed: true,
+      pull_review: true,
+    });
+
+    expect(invokeMock).toHaveBeenCalledWith("github_publish_inline_comment", {
+      path: "D:/repo",
+      remote: undefined,
+      input: {
+        pull_number: 42,
+        report_id: "report-1",
+        finding_id: "finding-1",
+        confirmed: true,
+        pull_review: true,
+      },
+    });
+  });
 });

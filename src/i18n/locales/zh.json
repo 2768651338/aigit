@@ -744,7 +744,8 @@
     "publishTitle": "发布此审查项？",
     "publishConfirm": "是否将此审查项发布到 {{file}}:{{line}}？每个审查项都需单独确认，默认不会发布。\n\n{{title}}",
     "published": "行内审查评论已发布",
-    "publishFailed": "发布行内评论失败"
+    "publishFailed": "发布行内评论失败",
+    "pullNumberPlaceholder": "例如 42"
   },
   "chat": {
     "title": "仓库助手",
@@ -941,7 +942,19 @@
     "createDraft": "创建为草稿",
     "aiGenerate": "AI 生成",
     "create": "创建 Pull Request",
-    "browserFallback": "未配置 GitHub 认证时，“创建”会安全地在浏览器打开比较/创建页面。"
+    "browserFallback": "未配置 GitHub 认证时，“创建”会安全地在浏览器打开比较/创建页面。",
+    "aiReview": "AI 审查",
+    "aiReviewAgain": "重新审查",
+    "reviewSection": "AI 审查发现",
+    "reviewEmpty": "尚无 AI 审查结果，点击“AI 审查”让 AI 分析这个 Pull Request 的改动。",
+    "reviewStale": "该 Pull Request 已有新提交，审查结果已过期，请重新审查后再发布。",
+    "publishAll": "发布全部可评论",
+    "publishAllTitle": "发布全部行内评论？",
+    "publishAllConfirm": "将按顺序发布 {{count}} 条行内评论到 Pull Request #{{number}} 的具体代码行。单条失败不影响其余条目；不会发布总结评论。继续吗？",
+    "publishingAll": "正在发布 {{current}}/{{total}}…",
+    "publishAllDone": "发布完成：成功 {{ok}} 条，失败 {{failed}} 条",
+    "publishAllNone": "没有可发布的行内评论（仅带行号的发现可发布）。",
+    "publishAllFailures": "以下 {{failed}} 条发布失败："
   },
   "health": {
     "title": "仓库健康检查",

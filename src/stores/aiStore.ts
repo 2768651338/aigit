@@ -153,6 +153,8 @@ interface AiState {
   loadedRepos: Record<string, boolean>;
   lastResultByRepo: Record<string, string | null>;
   reviewByRepo: Record<string, ReviewReport | null>;
+  /** GitHub PR 审查报告，按仓库保存最新一份；渲染时校验 pull_number 匹配。 */
+  prReviewByRepo: Record<string, ReviewReport | null>;
   tasks: Record<string, AiTaskState>;
   activeRequestByScope: Record<string, string | null>;
   loading: boolean;
@@ -165,6 +167,9 @@ interface AiState {
   loadSessions: (repoPath: string) => Promise<void>;
   loadReview: (repoPath: string) => Promise<void>;
   updateFindingStatus: (repoPath: string, findingId: string, status: FindingStatus) => Promise<void>;
+  loadPrReview: (repoPath: string, pullNumber: number) => Promise<void>;
+  reviewPullRequest: (repoPath: string, pullNumber: number) => Promise<ReviewReport>;
+  updatePrFindingStatus: (repoPath: string, pullNumber: number, findingId: string, status: FindingStatus) => Promise<void>;
   createSession: (repoPath: string) => void;
   selectSession: (repoPath: string, sessionId: string) => void;
   renameSession: (repoPath: string, sessionId: string, title: string) => Promise<void>;
@@ -179,7 +184,7 @@ interface AiState {
 }
 
 export const useAiStore = create<AiState>((set, get) => ({
-  sessionsByRepo: {}, activeSessionByRepo: {}, loadedRepos: {}, lastResultByRepo: {}, reviewByRepo: {},
+  sessionsByRepo: {}, activeSessionByRepo: {}, loadedRepos: {}, lastResultByRepo: {}, reviewByRepo: {}, prReviewByRepo: {},
   tasks: {}, activeRequestByScope: {}, loading: false, streamingTextByRepo: {},
   localSaveEnabled: localStorage.getItem("aigit.chat.localSave") !== "false", contextLimit: DEFAULT_CONTEXT_LIMIT,
   loadSessions: async (repoPath) => {
@@ -271,6 +276,48 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
   loadReview: async (repoPath) => { try { const report = await aiService.loadReviewReport(repoPath); set((state) => ({ reviewByRepo: { ...state.reviewByRepo, [repoPath]: report } })); } catch (e) { toastAiError(e, "review.loadFailed"); } },
   updateFindingStatus: async (repoPath, findingId, status) => { try { const report = await aiService.updateReviewFinding(repoPath, findingId, status); set((state) => ({ reviewByRepo: { ...state.reviewByRepo, [repoPath]: report } })); } catch (e) { toastAiError(e, "review.updateFailed"); throw e; } },
+  reviewPullRequest: async (repoPath, pullNumber) => {
+    const requestId = aiService.createRequestId();
+    const scope = `${repoPath}\u0000pr-review`;
+    const key = aiTaskKey(repoPath, "pr-review", requestId);
+    const onEvent = (event: AiStreamEvent) => set((state) => {
+      const task = state.tasks[key] ?? { repoPath, kind: "pr-review" as const, requestId, status: "started" as const, content: "" };
+      const next = { ...task };
+      if (event.type === "Delta") { next.content += event.delta; next.status = "streaming"; }
+      if (event.type === "Usage") { next.inputTokens = event.inputTokens; next.outputTokens = event.outputTokens; }
+      if (event.type === "Completed") next.status = "completed";
+      if (event.type === "Cancelled") next.status = "cancelled";
+      if (event.type === "Failed") { next.status = "failed"; next.error = event.message; }
+      const terminal = next.status === "completed" || next.status === "cancelled" || next.status === "failed";
+      const activeRequestByScope = terminal ? { ...state.activeRequestByScope, [scope]: null } : state.activeRequestByScope;
+      // 流式文本只进 task，不写 lastResultByRepo，避免与本地审查互相覆盖。
+      return { tasks: { ...state.tasks, [key]: next }, activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
+    });
+    set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "pr-review", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, loading: true }));
+    const { done } = await withSecretsConfirmation((confirmSecrets) =>
+      aiService.streamReviewPullRequest(repoPath, pullNumber, { onEvent }, requestId, confirmSecrets)
+    );
+    try {
+      await done;
+      const report = await aiService.loadPrReviewReport(repoPath, pullNumber);
+      if (!report) throw new Error(i18n.t("review.loadFailed"));
+      set((state) => ({ prReviewByRepo: { ...state.prReviewByRepo, [repoPath]: report } }));
+      useToastStore.getState().success(i18n.t("review.reviewDone"));
+      return report;
+    } catch (e) { set((state) => clearActiveScope(state, scope)); toastAiError(e, "review.reviewFailed"); throw e; }
+  },
+  loadPrReview: async (repoPath, pullNumber) => {
+    try {
+      const report = await aiService.loadPrReviewReport(repoPath, pullNumber);
+      set((state) => ({ prReviewByRepo: { ...state.prReviewByRepo, [repoPath]: report } }));
+    } catch (e) { toastAiError(e, "review.loadFailed"); }
+  },
+  updatePrFindingStatus: async (repoPath, pullNumber, findingId, status) => {
+    try {
+      const report = await aiService.updatePrReviewFinding(repoPath, pullNumber, findingId, status);
+      set((state) => ({ prReviewByRepo: { ...state.prReviewByRepo, [repoPath]: report } }));
+    } catch (e) { toastAiError(e, "review.updateFailed"); throw e; }
+  },
   sendChatMessage: async (content, repoPath, attachments = []) => {
     if (!repoPath) return;
     let session = (get().sessionsByRepo[repoPath] ?? []).find((item) => item.id === get().activeSessionByRepo[repoPath]);

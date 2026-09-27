@@ -82,6 +82,10 @@ pub struct ReviewReport {
     pub staged_only: bool,
     #[serde(default)]
     pub file_path: Option<String>,
+    /// Set when the report reviews a GitHub pull request instead of the
+    /// local worktree; persisted per PR in `aigit-review-pr-{number}.json`.
+    #[serde(default)]
+    pub pull_number: Option<u64>,
     #[serde(default)]
     pub stale: bool,
 }
@@ -159,6 +163,7 @@ impl AiReviewPayload {
         diff_hash: String,
         staged_only: bool,
         file_path: Option<String>,
+        pull_number: Option<u64>,
     ) -> ReviewReport {
         ReviewReport {
             id: new_id(),
@@ -189,6 +194,7 @@ impl AiReviewPayload {
             diff_hash,
             staged_only,
             file_path,
+            pull_number,
             stale: false,
         }
     }
@@ -262,9 +268,11 @@ pub fn finish_report(
     diff_hash: String,
     staged_only: bool,
     file_path: Option<String>,
+    pull_number: Option<u64>,
 ) -> Result<ReviewReport, String> {
-    parse_ai_payload(raw)
-        .map(|payload| payload.into_report(head_hash, diff_hash, staged_only, file_path))
+    parse_ai_payload(raw).map(|payload| {
+        payload.into_report(head_hash, diff_hash, staged_only, file_path, pull_number)
+    })
 }
 
 pub fn fallback_report(
@@ -273,6 +281,7 @@ pub fn fallback_report(
     diff_hash: String,
     staged_only: bool,
     file_path: Option<String>,
+    pull_number: Option<u64>,
 ) -> ReviewReport {
     ReviewReport {
         id: new_id(),
@@ -286,14 +295,20 @@ pub fn fallback_report(
         diff_hash,
         staged_only,
         file_path,
+        pull_number,
         stale: false,
     }
 }
 
 pub fn diff_hash(diffs: &[FileDiff]) -> String {
     let serialized = serde_json::to_string(diffs).unwrap_or_default();
+    text_hash(&serialized)
+}
+
+/// Hash an arbitrary text snapshot (e.g. a fetched PR diff).
+pub fn text_hash(text: &str) -> String {
     let mut hasher = DefaultHasher::new();
-    serialized.hash(&mut hasher);
+    text.hash(&mut hasher);
     format!("{:016x}", hasher.finish())
 }
 
@@ -305,8 +320,15 @@ fn report_path(repo: &git2::Repository) -> PathBuf {
     repo.path().join("aigit-review.json")
 }
 
-pub fn save_report(repo: &git2::Repository, report: &ReviewReport) -> AppResult<()> {
-    let path = report_path(repo);
+/// PR-scoped reports live next to the local one, one file per pull request
+/// number, so reviewing a PR never clobbers the local review report. The
+/// number is a u64, so it cannot traverse paths.
+fn pr_report_path(repo: &git2::Repository, pull_number: u64) -> PathBuf {
+    repo.path()
+        .join(format!("aigit-review-pr-{pull_number}.json"))
+}
+
+fn save_report_to(path: &Path, report: &ReviewReport) -> AppResult<()> {
     let content = serde_json::to_vec_pretty(report)?;
     let file = AtomicFile::new(path, AllowOverwrite);
     file.write(|handle| {
@@ -317,8 +339,27 @@ pub fn save_report(repo: &git2::Repository, report: &ReviewReport) -> AppResult<
     .map_err(|error| AppError::General(format!("Failed to save review report: {error}")))
 }
 
+pub fn save_report(repo: &git2::Repository, report: &ReviewReport) -> AppResult<()> {
+    save_report_to(&report_path(repo), report)
+}
+
+pub fn save_pr_report(
+    repo: &git2::Repository,
+    pull_number: u64,
+    report: &ReviewReport,
+) -> AppResult<()> {
+    save_report_to(&pr_report_path(repo, pull_number), report)
+}
+
 pub fn load_report(repo: &git2::Repository) -> AppResult<Option<ReviewReport>> {
     load_report_from(&report_path(repo))
+}
+
+pub fn load_pr_report(
+    repo: &git2::Repository,
+    pull_number: u64,
+) -> AppResult<Option<ReviewReport>> {
+    load_report_from(&pr_report_path(repo, pull_number))
 }
 
 pub fn recompute_stale(repo: &git2::Repository, report: &mut ReviewReport) -> AppResult<()> {
@@ -330,6 +371,15 @@ pub fn recompute_stale(repo: &git2::Repository, report: &mut ReviewReport) -> Ap
     report.stale =
         report.head_hash != head_hash(repo) || report.diff_hash != diff_hash(&current_diffs);
     Ok(())
+}
+
+/// A PR review is stale when the pull request head moved on. When the current
+/// head cannot be fetched (offline, auth missing) the saved flag is kept —
+/// the publish path re-validates against a live snapshot anyway.
+pub fn recompute_pr_stale(report: &mut ReviewReport, current_head: Option<&str>) {
+    if let (Some(saved), Some(current)) = (report.head_hash.as_deref(), current_head) {
+        report.stale = saved != current;
+    }
 }
 
 fn load_report_from(path: &Path) -> AppResult<Option<ReviewReport>> {
@@ -350,14 +400,37 @@ pub fn update_finding_status(
 ) -> AppResult<ReviewReport> {
     let mut report =
         load_report(repo)?.ok_or_else(|| AppError::General("No saved review report".into()))?;
+    set_finding_status(&mut report, finding_id, status)?;
+    save_report(repo, &report)?;
+    Ok(report)
+}
+
+/// Update a finding in a PR-scoped report.
+pub fn update_pr_finding_status(
+    repo: &git2::Repository,
+    pull_number: u64,
+    finding_id: &str,
+    status: FindingStatus,
+) -> AppResult<ReviewReport> {
+    let mut report = load_pr_report(repo, pull_number)?
+        .ok_or_else(|| AppError::General("No saved review report for this pull request".into()))?;
+    set_finding_status(&mut report, finding_id, status)?;
+    save_pr_report(repo, pull_number, &report)?;
+    Ok(report)
+}
+
+fn set_finding_status(
+    report: &mut ReviewReport,
+    finding_id: &str,
+    status: FindingStatus,
+) -> AppResult<()> {
     let finding = report
         .findings
         .iter_mut()
         .find(|finding| finding.id == finding_id)
         .ok_or_else(|| AppError::General("Review finding was not found".into()))?;
     finding.status = status;
-    save_report(repo, &report)?;
-    Ok(report)
+    Ok(())
 }
 
 #[cfg(test)]
@@ -417,7 +490,8 @@ mod tests {
         let root = std::env::temp_dir().join(format!("aigit-review-{unique}"));
         fs::create_dir_all(&root).unwrap();
         let repo = git2::Repository::init(&root).unwrap();
-        let mut report = finish_report(valid_json(), None, "diff".into(), false, None).unwrap();
+        let mut report =
+            finish_report(valid_json(), None, "diff".into(), false, None, None).unwrap();
         let finding_id = report.findings[0].id.clone();
         save_report(&repo, &report).unwrap();
 
@@ -435,12 +509,67 @@ mod tests {
     }
 
     #[test]
+    fn pr_report_round_trip_is_isolated_from_local_report() {
+        let unique = Uuid::new_v4();
+        let root = std::env::temp_dir().join(format!("aigit-review-pr-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+
+        let mut report = finish_report(
+            valid_json(),
+            Some("abc".into()),
+            "pdiff".into(),
+            false,
+            None,
+            Some(7),
+        )
+        .unwrap();
+        let finding_id = report.findings[0].id.clone();
+        save_pr_report(&repo, 7, &report).unwrap();
+
+        // The local report file stays untouched by PR-scoped saves.
+        assert!(load_report(&repo).unwrap().is_none());
+        report =
+            update_pr_finding_status(&repo, 7, &finding_id, FindingStatus::FalsePositive).unwrap();
+        assert_eq!(report.findings[0].status, FindingStatus::FalsePositive);
+        assert_eq!(report.pull_number, Some(7));
+        let reloaded = load_pr_report(&repo, 7).unwrap().unwrap();
+        assert_eq!(reloaded.findings[0].status, FindingStatus::FalsePositive);
+        assert!(load_pr_report(&repo, 8).unwrap().is_none());
+
+        // Head movement marks the PR report stale; an unfetchable head keeps
+        // the saved flag.
+        let mut stale_check = reloaded;
+        recompute_pr_stale(&mut stale_check, Some("def456"));
+        assert!(stale_check.stale);
+        recompute_pr_stale(&mut stale_check, Some("abc"));
+        assert!(!stale_check.stale);
+        recompute_pr_stale(&mut stale_check, None);
+        assert!(!stale_check.stale);
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn legacy_report_json_without_pull_number_deserializes() {
+        let legacy = r#"{"id":"r1","schema_version":1,"summary":"s","findings":[],"diff_hash":"h","staged_only":false,"stale":false}"#;
+        let report: ReviewReport = serde_json::from_str(legacy).unwrap();
+        assert_eq!(report.pull_number, None);
+        let value = serde_json::to_value(
+            &finish_report(valid_json(), None, "d".into(), false, None, Some(3)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(value["pull_number"], 3);
+    }
+
+    #[test]
     fn fallback_keeps_bounded_raw_output() {
         let report = fallback_report(
             &"x".repeat(MAX_RAW_MARKDOWN_CHARS + 10),
             None,
             "hash".into(),
             false,
+            None,
             None,
         );
         assert!(report.fallback);

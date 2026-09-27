@@ -2,7 +2,7 @@ import { invoke, Channel } from "@tauri-apps/api/core";
 import type { ChatAttachment, ChatMessage, CommitPlan, FindingStatus, GitErrorAnalysis, ReviewReport } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
-export type AiRequestKind = "chat" | "review" | "commit";
+export type AiRequestKind = "chat" | "review" | "pr-review" | "commit";
 export type AiStreamEvent =
   | { type: "Started"; requestId: string; provider: string; streaming: boolean }
   | { type: "Delta"; requestId: string; delta: string }
@@ -137,6 +137,41 @@ export const aiService = {
       requestId
     ),
   }),
+
+  reviewPullRequest: (repoPath: string, pullNumber: number, confirmSecrets?: boolean) => {
+    ensureTauri();
+    return invoke<ReviewReport>("review_pull_request", { repoPath, pullNumber, confirmSecrets });
+  },
+
+  streamReviewPullRequest: (
+    repoPath: string,
+    pullNumber: number,
+    handlers: AiStreamHandlers,
+    requestId = createRequestId(),
+    confirmSecrets?: boolean
+  ) => ({
+    requestId,
+    done: streamCommand(
+      "review_pull_request_stream",
+      { repoPath, pullNumber, confirmSecrets },
+      handlers,
+      async () => {
+        const report = await aiService.reviewPullRequest(repoPath, pullNumber, confirmSecrets);
+        return report.raw_markdown || report.summary;
+      },
+      requestId
+    ),
+  }),
+
+  loadPrReviewReport: (repoPath: string, pullNumber: number) => {
+    ensureTauri();
+    return invoke<ReviewReport | null>("load_pr_review_report", { repoPath, pullNumber });
+  },
+
+  updatePrReviewFinding: (repoPath: string, pullNumber: number, findingId: string, status: FindingStatus) => {
+    ensureTauri();
+    return invoke<ReviewReport>("update_pr_review_finding", { repoPath, pullNumber, findingId, status });
+  },
 
   loadReviewReport: (repoPath: string) => {
     ensureTauri();
