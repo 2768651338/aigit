@@ -1006,7 +1006,7 @@ pub fn gh_repo_create_and_publish(
         .is_some();
     Ok(PublishRepoResult {
         url,
-        remote_name,
+        remote_name: remote_name.to_string(),
         pushed,
     })
 }
