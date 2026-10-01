@@ -193,16 +193,14 @@ pub fn validate_host(host: &str) -> AppResult<()> {
     {
         return Err(invalid());
     }
-    let (hostname, port) = host.split_once(':').unwrap_or((host, ""));
+    let (hostname, port) = host.split_once(':').unwrap_or((host, "443"));
     if hostname.is_empty()
         || hostname.starts_with('-')
         || !hostname
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+        || port.parse::<u16>().is_err()
     {
-        return Err(invalid());
-    }
-    if !port.is_empty() && (port.len() > 5 || !port.chars().all(|c| c.is_ascii_digit())) {
         return Err(invalid());
     }
     Ok(())
@@ -393,32 +391,31 @@ fn valid_slug(value: &str) -> bool {
 /// Validate a GitHub repository slug for `gh repo create`: either `name`
 /// (created under the authenticated user) or `owner/name` (user or org).
 /// Leading `-` is rejected because the slug is a positional CLI argument and
-/// dash-prefixed values would be parsed as flags.
+/// dash-prefixed values would be parsed as flags; `.`/`..` parts are rejected
+/// as non-existent path-like slugs.
 fn validate_repo_slug(name: &str) -> AppResult<()> {
     if name.starts_with('-') {
         return Err(AppError::General(format!(
             "Invalid GitHub repository name: {name}"
         )));
     }
-    match name.split_once('/') {
-        Some((owner, repo)) => {
-            if !valid_slug(owner) {
-                return Err(AppError::General(format!(
-                    "Invalid GitHub repository owner: {owner}"
-                )));
-            }
-            if !valid_slug(repo) {
-                return Err(AppError::General(format!(
-                    "Invalid GitHub repository name: {repo}"
-                )));
-            }
-            Ok(())
+    let (owner, repo) = match name.split_once('/') {
+        Some((owner, repo)) => (Some(owner), repo),
+        None => (None, name),
+    };
+    if let Some(owner) = owner {
+        if !valid_slug(owner) || owner == "." || owner == ".." {
+            return Err(AppError::General(format!(
+                "Invalid GitHub repository owner: {owner}"
+            )));
         }
-        None if valid_slug(name) => Ok(()),
-        None => Err(AppError::General(format!(
-            "Invalid GitHub repository name: {name}"
-        ))),
     }
+    if !valid_slug(repo) || repo == "." || repo == ".." {
+        return Err(AppError::General(format!(
+            "Invalid GitHub repository name: {repo}"
+        )));
+    }
+    Ok(())
 }
 
 fn validate_repo_description(description: &str) -> AppResult<()> {
@@ -1592,7 +1589,10 @@ mod tests {
         assert!(validate_repo_slug("acme/widget").is_ok());
         assert!(validate_repo_slug("acme-team/widget.test_dev-2").is_ok());
         assert!(validate_repo_slug("").is_err());
+        assert!(validate_repo_slug(".").is_err());
+        assert!(validate_repo_slug("..").is_err());
         assert!(validate_repo_slug("acme/").is_err());
+        assert!(validate_repo_slug("acme/..").is_err());
         assert!(validate_repo_slug("/widget").is_err());
         assert!(validate_repo_slug("acme/wid get").is_err());
         assert!(validate_repo_slug("../etc-passwd").is_err());
@@ -1631,6 +1631,8 @@ mod tests {
         assert!(validate_host("ghe.example.com").is_ok());
         assert!(validate_host("ghe.local:8443").is_ok());
         assert!(validate_host("").is_err());
+        assert!(validate_host("ghe.local:65536").is_err());
+        assert!(validate_host("ghe.local:").is_err());
         assert!(validate_host("github.com/api").is_err());
         assert!(validate_host("github.com\\x").is_err());
         assert!(validate_host("gh example.com").is_err());
