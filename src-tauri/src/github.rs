@@ -992,12 +992,12 @@ pub fn gh_repo_create_and_publish(
         .flatten()
         .any(|name| name == "origin");
     let remote_name = if origin_taken { "github" } else { "origin" };
-    crate::git::remote::add_remote(repo, &remote_name, &url).map_err(|e| {
+    crate::git::remote::add_remote(repo, remote_name, &url).map_err(|e| {
         AppError::General(format!(
             "仓库已在 GitHub 创建（{url}），但添加 remote 失败：{e}"
         ))
     })?;
-    let pushed = crate::git::remote::push_branch_set_upstream(repo, &remote_name)
+    let pushed = crate::git::remote::push_branch_set_upstream(repo, remote_name)
         .map_err(|e| {
             AppError::General(format!(
                 "仓库已创建且 remote {remote_name} 已添加，但推送失败：{e}"
