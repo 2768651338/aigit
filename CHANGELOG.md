@@ -2,6 +2,17 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
+## [1.0.16] - 2026-10-01
+
+### Added
+
+- 在 GitHub 新建仓库并一站式发布（三处入口：分支页"远程与同步"面板按钮、命令面板、入口对话框 "GitHub" 标签页）：`gh repo create` 创建后自动添加 remote（`origin` 被占用时改用 `github`）并推送当前分支设置 upstream；仓库尚无提交时自动跳过推送并明确提示，不视为失败；gh CLI 未安装/未登录时给出对应指引与"重新检测"按钮；主机名可自定义（默认 github.com，支持 GitHub Enterprise 域名与端口，自动归一化，未登录提示带对应 `gh auth login --hostname` 命令）；私有仓库默认勾选，仓库名自动取本地目录名。
+
+### Fixed
+
+- 添加远程仓库表单：推送 URL 留空时点保存此前会静默无效——现自动复用获取 URL，必填项未填时保存按钮置灰，保存失败时表单保持打开供修改。
+- 建仓对话框的 gh 状态预检改用免仓库上下文探测（原实现对尚无 GitHub remote 的仓库必然探测失败并误报"未安装 gh CLI"）。
+
 ## [1.0.15] - 2026-09-27
 
 ### Added
