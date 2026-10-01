@@ -7,6 +7,7 @@ import { TitleBar } from "@/components/layout/TitleBar";
 import { StatusBar } from "@/components/layout/StatusBar";
 import { Toaster } from "@/components/common/Toaster";
 import { RepoEntryProvider } from "@/components/git/RepoEntryDialog";
+import { GitHubCreateProvider } from "@/components/git/GitHubCreateRepoDialog";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
 import { CommandPalette } from "@/components/common/CommandPalette";
 import {
@@ -40,7 +41,9 @@ export default function App() {
     <ErrorBoundary>
       <ContextMenuProvider>
         <RepoEntryProvider>
-          <AppShell />
+          <GitHubCreateProvider>
+            <AppShell />
+          </GitHubCreateProvider>
         </RepoEntryProvider>
       </ContextMenuProvider>
     </ErrorBoundary>

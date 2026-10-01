@@ -45,6 +45,9 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: translate }),
 }));
 vi.mock("@/services/git", () => ({ gitService: services }));
+vi.mock("./GitHubCreateRepoDialog", () => ({
+  useGitHubCreate: () => ({ showGitHubCreate: vi.fn() }),
+}));
 vi.mock("@/stores/toastStore", () => ({ useToastStore: () => toast }));
 vi.mock("@/utils/dialog", () => ({ confirmDialog: vi.fn(() => Promise.resolve(true)) }));
 vi.mock("@/stores/repoStore", () => ({
@@ -83,5 +86,28 @@ describe("RemotePanel", () => {
     fireEvent.change(select, { target: { value: "origin/main" } });
     fireEvent.click(screen.getByText("remotes.create"));
     await waitFor(() => expect(services.createTrackingBranch).toHaveBeenCalledWith("C:/repo", "origin/main", undefined));
+  });
+
+  it("adds a remote with the push URL defaulting to the fetch URL", async () => {
+    render(<RemotePanel />);
+    fireEvent.click(screen.getByLabelText("remotes.add"));
+    fireEvent.change(screen.getByPlaceholderText("remotes.name"), { target: { value: "mirror" } });
+    fireEvent.change(screen.getByPlaceholderText("remotes.fetchUrl"), { target: { value: "https://example.com/mirror.git" } });
+    // The push URL field is left empty on purpose: it must reuse the fetch URL.
+    fireEvent.click(screen.getAllByRole("button").find((button) => button.className.includes("btn-primary"))!);
+
+    await waitFor(() => expect(services.addRemote).toHaveBeenCalledWith("C:/repo", "mirror", "https://example.com/mirror.git"));
+    expect(services.setRemoteUrl).toHaveBeenNthCalledWith(1, "C:/repo", "mirror", "https://example.com/mirror.git", false);
+    expect(services.setRemoteUrl).toHaveBeenNthCalledWith(2, "C:/repo", "mirror", "https://example.com/mirror.git", true);
+  });
+
+  it("keeps the save button disabled until name and fetch URL are filled", async () => {
+    render(<RemotePanel />);
+    fireEvent.click(screen.getByLabelText("remotes.add"));
+    const save = screen.getAllByRole("button").find((button) => button.className.includes("btn-primary"))!;
+    expect(save).toBeDisabled();
+    fireEvent.change(screen.getByPlaceholderText("remotes.name"), { target: { value: "mirror" } });
+    fireEvent.change(screen.getByPlaceholderText("remotes.fetchUrl"), { target: { value: "https://example.com/mirror.git" } });
+    expect(save).not.toBeDisabled();
   });
 });

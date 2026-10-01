@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   CreatePullRequest,
+  CreateRepoInput,
   GhStatus,
   GitHubIssue,
   GitHubRemote,
   InlineCommentRequest,
+  PublishRepoResult,
   PullRequest,
   PullRequestDetail,
   PullRequestWorkflowResult,
@@ -28,6 +30,14 @@ export const githubService = {
   ghStatus(path: string, remote?: string) {
     ensureTauri();
     return invoke<GhStatus>("github_gh_status", { path, remote });
+  },
+  /**
+   * gh status for an explicit host (github.com or a GitHub Enterprise
+   * domain), without needing a repository that already has a GitHub remote.
+   */
+  ghStatusForHost(host: string) {
+    ensureTauri();
+    return invoke<GhStatus>("github_gh_status_for_host", { host });
   },
   openCompare(path: string, base: string, head: string, remote?: string) {
     ensureTauri();
@@ -65,6 +75,15 @@ export const githubService = {
   releaseCreate(path: string, tagName: string, name: string, body: string, remote?: string) {
     ensureTauri();
     return invoke<string>("github_release_create", { path, remote, tagName, name, body });
+  },
+  /**
+   * Create a GitHub repository via `gh repo create`, add it as a remote and
+   * push the current branch. Requires the GitHub CLI to be installed and
+   * authenticated; see ghStatus for pre-checks.
+   */
+  createRepo(path: string, input: CreateRepoInput) {
+    ensureTauri();
+    return invoke<PublishRepoResult>("github_repo_create", { path, input });
   },
   setPat(token: string) {
     ensureTauri();

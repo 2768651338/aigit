@@ -148,6 +148,76 @@ pub struct CreateRelease {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateRepoInput {
+    /// Repository slug: `name` (created under the authenticated user) or
+    /// `owner/name`.
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default = "default_repo_private")]
+    pub private: bool,
+    /// GitHub host: `github.com` (default) or a GitHub Enterprise domain.
+    /// Scheme and trailing slashes are tolerated and stripped.
+    #[serde(default)]
+    pub host: Option<String>,
+}
+
+fn default_repo_private() -> bool {
+    true
+}
+
+/// Normalize a user-supplied GitHub host: trim, strip an `http(s)://` scheme
+/// and trailing slashes, lowercase. Empty input yields the default host.
+pub fn normalize_host(host: Option<&str>) -> String {
+    let value = host.unwrap_or("").trim();
+    let value = value
+        .strip_prefix("https://")
+        .or_else(|| value.strip_prefix("http://"))
+        .unwrap_or(value);
+    let value = value.trim_end_matches('/');
+    if value.is_empty() {
+        "github.com".into()
+    } else {
+        value.to_ascii_lowercase()
+    }
+}
+
+/// Validate a normalized GitHub host (`hostname[:port]`). Values reach `gh`
+/// as the `GH_HOST` environment variable and `--hostname` flag, so anything
+/// path-like or whitespace-bearing is rejected defensively.
+pub fn validate_host(host: &str) -> AppResult<()> {
+    let invalid = || AppError::General(format!("Invalid GitHub host: {host}"));
+    if host.is_empty()
+        || host.contains(['/', '\\', '@', '?', '#', '%'])
+        || host.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return Err(invalid());
+    }
+    let (hostname, port) = host.split_once(':').unwrap_or((host, ""));
+    if hostname.is_empty()
+        || hostname.starts_with('-')
+        || !hostname
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-'))
+    {
+        return Err(invalid());
+    }
+    if !port.is_empty() && (port.len() > 5 || !port.chars().all(|c| c.is_ascii_digit())) {
+        return Err(invalid());
+    }
+    Ok(())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishRepoResult {
+    pub url: String,
+    pub remote_name: String,
+    /// false when the repository has no commits yet, so there was nothing to
+    /// push; the publish still succeeded.
+    pub pushed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowResult {
     pub pull_request: Option<PullRequest>,
     pub opened_url: Option<String>,
@@ -319,6 +389,51 @@ fn valid_slug(value: &str) -> bool {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
+
+/// Validate a GitHub repository slug for `gh repo create`: either `name`
+/// (created under the authenticated user) or `owner/name` (user or org).
+/// Leading `-` is rejected because the slug is a positional CLI argument and
+/// dash-prefixed values would be parsed as flags.
+fn validate_repo_slug(name: &str) -> AppResult<()> {
+    if name.starts_with('-') {
+        return Err(AppError::General(format!(
+            "Invalid GitHub repository name: {name}"
+        )));
+    }
+    match name.split_once('/') {
+        Some((owner, repo)) => {
+            if !valid_slug(owner) {
+                return Err(AppError::General(format!(
+                    "Invalid GitHub repository owner: {owner}"
+                )));
+            }
+            if !valid_slug(repo) {
+                return Err(AppError::General(format!(
+                    "Invalid GitHub repository name: {repo}"
+                )));
+            }
+            Ok(())
+        }
+        None if valid_slug(name) => Ok(()),
+        None => Err(AppError::General(format!(
+            "Invalid GitHub repository name: {name}"
+        ))),
+    }
+}
+
+fn validate_repo_description(description: &str) -> AppResult<()> {
+    if description.contains(['\n', '\r', '\0']) {
+        return Err(AppError::General(
+            "Repository description must not contain line breaks".into(),
+        ));
+    }
+    if description.chars().count() > 350 {
+        return Err(AppError::General(
+            "Repository description exceeds the 350-character limit".into(),
+        ));
+    }
+    Ok(())
+}
 fn validate_ref(value: &str) -> AppResult<()> {
     if value.is_empty()
         || value.len() > 255
@@ -358,6 +473,15 @@ fn run_gh_process(
     args: &[String],
     timeout: Duration,
 ) -> AppResult<(bool, String, String)> {
+    run_gh_process_env(workdir, args, timeout, &[])
+}
+
+fn run_gh_process_env(
+    workdir: &Path,
+    args: &[String],
+    timeout: Duration,
+    envs: &[(&str, &str)],
+) -> AppResult<(bool, String, String)> {
     // 安全边界：只执行编译期字面量二进制 "gh"，参数以 argv 数组逐个传递，
     // 全程不经过 shell，仓库内容无法注入或篡改命令。
     // CREATE_NO_WINDOW（仅 Windows）：抑制 GUI 进程派生 CLI 时的控制台窗口闪烁。
@@ -368,6 +492,11 @@ fn run_gh_process(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // 额外环境变量（如 GH_HOST）只影响 gh 的目标主机选择，值来自
+    // normalize_host/validate_host 之后的白名单字符集，不参与 shell 解析。
+    for (key, value) in envs {
+        command.env(key, value);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -795,6 +924,91 @@ pub fn gh_release_create(
         return Ok(remote.web_url() + "/releases");
     }
     Ok(url)
+}
+
+/// Create a GitHub repository via `gh repo create`; returns the new repo URL.
+/// The repository is created under the authenticated user unless the name is
+/// given as `owner/name`. `input.host` selects github.com (default) or a
+/// GitHub Enterprise instance via the `GH_HOST` environment variable.
+pub fn gh_repo_create(workdir: &Path, input: &CreateRepoInput) -> AppResult<String> {
+    let name = input.name.trim();
+    validate_repo_slug(name)?;
+    let host = normalize_host(input.host.as_deref());
+    validate_host(&host)?;
+    let description = input
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let mut args = vec!["repo".to_string(), "create".to_string(), name.to_string()];
+    if let Some(description) = &description {
+        validate_repo_description(description)?;
+        args.push("--description".into());
+        args.push(description.clone());
+    }
+    args.push(if input.private {
+        "--private".into()
+    } else {
+        "--public".into()
+    });
+    let (ok, stdout, stderr) =
+        run_gh_process_env(workdir, &args, GH_TIMEOUT, &[("GH_HOST", host.as_str())])?;
+    if !ok {
+        return Err(AppError::General(format!(
+            "GitHub CLI failed: {}",
+            stderr.trim()
+        )));
+    }
+    // `gh repo create` prints the new repository URL on the last output line.
+    let url = stdout
+        .trim()
+        .lines()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if !url.starts_with("https://") {
+        return Err(AppError::General(format!(
+            "GitHub CLI did not return a repository URL: {url}"
+        )));
+    }
+    Ok(url)
+}
+
+/// One-shot publish for a local repository: create the GitHub repository,
+/// register it as a remote and push the current branch with upstream.
+/// Earlier stages survive a later failure — the error message states which
+/// stage failed and what has already been done.
+pub fn gh_repo_create_and_publish(
+    repo: &Repository,
+    input: &CreateRepoInput,
+) -> AppResult<PublishRepoResult> {
+    let workdir = crate::git::cli::workdir(repo)?;
+    let url = gh_repo_create(workdir, input)?;
+    let origin_taken = repo
+        .remotes()?
+        .iter()
+        .flatten()
+        .any(|name| name == "origin");
+    let remote_name = if origin_taken { "github" } else { "origin" };
+    crate::git::remote::add_remote(repo, &remote_name, &url).map_err(|e| {
+        AppError::General(format!(
+            "仓库已在 GitHub 创建（{url}），但添加 remote 失败：{e}"
+        ))
+    })?;
+    let pushed = crate::git::remote::push_branch_set_upstream(repo, &remote_name)
+        .map_err(|e| {
+            AppError::General(format!(
+                "仓库已创建且 remote {remote_name} 已添加，但推送失败：{e}"
+            ))
+        })?
+        .is_some();
+    Ok(PublishRepoResult {
+        url,
+        remote_name,
+        pushed,
+    })
 }
 
 pub fn gh_checkout(workdir: &Path, remote: &GitHubRemote, number: u64) -> AppResult<String> {
@@ -1372,6 +1586,60 @@ fn api_error(status: StatusCode, remaining: &str, retry: &str, body: &str) -> Ap
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn repo_slug_accepts_name_and_owner_slash_name() {
+        assert!(validate_repo_slug("widget").is_ok());
+        assert!(validate_repo_slug("acme/widget").is_ok());
+        assert!(validate_repo_slug("acme-team/widget.test_dev-2").is_ok());
+        assert!(validate_repo_slug("").is_err());
+        assert!(validate_repo_slug("acme/").is_err());
+        assert!(validate_repo_slug("/widget").is_err());
+        assert!(validate_repo_slug("acme/wid get").is_err());
+        assert!(validate_repo_slug("../etc-passwd").is_err());
+        assert!(validate_repo_slug("-bad").is_err());
+    }
+
+    #[test]
+    fn repo_description_rejects_line_breaks_and_overlong_text() {
+        assert!(validate_repo_description("A short description").is_ok());
+        assert!(validate_repo_description("line one\nline two").is_err());
+        assert!(validate_repo_description("carriage\rreturn").is_err());
+        assert!(validate_repo_description("nul\0byte").is_err());
+        assert!(validate_repo_description(&"x".repeat(351)).is_err());
+        assert!(validate_repo_description(&"x".repeat(350)).is_ok());
+    }
+
+    #[test]
+    fn host_normalization_strips_scheme_and_defaults_to_dotcom() {
+        assert_eq!(normalize_host(None), "github.com");
+        assert_eq!(normalize_host(Some("")), "github.com");
+        assert_eq!(normalize_host(Some("  ")), "github.com");
+        assert_eq!(normalize_host(Some("GitHub.COM")), "github.com");
+        assert_eq!(
+            normalize_host(Some("https://GitHub.Example.COM/")),
+            "github.example.com"
+        );
+        assert_eq!(
+            normalize_host(Some("http://ghe.local:8443")),
+            "ghe.local:8443"
+        );
+    }
+
+    #[test]
+    fn host_validation_rejects_path_like_and_whitespace_values() {
+        assert!(validate_host("github.com").is_ok());
+        assert!(validate_host("ghe.example.com").is_ok());
+        assert!(validate_host("ghe.local:8443").is_ok());
+        assert!(validate_host("").is_err());
+        assert!(validate_host("github.com/api").is_err());
+        assert!(validate_host("github.com\\x").is_err());
+        assert!(validate_host("gh example.com").is_err());
+        assert!(validate_host("user@github.com").is_err());
+        assert!(validate_host("-host.example.com").is_err());
+        assert!(validate_host("ghe.local:99999").is_err());
+        assert!(validate_host("ghe.local:port").is_err());
+    }
+
     #[test]
     fn stored_dotcom_pat_is_not_forwarded_to_enterprise_hosts() {
         let remote =

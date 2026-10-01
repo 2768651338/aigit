@@ -4,11 +4,13 @@ import { useShallow } from "zustand/react/shallow";
 import { useRepoStore } from "@/stores/repoStore";
 import { useAiStore } from "@/stores/aiStore";
 import { useRepoEntry } from "@/components/git/RepoEntryDialog";
+import { useGitHubCreate } from "@/components/git/GitHubCreateRepoDialog";
 import type { ViewType } from "@/types";
 import {
   FileEditIcon,
   GitBranchIcon,
   FolderIcon,
+  GithubIcon,
   ScanSearchIcon,
   MessageSquareIcon,
   BarChartIcon,
@@ -45,6 +47,7 @@ const VIEW_TARGETS: { view: ViewType; icon: typeof FileEditIcon; shortcut: strin
 export function CommandPalette({ onViewChange }: CommandPaletteProps) {
   const { t } = useTranslation();
   const { showRepoEntry } = useRepoEntry();
+  const { showGitHubCreate } = useGitHubCreate();
   const { currentPath } = useRepoStore(
     useShallow((s) => ({ currentPath: s.currentPath })),
   );
@@ -113,6 +116,13 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
       },    );
     if (currentPath) {
       items.push({
+        id: "action:githubCreate",
+        label: t("githubCreate.title"),
+        group: t("palette.groupActions"),
+        icon: GithubIcon,
+        run: () => showGitHubCreate(),
+      });
+      items.push({
         id: "action:newChat",
         label: t("chat.newSession"),
         group: t("palette.groupActions"),
@@ -124,7 +134,7 @@ export function CommandPalette({ onViewChange }: CommandPaletteProps) {
       });
     }
     return items;
-  }, [t, onViewChange, showRepoEntry, currentPath, createSession]);
+  }, [t, onViewChange, showRepoEntry, showGitHubCreate, currentPath, createSession]);
 
   const keyword = filterText.trim().toLowerCase();
   const filtered = useMemo(

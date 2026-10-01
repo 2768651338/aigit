@@ -117,6 +117,8 @@ pub fn run() {
             github_cmd::github_issue_list,
             github_cmd::github_issue_create,
             github_cmd::github_release_create,
+            github_cmd::github_repo_create,
+            github_cmd::github_gh_status_for_host,
             github_cmd::set_github_pat,
             github_cmd::delete_github_pat,
             git_cmd::discard_files,

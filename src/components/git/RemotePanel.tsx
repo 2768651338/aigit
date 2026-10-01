@@ -6,10 +6,12 @@ import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
+import { useGitHubCreate } from "./GitHubCreateRepoDialog";
 import {
   CheckIcon,
   DownloadIcon,
   GitBranchIcon,
+  GithubIcon,
   PlusIcon,
   RefreshIcon,
   SendIcon,
@@ -51,6 +53,7 @@ export function RemotePanel() {
     })),
   );
   const toast = useToastStore();
+  const { showGitHubCreate } = useGitHubCreate();
   const [form, setForm] = useState<RemoteForm | null>(null);
   const [selectedRemote, setSelectedRemote] = useState("");
   const [upstreamBranch, setUpstreamBranch] = useState("");
@@ -137,20 +140,27 @@ export function RemotePanel() {
   };
 
   const saveRemote = async () => {
-    if (!currentPath || !form?.name.trim() || !form.fetchUrl.trim() || !form.pushUrl.trim()) return;
+    // Push URL is optional: an empty value reuses the fetch URL, matching
+    // `git remote add`. The button is disabled until the required fields are
+    // filled, so this early return should never fire in practice.
+    if (!currentPath || !form?.name.trim() || !form.fetchUrl.trim()) return;
     const name = form.name.trim();
     const fetchUrl = form.fetchUrl.trim();
-    const pushUrl = form.pushUrl.trim();
+    const pushUrl = form.pushUrl.trim() || fetchUrl;
+    const oldName = form.oldName;
+    let saved = false;
     await run("save", async () => {
-      if (!form.oldName) {
+      if (!oldName) {
         await gitService.addRemote(currentPath, name, fetchUrl);
-      } else if (form.oldName !== name) {
-        await gitService.renameRemote(currentPath, form.oldName, name);
+      } else if (oldName !== name) {
+        await gitService.renameRemote(currentPath, oldName, name);
       }
       await gitService.setRemoteUrl(currentPath, name, fetchUrl, false);
       await gitService.setRemoteUrl(currentPath, name, pushUrl, true);
-    }, t(form.oldName ? "remotes.updated" : "remotes.added", { name }));
-    setForm(null);
+      saved = true;
+    }, t(oldName ? "remotes.updated" : "remotes.added", { name }));
+    // Keep the form open when saving failed so the input can be corrected.
+    if (saved) setForm(null);
   };
 
   const removeRemote = async (name: string) => {
@@ -219,6 +229,7 @@ export function RemotePanel() {
         {taskBusy && <span className="text-2xs text-accent">{t(`remotes.running.${runningTask.key}`)}</span>}
         {fetchUpdatedAt && <span className="text-2xs text-text-muted">{t("remotes.updatedAt", { time: new Date(fetchUpdatedAt).toLocaleTimeString() })}</span>}
         <button className="btn-ghost" onClick={() => void load()} aria-label={t("changes.refresh")}><RefreshIcon size={14} /></button>
+        <button className="btn-ghost" onClick={showGitHubCreate} aria-label={t("githubCreate.title")} title={t("githubCreate.title")}><GithubIcon size={14} /></button>
         <button className="btn-ghost" onClick={() => setForm({ name: "", fetchUrl: "", pushUrl: "" })} aria-label={t("remotes.add")}><PlusIcon size={14} /></button>
       </div>
 
@@ -250,7 +261,7 @@ export function RemotePanel() {
 
       {(form || remotes.length > 0) && (
         <div className="px-4 pb-2.5 space-y-1.5">
-          {form && <div className="grid grid-cols-[9rem_1fr_1fr_auto_auto] gap-2"><input className="input py-1.5 text-xs" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t("remotes.name")} /><input className="input py-1.5 text-xs" value={form.fetchUrl} onChange={(e) => setForm({ ...form, fetchUrl: e.target.value })} placeholder={t("remotes.fetchUrl")} /><input className="input py-1.5 text-xs" value={form.pushUrl} onChange={(e) => setForm({ ...form, pushUrl: e.target.value })} placeholder={t("remotes.pushUrl")} /><button className="btn-primary" onClick={saveRemote} disabled={busy === "save"}><CheckIcon size={13} /></button><button className="btn-ghost" onClick={() => setForm(null)}><XIcon size={13} /></button></div>}
+          {form && <div className="grid grid-cols-[9rem_1fr_1fr_auto_auto] gap-2"><input className="input py-1.5 text-xs" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={t("remotes.name")} /><input className="input py-1.5 text-xs" value={form.fetchUrl} onChange={(e) => setForm({ ...form, fetchUrl: e.target.value })} placeholder={t("remotes.fetchUrl")} /><input className="input py-1.5 text-xs" value={form.pushUrl} onChange={(e) => setForm({ ...form, pushUrl: e.target.value })} placeholder={t("remotes.pushUrl")} title={t("remotes.pushUrlOptional")} /><button className="btn-primary" onClick={saveRemote} disabled={busy === "save" || !form.name.trim() || !form.fetchUrl.trim()}><CheckIcon size={13} /></button><button className="btn-ghost" onClick={() => setForm(null)}><XIcon size={13} /></button></div>}
           {remotes.map((remote) => <div key={remote.name} className="flex items-center gap-2 text-xs group"><button className="font-mono text-text-primary hover:underline" onClick={() => setForm({ oldName: remote.name, name: remote.name, fetchUrl: remote.fetch_url, pushUrl: remote.push_url })}>{remote.name}</button><span className="text-text-muted truncate flex-1" title={remote.fetch_url}>{t("remotes.fetchUrl")}: {remote.fetch_url}</span><span className="text-text-muted truncate flex-1" title={remote.push_url}>{t("remotes.pushUrl")}: {remote.push_url}</span><button className="opacity-0 group-hover:opacity-100 text-danger" onClick={() => removeRemote(remote.name)} aria-label={t("remotes.remove", { name: remote.name })}><TrashIcon size={13} /></button></div>)}
         </div>
       )}

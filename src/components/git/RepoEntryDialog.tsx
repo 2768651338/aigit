@@ -1,21 +1,24 @@
-import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
 import { gitService } from "@/services/git";
+import { githubService } from "@/services/github";
 import { useRepoStore } from "@/stores/repoStore";
 import { formatError } from "@/utils/error";
 import { useModalAccessibility } from "@/utils/modalA11y";
+import { defaultRepoName, isValidRepoHost, isValidRepoSlug, normalizeRepoHost } from "./GitHubCreateRepoDialog";
 import {
   AlertCircleIcon,
   DownloadIcon,
   FolderIcon,
   GitBranchIcon,
+  GithubIcon,
   SpinnerIcon,
   XIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
 
-type RepoEntryMode = "open" | "clone" | "init";
+type RepoEntryMode = "open" | "clone" | "init" | "github";
 
 interface RepoEntryContextValue {
   showRepoEntry: (mode?: RepoEntryMode) => void;
@@ -78,6 +81,11 @@ function RepoEntryDialog({
   const [mode, setMode] = useState<RepoEntryMode>(initialMode);
   const [path, setPath] = useState("");
   const [url, setUrl] = useState("");
+  const [repoName, setRepoName] = useState("");
+  const [repoNameTouched, setRepoNameTouched] = useState(false);
+  const [repoDescription, setRepoDescription] = useState("");
+  const [repoPrivate, setRepoPrivate] = useState(true);
+  const [repoHost, setRepoHost] = useState("github.com");
   const [busy, setBusy] = useState(false);
   const [cloneTaskId, setCloneTaskId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -98,7 +106,25 @@ function RepoEntryDialog({
   const urlError = url.trim() && !isCloneUrlValid(url)
     ? t("repoEntry.urlInvalid")
     : null;
-  const canSubmit = Boolean(path.trim()) && !pathError && (mode !== "clone" || (url.trim() && !urlError));
+  const repoNameError = repoName.trim() && !isValidRepoSlug(repoName.trim())
+    ? t("repoEntry.githubNameInvalid")
+    : null;
+  const repoHostValid = isValidRepoHost(repoHost);
+  const repoHostError = repoHost.trim() && !repoHostValid
+    ? t("githubCreate.hostInvalid")
+    : null;
+  // Derive the GitHub repo name from the target directory until the user
+  // edits it by hand.
+  useEffect(() => {
+    if (!repoNameTouched) setRepoName(defaultRepoName(path));
+  }, [path, repoNameTouched]);
+  const canSubmit = Boolean(path.trim()) && !pathError && (
+    mode === "clone"
+      ? Boolean(url.trim()) && !urlError
+      : mode === "github"
+        ? Boolean(repoName.trim()) && !repoNameError && !repoHostError
+        : true
+  );
 
   const submit = async () => {
     if (!canSubmit || busy) return;
@@ -115,6 +141,17 @@ function RepoEntryDialog({
         const taskId = `clone-${Date.now()}`;
         setCloneTaskId(taskId);
         await gitService.cloneRepoTask(url.trim(), target, taskId);
+      } else if (mode === "github") {
+        // `git init` is idempotent: an existing repository is left as-is, an
+        // empty directory becomes one. Then create on GitHub, wire the
+        // remote and push (skipped automatically without commits).
+        await gitService.initRepo(target);
+        await githubService.createRepo(target, {
+          name: repoName.trim(),
+          description: repoDescription.trim() || null,
+          private: repoPrivate,
+          host: normalizeRepoHost(repoHost),
+        });
       } else {
         await gitService.initRepo(target);
       }
@@ -136,6 +173,7 @@ function RepoEntryDialog({
     { id: "open", icon: FolderIcon },
     { id: "clone", icon: DownloadIcon },
     { id: "init", icon: GitBranchIcon },
+    { id: "github", icon: GithubIcon },
   ];
 
   return (
@@ -190,6 +228,59 @@ function RepoEntryDialog({
               />
               {urlError && <span className="block mt-1 text-xs text-danger">{urlError}</span>}
             </label>
+          )}
+
+          {mode === "github" && (
+            <>
+              <label className="block text-sm">
+                <span className="block mb-1.5 text-text-secondary">{t("repoEntry.githubRepoName")}</span>
+                <input
+                  autoFocus
+                  value={repoName}
+                  onChange={(event) => {
+                    setRepoName(event.target.value);
+                    setRepoNameTouched(true);
+                  }}
+                  disabled={busy}
+                  maxLength={201}
+                  placeholder={t("repoEntry.githubRepoNamePlaceholder")}
+                  className="w-full bg-bg-base border border-border rounded px-3 py-2 text-sm focus:outline-none focus:border-border-strong"
+                />
+                {repoNameError && <span className="block mt-1 text-xs text-danger">{repoNameError}</span>}
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1.5 text-text-secondary">{t("githubCreate.host")}</span>
+                <input
+                  value={repoHost}
+                  onChange={(event) => setRepoHost(event.target.value)}
+                  disabled={busy}
+                  maxLength={253}
+                  placeholder={t("githubCreate.hostPlaceholder")}
+                  className="w-full bg-bg-base border border-border rounded px-3 py-2 text-sm focus:outline-none focus:border-border-strong"
+                />
+                <span className="block mt-1 text-2xs text-text-muted">{t("githubCreate.hostHint")}</span>
+                {repoHostError && <span className="block mt-1 text-xs text-danger">{repoHostError}</span>}
+              </label>
+              <label className="block text-sm">
+                <span className="block mb-1.5 text-text-secondary">{t("repoEntry.githubDescription")}</span>
+                <input
+                  value={repoDescription}
+                  onChange={(event) => setRepoDescription(event.target.value)}
+                  disabled={busy}
+                  maxLength={350}
+                  className="w-full bg-bg-base border border-border rounded px-3 py-2 text-sm focus:outline-none focus:border-border-strong"
+                />
+              </label>
+              <label className="flex items-center gap-2 text-sm text-text-secondary">
+                <input
+                  type="checkbox"
+                  checked={repoPrivate}
+                  onChange={(event) => setRepoPrivate(event.target.checked)}
+                  disabled={busy}
+                />
+                {t("repoEntry.githubPrivate")}
+              </label>
+            </>
           )}
 
           <label className="block text-sm">

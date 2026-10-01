@@ -243,6 +243,31 @@ pub fn push_current_branch_cancellable(
     }
 }
 
+/// Push the current branch to `remote` and set it as the branch's upstream.
+/// Returns `Ok(None)` when the repository has no commits yet (unborn HEAD):
+/// the branch only comes into existence with the first commit, so callers
+/// should surface "created but nothing to push" instead of failing.
+pub fn push_branch_set_upstream(repo: &Repository, remote: &str) -> AppResult<Option<String>> {
+    validate_remote_name(remote)?;
+    repo.find_remote(remote)?;
+    let branch = match repo.head() {
+        Ok(head) if head.is_branch() => head
+            .shorthand()
+            .map(str::to_owned)
+            .ok_or_else(|| AppError::General("无法读取当前分支名".into()))?,
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => return Ok(None),
+        Ok(_) => return Err(AppError::General("当前处于 detached HEAD，无法推送".into())),
+        Err(e) => return Err(e.into()),
+    };
+    let mut args = vec!["push".to_string(), "--set-upstream".into()];
+    args.push("--".into());
+    args.push(remote.to_string());
+    args.push(format!("refs/heads/{branch}:refs/heads/{branch}"));
+    let error = format!("推送分支 {branch} 失败");
+    cli::run_checked(cli::workdir(repo)?, args, REMOTE_TIMEOUT, &error)?;
+    Ok(Some(branch))
+}
+
 pub fn pull_current_branch(repo: &Repository) -> AppResult<String> {
     pull_current_branch_cancellable(repo, None)
 }
@@ -403,6 +428,36 @@ mod tests {
         edit_remote(&repo, "upstream", "mirror", &remote_url).unwrap();
         remove_remote(&repo, "mirror").unwrap();
         assert!(list_remotes(&repo).unwrap().is_empty());
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn push_branch_set_upstream_handles_unborn_and_detached_head() {
+        let root = temp_dir("publish");
+        let bare = root.join("remote.git");
+        let work = root.join("work");
+        fs::create_dir_all(&bare).unwrap();
+        fs::create_dir_all(&work).unwrap();
+        git(&bare, &["init", "--bare"]);
+        git(&work, &["init"]);
+        let remote_url = bare.to_string_lossy().replace('\\', "/");
+
+        // Unborn HEAD (fresh `git init`, no commits): nothing to push yet.
+        let repo = Repository::open(&work).unwrap();
+        add_remote(&repo, "origin", &remote_url).unwrap();
+        assert_eq!(push_branch_set_upstream(&repo, "origin").unwrap(), None);
+
+        // Detached HEAD: refuse instead of guessing a branch name.
+        git(&work, &["config", "user.name", "Test"]);
+        git(&work, &["config", "user.email", "test@example.com"]);
+        fs::write(work.join("README.txt"), "test").unwrap();
+        git(&work, &["add", "README.txt"]);
+        git(&work, &["commit", "-m", "initial"]);
+        git(&work, &["checkout", "--detach"]);
+        let repo = Repository::open(&work).unwrap();
+        assert!(push_branch_set_upstream(&repo, "origin").is_err());
+
         drop(repo);
         let _ = fs::remove_dir_all(root);
     }

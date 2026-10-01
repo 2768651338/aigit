@@ -433,6 +433,46 @@ pub async fn github_release_create(
     ))
 }
 
+/// Host-scoped gh status probe that needs no repository context: before a
+/// repository has any GitHub remote, `github_gh_status` cannot discover a
+/// host, so the create-repository dialog probes the user-selected host
+/// directly. Runs on the blocking pool (see `gh_status_on_blocking_pool`).
+#[tauri::command]
+pub async fn github_gh_status_for_host(host: Option<String>) -> AppResult<github::GhStatus> {
+    let host = github::normalize_host(host.as_deref());
+    tokio::task::spawn_blocking(move || Ok(github::gh_status(&std::env::temp_dir(), &host)))
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?
+}
+
+/// Create a GitHub repository and publish the local repository to it in one
+/// shot. Only the `gh` CLI path is supported: there is no remote to derive an
+/// API context from yet, and `gh repo create` uses the CLI's own auth.
+#[tauri::command]
+pub async fn github_repo_create(
+    path: String,
+    input: github::CreateRepoInput,
+) -> AppResult<github::PublishRepoResult> {
+    let repo = git::repo::open_repo(&path)?;
+    let host = github::normalize_host(input.host.as_deref());
+    github::validate_host(&host)?;
+    let workdir = git::cli::workdir(&repo)?.to_path_buf();
+    let status = gh_status_on_blocking_pool(&workdir, &host).await?;
+    if !status.installed {
+        return Err(AppError::Credential(
+            "GitHub CLI (gh) was not found; install it and run `gh auth login`".into(),
+        ));
+    }
+    if !status.authenticated {
+        return Err(AppError::Credential(format!(
+            "GitHub CLI is not authenticated for {host}; run `gh auth login --hostname {host}`"
+        )));
+    }
+    tokio::task::spawn_blocking(move || github::gh_repo_create_and_publish(&repo, &input))
+        .await
+        .map_err(|e| AppError::General(format!("GitHub CLI task failed: {e}")))?
+}
+
 #[tauri::command]
 pub fn set_github_pat(token: String) -> AppResult<()> {
     use crate::config::{CredentialStore, SystemCredentialStore};

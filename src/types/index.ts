@@ -175,6 +175,23 @@ export interface InlineCommentRequest {
   pull_review?: boolean;
 }
 
+export interface CreateRepoInput {
+  /** 仓库 slug：`name`（建在当前登录账号下）或 `owner/name`。 */
+  name: string;
+  description?: string | null;
+  /** 默认 true：未显式选择时宁可不公开。 */
+  private: boolean;
+  /** GitHub 主机：留空/默认 github.com，GitHub Enterprise 填自定义域名。 */
+  host?: string | null;
+}
+
+export interface PublishRepoResult {
+  url: string;
+  remote_name: string;
+  /** false 表示仓库尚无提交、没有可推送内容，建仓与关联仍算成功。 */
+  pushed: boolean;
+}
+
 export interface PullRequestWorkflowResult {
   pull_request: PullRequest | null;
   opened_url: string | null;
