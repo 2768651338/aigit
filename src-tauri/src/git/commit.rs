@@ -398,6 +398,7 @@ mod tests {
             second_commit.parent_id(0).expect("parent").to_string(),
             initial
         );
+        drop(second_commit);
 
         drop(repo);
         let _ = fs::remove_dir_all(root);
