@@ -452,7 +452,7 @@ mod tests {
         let repo = Repository::init(&root).expect("init repo");
 
         let err = amend(&repo, "too early", false, false).expect_err("must reject");
-        assert!(err.to_string().contains("没有可修正的提交"), "{err}");
+        assert!(err.to_string().contains("无法修正"), "{err}");
 
         drop(repo);
         let _ = fs::remove_dir_all(root);
