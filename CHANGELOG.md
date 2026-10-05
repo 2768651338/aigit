@@ -2,6 +2,12 @@
 
 本项目采用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 风格，并遵循语义化版本。
 
+## [1.0.17] - 2026-10-05
+
+### Fixed
+
+- 打开零提交仓库不再报错（典型场景：入口对话框"初始化"后直接打开）：刚 `git init` 的仓库 HEAD 指向未出生分支，此前打开时加载提交历史会抛 "Git error: reference 'refs/heads/master' not found; class=Reference (4)"。现空仓库可正常打开并显示空历史；同时修复空仓库下的首条提交（此前 `commit` 解析 HEAD 必失败）、取消暂存（按条目移除 index，等价 git reset 未出生分支行为）、工作区差异查看（与空树比较，暂存新文件正常显示）、amend 给出友好提示而非原始报错、"是否已推送"判断返回未推送。
+
 ## [1.0.16] - 2026-10-01
 
 ### Added
