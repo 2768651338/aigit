@@ -12,8 +12,15 @@ pub fn get_workdir_diff(repo: &Repository, path: Option<&str>) -> AppResult<Vec<
         opts.pathspec(p);
     }
 
-    let head_tree = repo.head()?.peel_to_tree()?;
-    let diff = repo.diff_tree_to_workdir_with_index(Some(&head_tree), Some(&mut opts))?;
+    // Unborn HEAD (fresh repo): diff against the empty tree so staged new
+    // files still show up, mirroring `git diff` before the first commit.
+    let head_tree = if super::repo::head_is_unborn(repo) {
+        let empty_tree_oid = repo.treebuilder(None)?.write()?;
+        Some(repo.find_tree(empty_tree_oid)?)
+    } else {
+        Some(repo.head()?.peel_to_tree()?)
+    };
+    let diff = repo.diff_tree_to_workdir_with_index(head_tree.as_ref(), Some(&mut opts))?;
 
     let mut files = parse_diff(&diff)?;
     // libgit2 的 `diff_tree_to_workdir_with_index` 不会可靠地包含未跟踪文件
@@ -318,5 +325,34 @@ mod tests {
         assert_eq!(strip_line_ending(b"value  \n"), "value  ");
         assert_eq!(strip_line_ending(b"value\t\r\n"), "value\t");
         assert_eq!(strip_line_ending(b"no-newline"), "no-newline");
+    }
+
+    #[test]
+    fn workdir_diff_on_unborn_head_lists_staged_and_untracked() {
+        use super::get_workdir_diff;
+        use crate::git::commit::stage_all;
+        use git2::Repository;
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-diff-unborn-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        fs::write(root.join("staged.txt"), "a\n").expect("write staged file");
+        stage_all(&repo).expect("stage");
+        fs::write(root.join("untracked.txt"), "b\n").expect("write untracked file");
+
+        let diffs = get_workdir_diff(&repo, None).expect("diff on unborn head");
+        let paths: Vec<&str> = diffs.iter().map(|d| d.path.as_str()).collect();
+        assert!(paths.contains(&"staged.txt"), "{paths:?}");
+        assert!(paths.contains(&"untracked.txt"), "{paths:?}");
+
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
     }
 }

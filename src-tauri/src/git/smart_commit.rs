@@ -99,8 +99,10 @@ fn git_text(repo: &Repository, args: Vec<String>, label: &str) -> AppResult<Stri
 }
 
 fn head(repo: &Repository) -> AppResult<String> {
-    repo.head()?
-        .target()
+    let head = repo
+        .head()
+        .map_err(|_| AppError::General("智能拆分提交需要有效的 HEAD".into()))?;
+    head.target()
         .map(|oid| oid.to_string())
         .ok_or_else(|| AppError::General("智能拆分提交需要有效的 HEAD".into()))
 }

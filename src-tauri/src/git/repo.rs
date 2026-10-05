@@ -131,6 +131,13 @@ pub fn get_current_branch_name(repo: &Repository) -> Option<String> {
     })
 }
 
+/// True when HEAD points at a branch that has no commits yet (fresh `git
+/// init`). Resolving HEAD to a commit then fails with class=Reference, so
+/// callers check this first and degrade to empty results instead.
+pub fn head_is_unborn(repo: &Repository) -> bool {
+    matches!(repo.head(), Err(e) if e.code() == git2::ErrorCode::UnbornBranch)
+}
+
 fn get_ahead_behind(repo: &Repository, branch_name: &str) -> AppResult<(usize, usize)> {
     let local_branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
     let local_commit = local_branch.get().peel_to_commit()?;
@@ -147,7 +154,9 @@ fn get_ahead_behind(repo: &Repository, branch_name: &str) -> AppResult<(usize, u
 
 #[cfg(test)]
 mod tests {
-    use super::{discover_repo, get_repo_info, init_repo, open_repo, validate_clone_url};
+    use super::{
+        discover_repo, get_repo_info, head_is_unborn, init_repo, open_repo, validate_clone_url,
+    };
     use std::fs;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -214,6 +223,7 @@ mod tests {
         );
         // Fresh repo: no commit yet, so no current branch.
         assert_eq!(info.current_branch, None);
+        assert!(head_is_unborn(&repo));
 
         let _ = fs::remove_dir_all(root);
     }

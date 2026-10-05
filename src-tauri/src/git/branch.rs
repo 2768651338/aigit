@@ -112,6 +112,11 @@ pub fn delete_branch(repo: &Repository, name: &str) -> AppResult<()> {
 }
 
 pub fn get_log(repo: &Repository, limit: usize, offset: usize) -> AppResult<Vec<LogEntry>> {
+    // A fresh `git init` repo has an unborn HEAD: push_head() would fail with
+    // "reference 'refs/heads/master' not found". No commits — empty log.
+    if super::repo::head_is_unborn(repo) {
+        return Ok(Vec::new());
+    }
     let mut revwalk = repo.revwalk()?;
     revwalk.push_head()?;
     revwalk.set_sorting(git2::Sort::TOPOLOGICAL | git2::Sort::TIME)?;
@@ -172,7 +177,12 @@ pub fn get_log_range(
 
     let head_commit = match head {
         Some(head) => repo.revparse_single(head)?.peel_to_commit()?,
-        None => repo.head()?.peel_to_commit()?,
+        None => {
+            if super::repo::head_is_unborn(repo) {
+                return Ok(Vec::new());
+            }
+            repo.head()?.peel_to_commit()?
+        }
     };
     let base_commit = match base {
         Some(base) => Some(repo.revparse_single(base)?.peel_to_commit()?),
@@ -469,5 +479,27 @@ mod tests {
         // Limit truncates instead of erroring.
         let truncated = get_log_range(&repo, None, None, 1).expect("limit");
         assert_eq!(truncated.len(), 1);
+    }
+
+    #[test]
+    fn log_is_empty_on_unborn_head() {
+        use super::{get_log, get_log_range};
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-branch-unborn-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        // A fresh `git init` repo must open cleanly with an empty history.
+        assert!(get_log(&repo, 100, 0).expect("get log").is_empty());
+        assert!(get_log_range(&repo, None, None, 100)
+            .expect("range")
+            .is_empty());
+
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
     }
 }

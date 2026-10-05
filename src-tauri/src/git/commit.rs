@@ -35,6 +35,20 @@ pub fn stage_all(repo: &Repository) -> AppResult<()> {
 }
 
 pub fn unstage_files(repo: &Repository, paths: &[String]) -> AppResult<()> {
+    let mut index = repo.index()?;
+    if super::repo::head_is_unborn(repo) {
+        // No commits yet, so everything staged is "new": unstaging is just
+        // removing the entries from the index (git reset's unborn behaviour).
+        if paths.is_empty() {
+            index.remove_all(["*"].iter(), None)?;
+        } else {
+            let path_refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+            index.remove_all(path_refs.iter(), None)?;
+        }
+        index.write()?;
+        return Ok(());
+    }
+
     let head = repo.head()?;
     let head_commit = head.peel_to_commit()?;
     let head_obj = repo.find_object(head_commit.id(), None)?;
@@ -56,15 +70,24 @@ pub fn commit(repo: &Repository, message: &str) -> AppResult<String> {
     let tree_oid = index.write_tree()?;
     let tree = repo.find_tree(tree_oid)?;
 
-    let head = repo.head()?;
-    let parent_commit = head.peel_to_commit()?;
+    // Unborn HEAD (fresh repo): no parent exists. An empty parents slice with
+    // update_ref "HEAD" creates the initial commit and the branch it names.
+    let parent = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?),
+        Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
+        Err(e) => return Err(e.into()),
+    };
+    let parents: Vec<&git2::Commit> = parent.iter().collect();
 
-    let commit_oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent_commit])?;
+    let commit_oid = repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)?;
 
     Ok(commit_oid.to_string())
 }
 
 pub fn head_is_pushed(repo: &Repository) -> AppResult<bool> {
+    if super::repo::head_is_unborn(repo) {
+        return Ok(false);
+    }
     let head = repo.head()?;
     let head_oid = head.peel_to_commit()?.id();
     let local_name = head
@@ -84,6 +107,11 @@ pub fn amend(
     include_staged: bool,
     confirm_pushed: bool,
 ) -> AppResult<String> {
+    if super::repo::head_is_unborn(repo) {
+        return Err(AppError::General(
+            "仓库还没有任何提交，无法修正（amend）".into(),
+        ));
+    }
     if head_is_pushed(repo)? && !confirm_pushed {
         return Err(AppError::General(
             "AMEND_PUSHED_CONFIRMATION_REQUIRED".into(),
@@ -332,6 +360,100 @@ mod tests {
         drop(second);
         assert!(!first_path.exists());
         assert!(!second_path.exists());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn commit_creates_initial_commit_on_unborn_head() {
+        use super::commit;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-initial-commit-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        fs::write(root.join("first.txt"), "one\n").expect("write file");
+        stage_all(&repo).expect("stage");
+        let initial = commit(&repo, "initial").expect("initial commit");
+        assert_eq!(
+            repo.head()
+                .expect("head")
+                .target()
+                .expect("target")
+                .to_string(),
+            initial
+        );
+
+        // A follow-up commit must link back to the freshly created one.
+        fs::write(root.join("first.txt"), "two\n").expect("rewrite file");
+        stage_all(&repo).expect("stage second");
+        let second = commit(&repo, "second").expect("second commit");
+        let second_commit = repo
+            .find_commit(git2::Oid::from_str(&second).expect("oid"))
+            .expect("second commit object");
+        assert_eq!(
+            second_commit.parent_id(0).expect("parent").to_string(),
+            initial
+        );
+
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn unstage_clears_index_on_unborn_head() {
+        use super::unstage_files;
+        use std::path::Path;
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-unstage-unborn-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        fs::write(root.join("first.txt"), "one\n").expect("write first");
+        fs::write(root.join("second.txt"), "two\n").expect("write second");
+        stage_all(&repo).expect("stage");
+        let index = repo.index().expect("index");
+        assert!(index.get_path(Path::new("first.txt"), 0).is_some());
+        drop(index);
+
+        // Unstaging one path leaves the other staged.
+        unstage_files(&repo, &["first.txt".to_string()]).expect("unstage one");
+        let index = repo.index().expect("index");
+        assert!(index.get_path(Path::new("first.txt"), 0).is_none());
+        assert!(index.get_path(Path::new("second.txt"), 0).is_some());
+        drop(index);
+
+        // Unstaging everything empties the index (no HEAD to reset to).
+        unstage_files(&repo, &[]).expect("unstage all");
+        let index = repo.index().expect("index");
+        assert!(index.get_path(Path::new("second.txt"), 0).is_none());
+
+        drop(index);
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn amend_is_rejected_on_unborn_head() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("aigit-amend-unborn-{unique}"));
+        fs::create_dir_all(&root).expect("create temp directory");
+        let repo = Repository::init(&root).expect("init repo");
+
+        let err = amend(&repo, "too early", false, false).expect_err("must reject");
+        assert!(err.to_string().contains("没有可修正的提交"), "{err}");
+
+        drop(repo);
         let _ = fs::remove_dir_all(root);
     }
 }
