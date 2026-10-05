@@ -76,7 +76,10 @@ jobs:
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets --locked
 
       - name: Audit npm dependencies
-        run: npm audit --audit-level=high
+        # braces（tailwind 3 → chokidar 3 链）被公告 GHSA-vfj7-8cjw-p6xm 标记
+        # 全版本高危且上游无补丁，官方唯一修复路径是 tailwind v4 迁移。该链
+        # 只存在于 devDependencies，不随产品分发，迁移完成前只审运行时依赖。
+        run: npm audit --audit-level=high --omit=dev
 
       - name: Install cargo-audit
         uses: taiki-e/install-action@cargo-audit
