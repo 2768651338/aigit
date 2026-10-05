@@ -146,6 +146,9 @@ fn truncate_to_budget(text: String, budget: usize) -> String {
 pub type ProviderEventSink<'a> = &'a mut (dyn FnMut(ProviderEvent) -> AppResult<()> + Send);
 pub type StreamFuture<'a> = Pin<Box<dyn Future<Output = AppResult<()>> + Send + 'a>>;
 
+// Rust 1.99 的 clippy 对 async_trait 生成的 must_use 装箱方法报
+// double_must_use（返回的 Pin<Box<dyn Future>> 本身已是 must_use）。
+#[allow(clippy::double_must_use)]
 #[async_trait]
 pub trait AiProvider: Send + Sync {
     async fn chat(
