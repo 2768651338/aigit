@@ -267,7 +267,8 @@ mod tests {
         // 计数相同的前缀按字母序输出（与实现保持一致的确定性排序）。
         assert_eq!(prefixes, vec!["docs", "feat", "fix"]);
         assert_eq!(style.cjk_subject_percent, 75);
-        assert_eq!(style.language_hint, "mixed");
+        // 75% ≥ 60% 多数决阈值 → 中文为主。
+        assert_eq!(style.language_hint, "zh");
         assert_eq!(style.sample_subjects.len(), 4);
     }
 
