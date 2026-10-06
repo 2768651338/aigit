@@ -1,7 +1,7 @@
 {
   "name": "aigit",
   "private": true,
-  "version": "1.0.17",
+  "version": "1.0.18",
   "type": "module",
   "description": "AI-Driven Git Tool for Windows",
   "author": "田小橙 <2768651338@qq.com> (QQ: 2768651338)",
