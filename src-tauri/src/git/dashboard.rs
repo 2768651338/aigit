@@ -139,9 +139,7 @@ fn build_item(repo_path: &str) -> AppResult<RepoDashboardItem> {
 
 fn unborn_branch_name(repo: &Repository) -> Option<String> {
     let head = repo.find_reference("HEAD").ok()?;
-    if !head.is_symbolic_ref() {
-        return None;
-    }
+    // symbolic_target 对直接引用（如 detached HEAD）返回 None，无需再判类型。
     let target = head.symbolic_target()?;
     Some(
         target

@@ -80,10 +80,11 @@ pub fn scan_history_secrets(repo: &Repository, max_commits: usize) -> AppResult<
         let subject = commit.summary().unwrap_or("").trim().to_string();
 
         let mut scanned_lines = 0usize;
-        // git2 0.19 的 foreach：第二个参数（binary 回调）是必需的。
+        // git2 0.19 的 foreach：第 1 位是必需的 binary 进度回调（非 Option），
+        // 第 2 位才是可选的 file 回调。
         let _ = diff.foreach(
-            None,
             &mut |_delta, _weight| true,
+            None,
             None,
             Some(&mut |delta, _hunk, line| {
                 if line.origin() != '+' {

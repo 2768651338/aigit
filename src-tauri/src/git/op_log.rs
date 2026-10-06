@@ -95,9 +95,7 @@ fn current_branch_or_unborn(repo: &git2::Repository) -> Option<String> {
 
 fn unborn_branch_name(repo: &git2::Repository) -> Option<String> {
     let head = repo.find_reference("HEAD").ok()?;
-    if !head.is_symbolic_ref() {
-        return None;
-    }
+    // symbolic_target 对直接引用（如 detached HEAD）返回 None，无需再判类型。
     let target = head.symbolic_target()?;
     Some(
         target
