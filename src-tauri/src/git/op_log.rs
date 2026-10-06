@@ -308,6 +308,7 @@ fn undo_checkout(
         KIND_UNDO,
         format!("undo: switch back to {branch_before}"),
         Position::default(),
+        false,
     );
     Ok(UndoOutcome {
         backup_branch: None,
@@ -369,6 +370,7 @@ fn undo_reset(
                 short_id(&head_before)
             ),
             Position::default(),
+            false,
         );
         return Ok(UndoOutcome {
             backup_branch: Some(backup_branch),
@@ -384,6 +386,7 @@ fn undo_reset(
         KIND_UNDO,
         format!("undo: {} (HEAD unchanged, no reset)", record.summary),
         Position::default(),
+        false,
     );
     Ok(UndoOutcome {
         backup_branch: None,
@@ -413,12 +416,14 @@ fn unique_backup_branch(repo: &git2::Repository) -> AppResult<String> {
 }
 
 /// 仅在已持有 [`OP_LOG_LOCK`] 的路径（撤销流程）与测试中调用。
+#[allow(clippy::too_many_arguments)]
 fn record_in(
     root: &Path,
     repo_path: &str,
     kind: &str,
     summary: impl Into<String>,
     position: Position,
+    reversible: bool,
 ) {
     let entry = OperationRecord {
         id: uuid::Uuid::new_v4().to_string(),
@@ -427,7 +432,7 @@ fn record_in(
         summary: summary.into(),
         branch_before: position.branch_before,
         head_before: position.head_before,
-        reversible: false,
+        reversible,
     };
     let result = push_entry(root, repo_path, entry, FALLBACK_MAX_ENTRIES).err();
     if let Some(error) = result {
@@ -513,6 +518,7 @@ mod tests {
                 KIND_RESET,
                 format!("op {index}"),
                 Position::default(),
+                true,
             );
         }
         let records = load_from(&root, repo_path);
@@ -558,7 +564,14 @@ mod tests {
         let position = capture_position(&repo);
         let second = commit_all(&repo, "feat: second", 1_700_000_100);
 
-        record_in(&root, &repo_path, KIND_RESET, "reset --hard demo", position);
+        record_in(
+            &root,
+            &repo_path,
+            KIND_RESET,
+            "reset --hard demo",
+            position,
+            true,
+        );
         let record_id = last_record_id(&root, &repo_path);
 
         let outcome = undo_in(&root, &repo_path, &record_id, false).expect("undo");
@@ -602,7 +615,7 @@ mod tests {
         let first = commit_all(&repo, "feat: first", 1_700_000_000);
         let position = capture_position(&repo);
         let second = commit_all(&repo, "feat: second", 1_700_000_100);
-        record_in(&root, &repo_path, KIND_RESET, "reset demo", position);
+        record_in(&root, &repo_path, KIND_RESET, "reset demo", position, true);
         let record_id = last_record_id(&root, &repo_path);
 
         // 制造脏工作区。
@@ -645,6 +658,7 @@ mod tests {
             KIND_DISCARD,
             "discard 1 file",
             Position::default(),
+            false,
         );
         let record_id = last_record_id(&root, &repo_path);
 

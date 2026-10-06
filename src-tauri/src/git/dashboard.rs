@@ -227,8 +227,9 @@ mod tests {
         commit_all(&repo, "feat: base", 1_700_000_000);
         drop(repo);
 
-        let workdir = dir.join("tracked.txt");
-        fs::write(&workdir, "modified\n").expect("modify tracked");
+        // 修改已跟踪文件（commit_all 写入的是 file-<时间戳>.txt）。
+        let tracked = dir.join("file-1700000000.txt");
+        fs::write(&tracked, "modified\n").expect("modify tracked");
         fs::write(dir.join("new.txt"), "untracked\n").expect("add untracked");
 
         let item = collect_dashboard(&dir.to_string_lossy());
