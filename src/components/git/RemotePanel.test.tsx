@@ -24,7 +24,14 @@ const store = vi.hoisted(() => ({
   currentPath: "C:/repo",
   branches: [{ name: "origin/main", is_remote: true }],
   remotes: [{ name: "origin", fetch_url: "fetch-old", push_url: "push-old" }],
-  tracking: { branch: "main", upstream: "origin/main", remote: "origin", remote_branch: "main", ahead: 2, behind: 1 },
+  tracking: {
+    branch: "main",
+    upstream: "origin/main" as string | null,
+    remote: "origin" as string | null,
+    remote_branch: "main" as string | null,
+    ahead: 2,
+    behind: 1,
+  },
   fetchUpdatedAt: null as number | null,
   remoteBusy: null as string | null,
   remoteTask: null as { key: "fetch" | "pull" | "push"; id: string } | null,
@@ -109,5 +116,22 @@ describe("RemotePanel", () => {
     fireEvent.change(screen.getByPlaceholderText("remotes.name"), { target: { value: "mirror" } });
     fireEvent.change(screen.getByPlaceholderText("remotes.fetchUrl"), { target: { value: "https://example.com/mirror.git" } });
     expect(save).not.toBeDisabled();
+  });
+
+  it("pushes a branch without upstream, deferring empty inputs to the backend fallback", async () => {
+    const tracked = store.tracking;
+    store.tracking = { branch: "main", upstream: null, remote: null, remote_branch: null, ahead: 0, behind: 0 };
+    services.pushTask.mockResolvedValue("main");
+    try {
+      render(<RemotePanel />);
+      fireEvent.change(screen.getByDisplayValue("origin"), { target: { value: "" } });
+      fireEvent.change(screen.getByPlaceholderText("remotes.remoteBranch"), { target: { value: "" } });
+      fireEvent.click(screen.getByText("remotes.push"));
+      await waitFor(() =>
+        expect(services.pushTask).toHaveBeenCalledWith("C:/repo", expect.any(String), undefined, undefined),
+      );
+    } finally {
+      store.tracking = tracked;
+    }
   });
 });

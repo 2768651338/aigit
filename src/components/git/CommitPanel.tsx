@@ -242,8 +242,8 @@ export function CommitPanel({ onSmartCommit }: { onSmartCommit?: () => void }) {
       setHistory(next);
       saveHistory(targetPath, next);
       setCommitMessageFor(targetPath, "");
-      // Push only to the branch's configured upstream. Branches without an
-      // upstream are configured explicitly from the Remotes panel.
+      // Push to the branch's configured upstream; without one the backend
+      // falls back to origin (or the sole remote) and sets tracking itself.
       try {
         await push(targetPath);
         const body = branch

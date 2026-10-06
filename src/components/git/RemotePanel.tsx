@@ -188,8 +188,8 @@ export function RemotePanel() {
     (path, taskId) => gitService.pushTask(
       path,
       taskId,
-      tracking?.upstream ? undefined : selectedRemote,
-      tracking?.upstream ? undefined : upstreamBranch.trim(),
+      tracking?.upstream ? undefined : selectedRemote || undefined,
+      tracking?.upstream ? undefined : upstreamBranch.trim() || undefined,
     ),
     () => Promise.all([refreshBranches(true), refreshRepoInfo()]),
     t("remotes.pushSuccess"),
@@ -242,7 +242,7 @@ export function RemotePanel() {
         <label className="flex items-center gap-1.5"><input type="checkbox" checked={tags} onChange={(e) => setTags(e.target.checked)} />{t("remotes.tags")}</label>
         <button className="btn-secondary" disabled={taskBusy || !!busy} onClick={fetchRemote}>{runningTask?.key === "fetch" ? <SpinnerIcon size={13} /> : <RefreshIcon size={13} />}{t("remotes.fetch")}</button>
         <button className="btn-secondary" disabled={taskBusy || !!busy || !tracking?.upstream} onClick={pull}>{runningTask?.key === "pull" ? <SpinnerIcon size={13} /> : <DownloadIcon size={13} />}{t("remotes.pull")}</button>
-        <button className="btn-secondary" disabled={taskBusy || !!busy || (!tracking?.upstream && (!selectedRemote || !upstreamBranch.trim()))} onClick={push}>{runningTask?.key === "push" ? <SpinnerIcon size={13} /> : <SendIcon size={13} />}{t("remotes.push")}</button>
+        <button className="btn-secondary" disabled={taskBusy || !!busy} onClick={push}>{runningTask?.key === "push" ? <SpinnerIcon size={13} /> : <SendIcon size={13} />}{t("remotes.push")}</button>
         {taskBusy && <button className="btn-ghost text-danger" onClick={() => void cancelTask()}><XIcon size={13} />{t("remotes.cancel")}</button>}
         {!tracking?.upstream && <><input className="input w-40 py-1.5" value={upstreamBranch} onChange={(e) => setUpstreamBranch(e.target.value)} placeholder={t("remotes.remoteBranch")} /><button className="btn-primary" disabled={taskBusy || !!busy || !selectedRemote || !upstreamBranch.trim()} onClick={setUpstream}>{busy === "upstream" ? <SpinnerIcon size={13} /> : <CheckIcon size={13} />}{t("remotes.setUpstream")}</button></>}
       </div>

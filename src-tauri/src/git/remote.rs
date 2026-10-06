@@ -30,7 +30,29 @@ fn validate_remote_url(url: &str) -> AppResult<()> {
     cli::validate_non_option(url, "远程仓库 URL")
 }
 
+/// Branch name HEAD points at while the branch is unborn (no commits yet):
+/// HEAD still exists as a symbolic reference, only its target is missing.
+fn unborn_branch_name(repo: &Repository) -> AppResult<String> {
+    let head = repo.find_reference("HEAD")?;
+    let target = head
+        .symbolic_target()
+        .ok_or_else(|| AppError::General("无法读取当前分支名".into()))?;
+    Ok(target
+        .strip_prefix("refs/heads/")
+        .unwrap_or(target)
+        .to_string())
+}
+
 fn current_branch(repo: &Repository) -> AppResult<String> {
+    // On an unborn branch find_branch would fail with the raw
+    // "reference 'refs/heads/master' not found"; point the user at the
+    // missing first commit instead.
+    if super::repo::head_is_unborn(repo) {
+        return Err(AppError::General(format!(
+            "分支 {} 还没有任何提交，请先完成首次提交再操作远程",
+            unborn_branch_name(repo)?
+        )));
+    }
     let head = repo.head()?;
     if !head.is_branch() {
         return Err(AppError::General(
@@ -108,6 +130,19 @@ pub fn set_remote_url(repo: &Repository, name: &str, url: &str, push: bool) -> A
 }
 
 pub fn tracking_info(repo: &Repository) -> AppResult<TrackingInfo> {
+    // A fresh `git init` repo has an unborn HEAD: repo.head() would fail with
+    // UnbornBranch and take down the whole remote panel load. No commits —
+    // no upstream and nothing to compare, so report the bare branch name.
+    if super::repo::head_is_unborn(repo) {
+        return Ok(TrackingInfo {
+            branch: unborn_branch_name(repo)?,
+            upstream: None,
+            remote: None,
+            remote_branch: None,
+            ahead: 0,
+            behind: 0,
+        });
+    }
     let branch_name = current_branch(repo)?;
     let branch = repo.find_branch(&branch_name, BranchType::Local)?;
     let Ok(upstream) = branch.upstream() else {
@@ -193,6 +228,50 @@ pub fn fetch_cancellable(
     }
 }
 
+/// Pick where a branch push should go. A configured upstream wins; a branch
+/// without one falls back to the explicit override, then `origin`, then a
+/// sole remaining remote — the remote branch mirrors the local branch name
+/// and the push establishes tracking, like VS Code "Publish Branch". Only a
+/// remote list without `origin` still requires an explicit choice.
+fn resolve_push_target(
+    tracking: &TrackingInfo,
+    explicit_remote: Option<&str>,
+    explicit_remote_branch: Option<&str>,
+    remotes: &[String],
+) -> AppResult<(String, String, bool)> {
+    if let (Some(remote), Some(remote_branch)) = (
+        tracking.remote.as_deref(),
+        tracking.remote_branch.as_deref(),
+    ) {
+        return Ok((remote.to_owned(), remote_branch.to_owned(), false));
+    }
+    let remote = match explicit_remote {
+        Some(remote) => remote.to_string(),
+        None => match remotes {
+            [] => {
+                return Err(AppError::General(
+                    "当前分支没有 upstream，仓库也没有配置远程，请先添加远程仓库或使用 GitHub 一站式发布"
+                        .into(),
+                ))
+            }
+            [only] => only.clone(),
+            _ => remotes
+                .iter()
+                .find(|name| name.as_str() == "origin")
+                .cloned()
+                .ok_or_else(|| {
+                    AppError::General(
+                        "当前分支没有 upstream，请选择远程仓库和远程分支以显式设置".into(),
+                    )
+                })?,
+        },
+    };
+    let remote_branch = explicit_remote_branch
+        .map(str::to_owned)
+        .unwrap_or_else(|| tracking.branch.clone());
+    Ok((remote, remote_branch, true))
+}
+
 pub fn push_current_branch(
     repo: &Repository,
     explicit_remote: Option<&str>,
@@ -209,31 +288,25 @@ pub fn push_current_branch_cancellable(
 ) -> AppResult<String> {
     let branch = current_branch(repo)?;
     let tracking = tracking_info(repo)?;
-    let target = match (tracking.remote, tracking.remote_branch) {
-        (Some(remote), Some(remote_branch)) => (remote, remote_branch, false),
-        _ => {
-            let remote = explicit_remote.ok_or_else(|| {
-                AppError::General(
-                    "当前分支没有 upstream，请选择远程仓库和远程分支以显式设置".into(),
-                )
-            })?;
-            let remote_branch = explicit_remote_branch.ok_or_else(|| {
-                AppError::General("当前分支没有 upstream，请显式指定远程分支".into())
-            })?;
-            (remote.to_string(), remote_branch.to_string(), true)
-        }
-    };
-    validate_remote_name(&target.0)?;
-    validate_branch_name(&target.1, "远程分支名")?;
-    repo.find_remote(&target.0)?;
+    let remotes: Vec<String> = repo
+        .remotes()?
+        .iter()
+        .flatten()
+        .map(str::to_owned)
+        .collect();
+    let (remote, remote_branch, set_upstream) =
+        resolve_push_target(&tracking, explicit_remote, explicit_remote_branch, &remotes)?;
+    validate_remote_name(&remote)?;
+    validate_branch_name(&remote_branch, "远程分支名")?;
+    repo.find_remote(&remote)?;
 
     let mut args = vec!["push".to_string()];
-    if target.2 {
+    if set_upstream {
         args.push("--set-upstream".into());
     }
     args.push("--".into());
-    args.push(target.0.clone());
-    args.push(format!("refs/heads/{branch}:refs/heads/{}", target.1));
+    args.push(remote);
+    args.push(format!("refs/heads/{branch}:refs/heads/{remote_branch}"));
     let error = format!("推送分支 {branch} 失败");
     match cancellation {
         Some(flag) => {
@@ -457,6 +530,84 @@ mod tests {
         git(&work, &["checkout", "--detach"]);
         let repo = Repository::open(&work).unwrap();
         assert!(push_branch_set_upstream(&repo, "origin").is_err());
+
+        drop(repo);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolve_push_target_prefers_upstream_then_origin_then_sole_remote() {
+        fn tracking_info_with_upstream(upstream: bool) -> TrackingInfo {
+            TrackingInfo {
+                branch: "feature/a".into(),
+                upstream: upstream.then(|| "origin/feature/a".into()),
+                remote: upstream.then(|| "origin".into()),
+                remote_branch: upstream.then(|| "feature/a".into()),
+                ahead: 0,
+                behind: 0,
+            }
+        }
+
+        // Configured upstream wins: push as-is, no tracking to establish.
+        assert_eq!(
+            resolve_push_target(&tracking_info_with_upstream(true), None, None, &[]).unwrap(),
+            ("origin".to_string(), "feature/a".to_string(), false)
+        );
+
+        let bare = tracking_info_with_upstream(false);
+        // No upstream: prefer origin, mirror the local branch name, track.
+        assert_eq!(
+            resolve_push_target(&bare, None, None, &["github".into(), "origin".into()]).unwrap(),
+            ("origin".to_string(), "feature/a".to_string(), true)
+        );
+        // A sole remote works even when it isn't named origin.
+        assert_eq!(
+            resolve_push_target(&bare, None, None, &["gitlab".into()]).unwrap(),
+            ("gitlab".to_string(), "feature/a".to_string(), true)
+        );
+        // Explicit override beats the automatic choice.
+        assert_eq!(
+            resolve_push_target(&bare, Some("github"), Some("main"), &["origin".into()]).unwrap(),
+            ("github".to_string(), "main".to_string(), true)
+        );
+        // Zero remotes: guide toward adding one instead of demanding a choice.
+        assert!(resolve_push_target(&bare, None, None, &[])
+            .unwrap_err()
+            .to_string()
+            .contains("没有配置远程"));
+        // Multiple remotes without origin: keep requiring an explicit choice.
+        assert!(
+            resolve_push_target(&bare, None, None, &["gitee".into(), "gitlab".into()])
+                .unwrap_err()
+                .to_string()
+                .contains("请选择远程仓库")
+        );
+    }
+
+    #[test]
+    fn tracking_info_degrades_on_unborn_head() {
+        let root = temp_dir("tracking-unborn");
+        let work = root.join("work");
+        fs::create_dir_all(&work).unwrap();
+        git(&work, &["init", "-b", "master"]);
+        git(&work, &["config", "user.name", "Test"]);
+        git(&work, &["config", "user.email", "test@example.com"]);
+        fs::write(work.join("README.txt"), "staged only").unwrap();
+        git(&work, &["add", "README.txt"]);
+
+        // Unborn HEAD: report the branch from HEAD's symbolic target instead
+        // of failing with "reference 'refs/heads/master' not found".
+        let repo = Repository::open(&work).unwrap();
+        let tracking = tracking_info(&repo).unwrap();
+        assert_eq!(tracking.branch, "master");
+        assert!(tracking.upstream.is_none());
+        assert_eq!((tracking.ahead, tracking.behind), (0, 0));
+
+        // First commit brings the branch into existence; parsing is normal.
+        git(&work, &["commit", "-m", "initial"]);
+        let tracking = tracking_info(&repo).unwrap();
+        assert_eq!(tracking.branch, "master");
+        assert!(tracking.upstream.is_none());
 
         drop(repo);
         let _ = fs::remove_dir_all(root);
