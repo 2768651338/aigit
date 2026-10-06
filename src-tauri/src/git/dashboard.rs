@@ -139,7 +139,7 @@ fn build_item(repo_path: &str) -> AppResult<RepoDashboardItem> {
 
 fn unborn_branch_name(repo: &Repository) -> Option<String> {
     let head = repo.find_reference("HEAD").ok()?;
-    if !head.is_symbolic() {
+    if !head.is_symbolic_ref() {
         return None;
     }
     let target = head.symbolic_target()?;

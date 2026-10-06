@@ -12,6 +12,7 @@
 //!   备份分支建立之前绝不执行 reset。
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -94,7 +95,7 @@ fn current_branch_or_unborn(repo: &git2::Repository) -> Option<String> {
 
 fn unborn_branch_name(repo: &git2::Repository) -> Option<String> {
     let head = repo.find_reference("HEAD").ok()?;
-    if !head.is_symbolic() {
+    if !head.is_symbolic_ref() {
         return None;
     }
     let target = head.symbolic_target()?;
@@ -414,12 +415,18 @@ fn unique_backup_branch(repo: &git2::Repository) -> AppResult<String> {
 }
 
 /// 仅在已持有 [`OP_LOG_LOCK`] 的路径（撤销流程）与测试中调用。
-fn record_in(root: &Path, repo_path: &str, kind: &str, summary: String, position: Position) {
+fn record_in(
+    root: &Path,
+    repo_path: &str,
+    kind: &str,
+    summary: impl Into<String>,
+    position: Position,
+) {
     let entry = OperationRecord {
         id: uuid::Uuid::new_v4().to_string(),
         timestamp: chrono::Utc::now().timestamp(),
         kind: kind.to_string(),
-        summary,
+        summary: summary.into(),
         branch_before: position.branch_before,
         head_before: position.head_before,
         reversible: false,
