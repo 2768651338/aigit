@@ -190,11 +190,9 @@ pub fn analyze_commit_style(repo: &Repository, sample_limit: usize) -> AppResult
         uses_conventional: total > 0 && conventional * 2 >= total,
         conventional_percent: percent(conventional, total),
         prefix_counts: sorted_prefixes,
-        avg_subject_chars: if total == 0 {
-            0
-        } else {
-            (subject_chars / total) as u32
-        },
+        avg_subject_chars: subject_chars
+            .checked_div(total)
+            .map_or(0, |value| value as u32),
         cjk_subject_percent: cjk_percent,
         trailing_period_percent: percent(trailing_period, total),
         bulleted_body_percent: percent(bulleted_body, total),
