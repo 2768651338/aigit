@@ -82,6 +82,11 @@ fn parse_insights_date(value: Option<String>, field: &str) -> AppResult<Option<N
         .transpose()
 }
 
+/// 操作历史摘要里引用的哈希统一截短，保持时间线可读。
+fn short_ref(reference: &str) -> String {
+    reference.chars().take(7).collect()
+}
+
 #[tauri::command]
 pub async fn get_repository_insights(
     path: String,
@@ -332,7 +337,18 @@ pub fn list_head_reflog(path: String) -> AppResult<Vec<git::ReflogEntry>> {
 #[tauri::command]
 pub fn switch_branch(path: String, name: String, force: Option<bool>) -> AppResult<()> {
     let repo = git::repo::open_repo(&path)?;
-    git::branch::switch_branch(&repo, &name, force.unwrap_or(false))
+    let position = git::op_log::capture_position(&repo);
+    let result = git::branch::switch_branch(&repo, &name, force.unwrap_or(false));
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_CHECKOUT,
+            format!("checkout {name}"),
+            position.clone(),
+            position.branch_before.is_some(),
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -510,7 +526,19 @@ pub fn bisect_reset(path: String) -> AppResult<()> {
 #[tauri::command]
 pub fn rewrite_history(path: String, steps: Vec<git::history::RewriteStep>) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
-    git::history::rewrite_history(&repo, &steps)
+    let position = git::op_log::capture_position(&repo);
+    let step_count = steps.len();
+    let result = git::history::rewrite_history(&repo, &steps);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_REWRITE,
+            format!("rewrite history ({step_count} steps)"),
+            position,
+            true,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -608,7 +636,23 @@ pub async fn push(
 ) -> AppResult<String> {
     run_git_blocking(move || {
         let repo = git::repo::open_repo(&path)?;
-        git::remote::push_current_branch(&repo, remote.as_deref(), remote_branch.as_deref())
+        let position = git::op_log::capture_position(&repo);
+        let result =
+            git::remote::push_current_branch(&repo, remote.as_deref(), remote_branch.as_deref());
+        if result.is_ok() {
+            let branch = position
+                .branch_before
+                .clone()
+                .unwrap_or_else(|| "HEAD".into());
+            git::op_log::record(
+                &path,
+                git::op_log::KIND_PUSH,
+                format!("push {branch}"),
+                position,
+                false,
+            );
+        }
+        result
     })
     .await
 }
@@ -617,7 +661,22 @@ pub async fn push(
 pub async fn pull(path: String) -> AppResult<String> {
     run_git_blocking(move || {
         let repo = git::repo::open_repo(&path)?;
-        git::remote::pull_current_branch(&repo)
+        let position = git::op_log::capture_position(&repo);
+        let result = git::remote::pull_current_branch(&repo);
+        if result.is_ok() {
+            let branch = position
+                .branch_before
+                .clone()
+                .unwrap_or_else(|| "HEAD".into());
+            git::op_log::record(
+                &path,
+                git::op_log::KIND_PULL,
+                format!("pull {branch}"),
+                position,
+                true,
+            );
+        }
+        result
     })
     .await
 }
@@ -654,12 +713,27 @@ pub async fn push_task(
 ) -> AppResult<String> {
     run_remote_task(registry.inner(), &task_id, move |cancellation| {
         let repo = git::repo::open_repo(&path)?;
-        git::remote::push_current_branch_cancellable(
+        let position = git::op_log::capture_position(&repo);
+        let result = git::remote::push_current_branch_cancellable(
             &repo,
             remote.as_deref(),
             remote_branch.as_deref(),
             Some(cancellation),
-        )
+        );
+        if result.is_ok() {
+            let branch = position
+                .branch_before
+                .clone()
+                .unwrap_or_else(|| "HEAD".into());
+            git::op_log::record(
+                &path,
+                git::op_log::KIND_PUSH,
+                format!("push {branch}"),
+                position,
+                false,
+            );
+        }
+        result
     })
     .await
 }
@@ -672,7 +746,22 @@ pub async fn pull_task(
 ) -> AppResult<String> {
     run_remote_task(registry.inner(), &task_id, move |cancellation| {
         let repo = git::repo::open_repo(&path)?;
-        git::remote::pull_current_branch_cancellable(&repo, Some(cancellation))
+        let position = git::op_log::capture_position(&repo);
+        let result = git::remote::pull_current_branch_cancellable(&repo, Some(cancellation));
+        if result.is_ok() {
+            let branch = position
+                .branch_before
+                .clone()
+                .unwrap_or_else(|| "HEAD".into());
+            git::op_log::record(
+                &path,
+                git::op_log::KIND_PULL,
+                format!("pull {branch}"),
+                position,
+                true,
+            );
+        }
+        result
     })
     .await
 }
@@ -716,7 +805,19 @@ pub async fn delete_remote_tag(path: String, remote: String, tag: String) -> App
 #[tauri::command]
 pub fn discard_files(path: String, files: Vec<String>) -> AppResult<()> {
     let repo = git::repo::open_repo(&path)?;
-    git::commit::discard_files(&repo, &files)
+    let position = git::op_log::capture_position(&repo);
+    let file_count = files.len();
+    let result = git::commit::discard_files(&repo, &files);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_DISCARD,
+            format!("discard {file_count} file(s)"),
+            position,
+            false,
+        );
+    }
+    result
 }
 
 // --- Stash ---
@@ -827,13 +928,35 @@ pub fn merge_branch(
     no_ff: Option<bool>,
 ) -> AppResult<git::MergeResult> {
     let repo = git::repo::open_repo(&path)?;
-    git::merge::merge_branch(&repo, &branch, no_ff.unwrap_or(false))
+    let position = git::op_log::capture_position(&repo);
+    let result = git::merge::merge_branch(&repo, &branch, no_ff.unwrap_or(false));
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_MERGE,
+            format!("merge {branch}"),
+            position,
+            true,
+        );
+    }
+    result
 }
 
 #[tauri::command]
 pub fn rebase_branch(path: String, branch: String) -> AppResult<git::MergeResult> {
     let repo = git::repo::open_repo(&path)?;
-    git::merge::rebase_branch(&repo, &branch)
+    let position = git::op_log::capture_position(&repo);
+    let result = git::merge::rebase_branch(&repo, &branch);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_REBASE,
+            format!("rebase onto {branch}"),
+            position,
+            true,
+        );
+    }
+    result
 }
 
 #[tauri::command]
@@ -937,23 +1060,162 @@ pub fn abort_operation(path: String) -> AppResult<String> {
 #[tauri::command]
 pub fn checkout_commit(path: String, hash: String) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
-    git::history::checkout_commit(&repo, &hash)
+    let position = git::op_log::capture_position(&repo);
+    let result = git::history::checkout_commit(&repo, &hash);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_CHECKOUT,
+            format!("checkout {} (detached)", short_ref(&hash)),
+            position.clone(),
+            position.branch_before.is_some(),
+        );
+    }
+    result
 }
 
 #[tauri::command]
 pub fn revert_commit(path: String, hash: String) -> AppResult<git::MergeResult> {
     let repo = git::repo::open_repo(&path)?;
-    git::history::revert_commit(&repo, &hash)
+    let position = git::op_log::capture_position(&repo);
+    let result = git::history::revert_commit(&repo, &hash);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_REVERT,
+            format!("revert {}", short_ref(&hash)),
+            position,
+            true,
+        );
+    }
+    result
 }
 
 #[tauri::command]
 pub fn cherry_pick_commit(path: String, hash: String) -> AppResult<git::MergeResult> {
     let repo = git::repo::open_repo(&path)?;
-    git::history::cherry_pick_commit(&repo, &hash)
+    let position = git::op_log::capture_position(&repo);
+    let result = git::history::cherry_pick_commit(&repo, &hash);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_CHERRY_PICK,
+            format!("cherry-pick {}", short_ref(&hash)),
+            position,
+            true,
+        );
+    }
+    result
 }
 
 #[tauri::command]
 pub fn reset_to_commit(path: String, hash: String, mode: String) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
-    git::history::reset_to_commit(&repo, &hash, &mode)
+    let position = git::op_log::capture_position(&repo);
+    let result = git::history::reset_to_commit(&repo, &hash, &mode);
+    if result.is_ok() {
+        git::op_log::record(
+            &path,
+            git::op_log::KIND_RESET,
+            format!("reset --{mode} {}", short_ref(&hash)),
+            position,
+            true,
+        );
+    }
+    result
+}
+
+// --- Dashboard（多仓库仪表盘） ---
+
+/// 多仓库仪表盘聚合快照：逐仓库独立容错，坏仓库只标记 `valid=false`。
+#[tauri::command]
+pub async fn get_repos_dashboard(
+    paths: Vec<String>,
+) -> AppResult<Vec<git::dashboard::RepoDashboardItem>> {
+    let tasks: Vec<_> = paths
+        .into_iter()
+        .map(|path| tokio::task::spawn_blocking(move || git::dashboard::collect_dashboard(&path)))
+        .collect();
+    let items = futures_util::future::join_all(tasks)
+        .await
+        .into_iter()
+        .enumerate()
+        .map(|(index, joined)| match joined {
+            Ok(item) => item,
+            Err(error) => git::dashboard::invalid_item(
+                &format!("task-{index}"),
+                format!("Dashboard task failed: {error}"),
+            ),
+        })
+        .collect();
+    Ok(items)
+}
+
+// --- 健康检查扩展（历史密钥扫描 / 代码热点） ---
+
+/// 扫描最近提交中新增行的疑似密钥。扫描上限只从 config.toml 读取，
+/// 前端传入值仅允许在安全范围内进一步收紧。
+#[tauri::command]
+pub async fn scan_history_secrets(
+    path: String,
+    max_commits: Option<u32>,
+) -> AppResult<git::health_extra::HistorySecretScan> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        let configured = crate::config::AppConfig::load(&crate::config::SystemCredentialStore)
+            .map(|config| config.health.secret_scan_max_commits)
+            .unwrap_or(10_000);
+        let max_commits = max_commits.unwrap_or(configured).clamp(100, 100_000) as usize;
+        git::health_extra::scan_history_secrets(&repo, max_commits)
+    })
+    .await
+}
+
+/// 统计最近提交中改动最频繁的文件 Top N（churn 热点）。
+#[tauri::command]
+pub async fn analyze_code_hotspots(
+    path: String,
+    top_n: Option<u32>,
+    max_commits: Option<u32>,
+) -> AppResult<git::health_extra::HotspotReport> {
+    run_git_blocking(move || {
+        let repo = git::repo::open_repo(&path)?;
+        let (configured_top, configured_max) =
+            crate::config::AppConfig::load(&crate::config::SystemCredentialStore)
+                .map(|config| {
+                    (
+                        config.health.hotspot_top_n,
+                        config.health.hotspot_max_commits,
+                    )
+                })
+                .unwrap_or((15, 2_000));
+        let top_n = top_n.unwrap_or(configured_top) as usize;
+        let max_commits = max_commits.unwrap_or(configured_max) as usize;
+        git::health_extra::analyze_code_hotspots(&repo, top_n, max_commits)
+    })
+    .await
+}
+
+// --- 操作历史（撤销中心） ---
+
+/// 最近的会改动 HEAD 的操作记录，最新的在最前。
+#[tauri::command]
+pub async fn list_operation_history(path: String) -> AppResult<Vec<git::op_log::OperationRecord>> {
+    run_git_blocking(move || git::op_log::list(&path)).await
+}
+
+#[tauri::command]
+pub async fn clear_operation_history(path: String) -> AppResult<()> {
+    run_git_blocking(move || git::op_log::clear(&path)).await
+}
+
+/// 撤销一条操作：checkout 类切回原分支；其余恢复到操作前的提交，
+/// 撤销前的 HEAD 自动备份成 `aigit/undo-backup-*` 分支。
+#[tauri::command]
+pub async fn undo_operation(
+    path: String,
+    record_id: String,
+    stash_dirty: bool,
+) -> AppResult<git::op_log::UndoOutcome> {
+    run_git_blocking(move || git::op_log::undo(&path, &record_id, stash_dirty)).await
 }

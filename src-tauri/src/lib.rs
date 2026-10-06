@@ -161,6 +161,13 @@ pub fn run() {
             git_cmd::revert_commit,
             git_cmd::cherry_pick_commit,
             git_cmd::reset_to_commit,
+            // Dashboard（多仓库仪表盘）/ 健康检查扩展 / 操作历史（撤销中心）
+            git_cmd::get_repos_dashboard,
+            git_cmd::scan_history_secrets,
+            git_cmd::analyze_code_hotspots,
+            git_cmd::list_operation_history,
+            git_cmd::clear_operation_history,
+            git_cmd::undo_operation,
             // AI commands
             ai_cmd::generate_smart_commit_plan,
             ai_cmd::generate_commit_message,

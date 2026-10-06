@@ -110,6 +110,11 @@ export function SettingsView() {
     setLocal({ ...local, prompts: { ...local.prompts, ...partial } });
   };
 
+  const updateOps = (partial: Partial<AppConfig["ops"]>) => {
+    if (!local) return;
+    setLocal({ ...local, ops: { ...local.ops, ...partial } });
+  };
+
   const updateApiKey = (provider: CredentialProvider, value: string) => {
     setApiKeys((current) => ({ ...current, [provider]: value }));
   };
@@ -548,6 +553,22 @@ export function SettingsView() {
                 {t("settings.maxContextHint")}
               </p>
             </Field>
+            <div>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={local.ai.commit_style_learning ?? true}
+                  onChange={(e) => update({ commit_style_learning: e.target.checked })}
+                  className="accent-accent w-4 h-4"
+                />
+                <span className="text-sm text-text-secondary">
+                  {t("settings.commitStyleLearning")}
+                </span>
+              </label>
+              <p className="mt-1.5 text-xs text-text-muted">
+                {t("settings.commitStyleLearningHint")}
+              </p>
+            </div>
           </div>
         </section>
 
@@ -679,6 +700,35 @@ export function SettingsView() {
                 {t("settings.rememberOpenRepos")}
               </span>
             </label>
+            <div>
+              <label className="flex items-center gap-2.5 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={local.ops.op_log_enabled}
+                  onChange={(e) => updateOps({ op_log_enabled: e.target.checked })}
+                  className="accent-accent w-4 h-4"
+                />
+                <span className="text-sm text-text-secondary">
+                  {t("settings.opLogEnabled")}
+                </span>
+              </label>
+              <p className="mt-1.5 text-xs text-text-muted">
+                {t("settings.opLogEnabledHint")}
+              </p>
+            </div>
+            {local.ops.op_log_enabled && (
+              <Field label={`${t("settings.opLogMaxEntries")}: ${local.ops.op_log_max_entries}`}>
+                <input
+                  type="range"
+                  min="10"
+                  max="1000"
+                  step="10"
+                  value={local.ops.op_log_max_entries}
+                  onChange={(e) => updateOps({ op_log_max_entries: parseInt(e.target.value) })}
+                  className="w-full accent-accent"
+                />
+              </Field>
+            )}
           </div>
         </section>
 

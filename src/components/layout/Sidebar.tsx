@@ -22,6 +22,8 @@ import {
   CheckIcon,
   PlusIcon,
   XIcon,
+  LayoutDashboardIcon,
+  HistoryIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
 
@@ -42,6 +44,8 @@ const NAV_ITEMS: {
   { id: "review", labelKey: "nav.review", icon: ScanSearchIcon, shortcut: "4" },
   { id: "chat", labelKey: "nav.chat", icon: MessageSquareIcon, shortcut: "5" },
   { id: "insights", labelKey: "nav.insights", icon: BarChartIcon, shortcut: "6" },
+  { id: "dashboard", labelKey: "nav.dashboard", icon: LayoutDashboardIcon, shortcut: "8" },
+  { id: "history", labelKey: "nav.history", icon: HistoryIcon, shortcut: "9" },
   { id: "settings", labelKey: "nav.settings", icon: SettingsIcon, shortcut: "7" },
 ];
 

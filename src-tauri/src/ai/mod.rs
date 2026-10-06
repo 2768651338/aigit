@@ -259,8 +259,7 @@ const SECRET_PATTERNS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Return the labels of all secret-like patterns present in `text`.
-pub fn find_secret_hits(text: &str) -> Vec<&'static str> {
+fn compiled_secret_patterns() -> &'static [(Regex, &'static str)] {
     static COMPILED: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     let compiled = COMPILED.get_or_init(|| {
         SECRET_PATTERNS
@@ -268,13 +267,47 @@ pub fn find_secret_hits(text: &str) -> Vec<&'static str> {
             .map(|(pattern, label)| (Regex::new(pattern).expect("valid secret pattern"), *label))
             .collect()
     });
+    compiled.as_slice()
+}
+
+/// Return the labels of all secret-like patterns present in `text`.
+pub fn find_secret_hits(text: &str) -> Vec<&'static str> {
     let mut hits: Vec<&'static str> = Vec::new();
-    for (regex, label) in compiled {
+    for (regex, label) in compiled_secret_patterns() {
         if regex.is_match(text) && !hits.contains(label) {
             hits.push(label);
         }
     }
     hits
+}
+
+/// Return each distinct secret-like pattern present in `text` together with a
+/// redacted preview of its first match. The preview keeps only the leading few
+/// characters so history scans can show *where* without exposing the secret.
+pub fn find_secret_previews(text: &str) -> Vec<(&'static str, String)> {
+    let mut hits: Vec<(&'static str, String)> = Vec::new();
+    for (regex, label) in compiled_secret_patterns() {
+        if let Some(mat) = regex.find(text) {
+            if hits.iter().any(|(existing, _)| existing == label) {
+                continue;
+            }
+            hits.push((label, redact_secret_preview(mat.as_str())));
+        }
+    }
+    hits
+}
+
+/// Keep only a few leading (and for long matches, trailing) characters of a
+/// matched secret for display purposes.
+fn redact_secret_preview(matched: &str) -> String {
+    let chars: Vec<char> = matched.chars().collect();
+    let head: String = chars.iter().take(4).collect();
+    if chars.len() > 8 {
+        let tail: String = chars[(chars.len() - 2)..].iter().collect();
+        format!("{head}…{tail}")
+    } else {
+        format!("{head}…")
+    }
 }
 
 /// Block a provider request when the payload contains secret-like content and

@@ -533,6 +533,8 @@ export interface ModelProfile {
 
 export interface AiProviderConfig {
   active_provider: string;
+  /** 生成提交信息时自动学习仓库历史风格注入提示词。 */
+  commit_style_learning?: boolean;
   openai_model: string;
   openai_base_url: string;
   claude_model: string;
@@ -632,6 +634,20 @@ export interface HealthConfig {
   large_file_top_n: number;
   /** Scan budget safety valve; only editable in config.toml. */
   max_scan_entries: number;
+  /** 历史密钥扫描的最大提交数。 */
+  secret_scan_max_commits: number;
+  /** 代码热点统计的最大提交数。 */
+  hotspot_max_commits: number;
+  /** 代码热点 Top N。 */
+  hotspot_top_n: number;
+}
+
+/** 操作历史（撤销中心）配置（mirrors `config::OpsConfig`）。 */
+export interface OpsConfig {
+  /** 是否在执行会改动 HEAD 的 git 操作时记录操作历史。 */
+  op_log_enabled: boolean;
+  /** 每个仓库保留的操作历史条数上限。 */
+  op_log_max_entries: number;
 }
 
 export interface AppConfig {
@@ -642,6 +658,7 @@ export interface AppConfig {
   prompts: PromptsConfig;
   index: IndexConfig;
   health: HealthConfig;
+  ops: OpsConfig;
   recent_repos: string[];
   /** Paths of repos currently open as tabs. */
   open_repos: string[];
@@ -756,7 +773,84 @@ export interface InsightExportOptions {
   frameRate?: number;
 }
 
-export type ViewType = "changes" | "branches" | "files" | "review" | "chat" | "insights" | "settings";
+export type ViewType =
+  | "changes"
+  | "branches"
+  | "files"
+  | "review"
+  | "chat"
+  | "insights"
+  | "dashboard"
+  | "history"
+  | "settings";
+
+/** 多仓库仪表盘的单仓库快照（mirrors `git::dashboard::RepoDashboardItem`）。 */
+export interface RepoDashboardItem {
+  path: string;
+  valid: boolean;
+  name: string;
+  current_branch: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  staged_files: number;
+  unstaged_files: number;
+  untracked_files: number;
+  head_summary: string | null;
+  /** Unix seconds. */
+  last_commit_ts: number | null;
+  /** 空仓库（零提交）。 */
+  unborn: boolean;
+  error: string | null;
+}
+
+/** 历史密钥扫描的单条命中（mirrors `git::health_extra::SecretHit`）。预览已脱敏。 */
+export interface SecretHit {
+  short_hash: string;
+  commit_message: string;
+  file_path: string;
+  kind: string;
+  preview: string;
+  line_no: number | null;
+}
+
+export interface HistorySecretScan {
+  hits: SecretHit[];
+  scanned_commits: number;
+  truncated: boolean;
+  hit_cap_reached: boolean;
+}
+
+/** 代码热点（churn）条目（mirrors `git::health_extra::CodeHotspot`）。 */
+export interface CodeHotspot {
+  path: string;
+  commit_count: number;
+}
+
+export interface HotspotReport {
+  hotspots: CodeHotspot[];
+  scanned_commits: number;
+  truncated: boolean;
+}
+
+/** 操作历史记录（mirrors `git::op_log::OperationRecord`）。 */
+export interface OperationRecord {
+  id: string;
+  /** Unix seconds. */
+  timestamp: number;
+  /** "pull" | "push" | "merge" | "rebase" | "revert" | "cherry_pick" | "reset" | "checkout" | "discard" | "history_rewrite" | "undo". */
+  kind: string;
+  summary: string;
+  branch_before: string | null;
+  head_before: string | null;
+  reversible: boolean;
+}
+
+export interface UndoOutcome {
+  backup_branch: string | null;
+  stashed: boolean;
+  switched_to: string | null;
+}
 
 export type FileStatusType =
   | "modified"

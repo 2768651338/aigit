@@ -22,6 +22,8 @@ import { FilesView } from "@/pages/FilesView";
 import { ReviewView } from "@/pages/ReviewView";
 import { ChatView } from "@/pages/ChatView";
 import { InsightsView } from "@/pages/InsightsView";
+import { DashboardView } from "@/pages/DashboardView";
+import { OperationHistoryView } from "@/pages/OperationHistoryView";
 import { SettingsView } from "@/pages/SettingsView";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useRepoStore } from "@/stores/repoStore";
@@ -109,8 +111,18 @@ function AppShell() {
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      if (e.key >= "1" && e.key <= "7") {
-        const views: ViewType[] = ["changes", "branches", "files", "review", "chat", "insights", "settings"];
+      if (e.key >= "1" && e.key <= "9") {
+        const views: ViewType[] = [
+          "changes",
+          "branches",
+          "files",
+          "review",
+          "chat",
+          "insights",
+          "dashboard",
+          "history",
+          "settings",
+        ];
         const idx = Number(e.key) - 1;
         if (idx < views.length) {
           e.preventDefault();
@@ -271,6 +283,8 @@ function AppShell() {
                 {activeView === "review" && <ReviewView onNavigateChanges={() => setActiveView("changes")} />}
                 {activeView === "chat" && <ChatView />}
                 {activeView === "insights" && <InsightsView />}
+                {activeView === "dashboard" && <DashboardView />}
+                {activeView === "history" && <OperationHistoryView />}
                 {activeView === "settings" && <SettingsView />}
               </ErrorBoundary>
             </div>

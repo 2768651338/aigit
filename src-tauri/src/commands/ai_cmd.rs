@@ -160,6 +160,20 @@ fn commit_msg_prompt(config: &AppConfig) -> &str {
     }
 }
 
+/// 生成提交信息的最终系统提示词：在用户提示（或内置默认）之上，按设置追加
+/// 仓库提交风格参考块。风格学习是尽力而为：分析失败或空仓库时静默退回原
+/// 提示词，绝不阻塞提交信息的生成。
+fn commit_msg_effective_prompt(config: &AppConfig, repo: &git2::Repository) -> String {
+    let base = commit_msg_prompt(config);
+    if !config.ai.commit_style_learning {
+        return base.to_string();
+    }
+    match git::commit_style::analyze_commit_style(repo, git::commit_style::DEFAULT_SAMPLE_COMMITS) {
+        Ok(style) if style.sample_count > 0 => format!("{base}\n\n{}", style.prompt_block()),
+        _ => base.to_string(),
+    }
+}
+
 /// Returns the user-customized code-review prompt if set, otherwise the default.
 fn code_review_prompt(config: &AppConfig) -> &str {
     let custom = &config.prompts.code_review;
@@ -292,25 +306,17 @@ pub async fn generate_commit_message(
 
     let diff_text = format_diffs(&diffs);
     let provider = ai::get_provider(&config.ai.active_provider)?;
+    let system_prompt = commit_msg_effective_prompt(&config, &repo);
     let messages = vec![ChatMessage {
         role: "user".to_string(),
         content: format!(
             "Analyze this Git diff and generate an appropriate commit message:\n\n```diff\n{diff_text}\n```"
         ),
     }];
-    ai::ensure_no_secrets(
-        commit_msg_prompt(&config),
-        &messages,
-        confirm_secrets.unwrap_or(false),
-    )?;
+    ai::ensure_no_secrets(&system_prompt, &messages, confirm_secrets.unwrap_or(false))?;
 
     provider
-        .chat(
-            commit_msg_prompt(&config),
-            &messages,
-            &config.ai,
-            api_key.as_deref(),
-        )
+        .chat(&system_prompt, &messages, &config.ai, api_key.as_deref())
         .await
 }
 
@@ -662,14 +668,11 @@ pub async fn generate_commit_message_stream(
             format_diffs(&diffs)
         ),
     }];
-    ai::ensure_no_secrets(
-        commit_msg_prompt(&config),
-        &messages,
-        confirm_secrets.unwrap_or(false),
-    )?;
+    let system_prompt = commit_msg_effective_prompt(&config, &repo);
+    ai::ensure_no_secrets(&system_prompt, &messages, confirm_secrets.unwrap_or(false))?;
     run_stream(
         &request_id,
-        commit_msg_prompt(&config),
+        &system_prompt,
         &messages,
         &config,
         api_key.as_deref(),

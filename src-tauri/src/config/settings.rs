@@ -114,6 +114,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub health: HealthConfig,
     #[serde(default)]
+    pub ops: OpsConfig,
+    #[serde(default)]
     pub recent_repos: Vec<String>,
     #[serde(default)]
     pub open_repos: Vec<String>,
@@ -190,6 +192,12 @@ pub struct HealthConfig {
     pub large_file_top_n: u32,
     /// 单次扫描的条目预算（分支枚举 + 索引遍历），超出即截断并提示。
     pub max_scan_entries: u32,
+    /// 历史密钥扫描的最大提交数，超出即截断并提示。
+    pub secret_scan_max_commits: u32,
+    /// 代码热点统计的最大提交数，超出即截断并提示。
+    pub hotspot_max_commits: u32,
+    /// 代码热点 Top N。
+    pub hotspot_top_n: u32,
 }
 
 impl Default for HealthConfig {
@@ -199,6 +207,28 @@ impl Default for HealthConfig {
             large_file_min_mb: 5,
             large_file_top_n: 20,
             max_scan_entries: 50_000,
+            secret_scan_max_commits: 10_000,
+            hotspot_max_commits: 2_000,
+            hotspot_top_n: 15,
+        }
+    }
+}
+
+/// 操作历史（撤销中心）的记录配置。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OpsConfig {
+    /// 是否在执行会改动 HEAD 的 git 操作时记录操作历史。
+    pub op_log_enabled: bool,
+    /// 每个仓库保留的操作历史条数上限（超出裁掉最旧的）。
+    pub op_log_max_entries: u32,
+}
+
+impl Default for OpsConfig {
+    fn default() -> Self {
+        Self {
+            op_log_enabled: true,
+            op_log_max_entries: 200,
         }
     }
 }
@@ -217,6 +247,8 @@ pub struct PromptsConfig {
 #[serde(default)]
 pub struct AiProviderConfig {
     pub active_provider: String,
+    /// 生成提交信息时自动学习仓库历史提交风格（语言/前缀/长度）注入提示词。
+    pub commit_style_learning: bool,
     pub openai_model: String,
     pub openai_base_url: String,
     pub claude_model: String,
@@ -288,6 +320,7 @@ impl Default for AiProviderConfig {
     fn default() -> Self {
         Self {
             active_provider: "openai".to_string(),
+            commit_style_learning: true,
             openai_model: "gpt-4o-mini".to_string(),
             openai_base_url: "https://api.openai.com/v1".to_string(),
             claude_model: "claude-sonnet-4-20250514".to_string(),
@@ -371,6 +404,13 @@ impl AppConfig {
         let config_dir = dirs::config_dir()
             .ok_or_else(|| AppError::Config("Cannot determine config directory".to_string()))?;
         Self::config_path_in(&config_dir.join("aigit"))
+    }
+
+    /// Public path of the active config.toml for lightweight readers (such as
+    /// the operation log) that must not touch the system credential store on
+    /// every git operation.
+    pub fn config_file_path() -> AppResult<PathBuf> {
+        Self::config_path()
     }
 
     fn config_path_in(app_dir: &Path) -> AppResult<PathBuf> {
@@ -465,6 +505,26 @@ impl AppConfig {
         if !(1_000..=1_000_000).contains(&self.health.max_scan_entries) {
             return Err(AppError::Config(
                 "health.max_scan_entries must be between 1000 and 1000000".into(),
+            ));
+        }
+        if !(100..=100_000).contains(&self.health.secret_scan_max_commits) {
+            return Err(AppError::Config(
+                "health.secret_scan_max_commits must be between 100 and 100000".into(),
+            ));
+        }
+        if !(100..=50_000).contains(&self.health.hotspot_max_commits) {
+            return Err(AppError::Config(
+                "health.hotspot_max_commits must be between 100 and 50000".into(),
+            ));
+        }
+        if !(1..=100).contains(&self.health.hotspot_top_n) {
+            return Err(AppError::Config(
+                "health.hotspot_top_n must be between 1 and 100".into(),
+            ));
+        }
+        if !(10..=1_000).contains(&self.ops.op_log_max_entries) {
+            return Err(AppError::Config(
+                "ops.op_log_max_entries must be between 10 and 1000".into(),
             ));
         }
         Ok(())

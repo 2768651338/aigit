@@ -26,6 +26,11 @@ import type {
   RepoHealth,
   TagInfo,
   TrackingInfo,
+  RepoDashboardItem,
+  HistorySecretScan,
+  HotspotReport,
+  OperationRecord,
+  UndoOutcome,
 } from "@/types";
 import { isTauriEnv } from "@/utils/env";
 
@@ -215,6 +220,41 @@ export const gitService = {
   getCommitFiles: (path: string, hash: string) => {
     ensureTauri();
     return invoke<FileDiff[]>("get_commit_diff_files", { path, hash });
+  },
+
+  /** 多仓库仪表盘聚合快照：逐仓库独立容错。 */
+  getReposDashboard: (paths: string[]) => {
+    ensureTauri();
+    return invoke<RepoDashboardItem[]>("get_repos_dashboard", { paths });
+  },
+
+  /** 历史密钥泄露扫描（结果中的预览已脱敏）。 */
+  scanHistorySecrets: (path: string, maxCommits?: number) => {
+    ensureTauri();
+    return invoke<HistorySecretScan>("scan_history_secrets", { path, maxCommits });
+  },
+
+  /** 代码热点（churn）统计。 */
+  analyzeCodeHotspots: (path: string, topN?: number, maxCommits?: number) => {
+    ensureTauri();
+    return invoke<HotspotReport>("analyze_code_hotspots", { path, topN, maxCommits });
+  },
+
+  /** 操作历史（撤销中心），最新的在最前。 */
+  listOperationHistory: (path: string) => {
+    ensureTauri();
+    return invoke<OperationRecord[]>("list_operation_history", { path });
+  },
+
+  clearOperationHistory: (path: string) => {
+    ensureTauri();
+    return invoke<void>("clear_operation_history", { path });
+  },
+
+  /** 撤销一条操作：脏工作区时由后端守护，`stashDirty` 表示允许先自动 stash。 */
+  undoOperation: (path: string, recordId: string, stashDirty: boolean) => {
+    ensureTauri();
+    return invoke<UndoOutcome>("undo_operation", { path, recordId, stashDirty });
   },
 
   /** List all tracked files in the repository (for the AI chat @file picker). */

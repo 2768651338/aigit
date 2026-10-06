@@ -8,13 +8,15 @@ import { aiService } from "@/services/ai";
 import { configService } from "@/services/config";
 import { formatError } from "@/utils/error";
 import { confirmDialog } from "@/utils/dialog";
-import type { BranchHealth, RepoHealth } from "@/types";
+import type { BranchHealth, RepoHealth, HistorySecretScan, HotspotReport } from "@/types";
 import {
   AlertCircleIcon,
+  BarChartIcon,
   CopyIcon,
   GitBranchIcon,
   RefreshIcon,
   ScanSearchIcon,
+  SearchIcon,
   SpinnerIcon,
   TrashIcon,
 } from "@/components/common/Icons";
@@ -332,6 +334,10 @@ export function RepoHealthPanel({ onOpenStash }: RepoHealthPanelProps) {
               </p>
             </section>
 
+            {/* 历史密钥扫描 / 代码热点：重扫描按需触发，不跟随面板加载。 */}
+            <SecretScanSection repoPath={currentPath} />
+            <HotspotSection repoPath={currentPath} />
+
             {/* AI cleanup suggestion (one-shot, repo-chat channel). */}
             <section className="rounded-lg border border-border bg-bg-surface p-4">
               <div className="flex items-center gap-2 mb-2">
@@ -397,6 +403,197 @@ function SectionCard({
         <p className="text-sm text-text-muted">{emptyText}</p>
       ) : (
         <div className="space-y-0.5">{children}</div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 历史密钥扫描分区：扫描最近提交中**新增行**的疑似密钥。
+ * 结果只含脱敏预览；上限信息来自后端的 truncated/hit_cap_reached 标志。
+ */
+function SecretScanSection({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation();
+  const toast = useToastStore();
+  const [scan, setScan] = useState<HistorySecretScan | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runScan = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setScan(await gitService.scanHistorySecrets(repoPath));
+    } catch (e) {
+      setError(formatError(e));
+      setScan(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="rounded-lg border border-border bg-bg-surface p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold flex-1">
+          {t("health.secretScan.title")}
+          {scan && scan.hits.length > 0 && (
+            <span className="ml-1.5 text-2xs text-danger">{scan.hits.length}</span>
+          )}
+        </h3>
+        <button
+          onClick={() => void runScan()}
+          disabled={loading}
+          aria-busy={loading}
+          className="btn-ghost text-2xs px-1.5 py-0.5 text-text-muted hover:text-text-primary"
+        >
+          {loading ? <SpinnerIcon size={12} /> : <SearchIcon size={12} />}
+          {scan ? t("health.secretScan.rescan") : t("health.secretScan.scan")}
+        </button>
+      </div>
+      <p className="text-sm text-text-muted">{t("health.secretScan.hint")}</p>
+
+      {error && (
+        <p className="mt-2 text-sm text-danger break-words whitespace-pre-wrap">{error}</p>
+      )}
+
+      {scan && (
+        <>
+          {scan.hits.length === 0 ? (
+            <p className="mt-2 text-sm text-text-secondary">
+              {t("health.secretScan.clean", { count: scan.scanned_commits })}
+            </p>
+          ) : (
+            <div className="mt-2 space-y-0.5">
+              {scan.hits.map((hit, index) => (
+                <div
+                  key={`${hit.short_hash}-${hit.file_path}-${index}`}
+                  className="group flex items-center gap-2 px-2 py-1.5 rounded hover:bg-bg-hover text-sm"
+                >
+                  <span className="badge shrink-0 bg-danger/10 text-danger">
+                    {hit.kind}
+                  </span>
+                  <span className="font-mono truncate flex-1" title={`${hit.file_path}${hit.line_no ? `:${hit.line_no}` : ""} — ${hit.preview}`}>
+                    {hit.file_path}
+                    {hit.line_no ? `:${hit.line_no}` : ""}
+                    <span className="ml-1.5 text-text-muted">{hit.preview}</span>
+                  </span>
+                  <span
+                    className="text-2xs text-text-muted shrink-0"
+                    title={hit.commit_message}
+                  >
+                    {hit.short_hash}
+                  </span>
+                  <button
+                    onClick={() =>
+                      void navigator.clipboard
+                        ?.writeText(
+                          `${hit.short_hash} ${hit.file_path}${hit.line_no ? `:${hit.line_no}` : ""} ${hit.kind}`,
+                        )
+                        .then(() => toast.success(t("health.secretScan.copied")))
+                        .catch(() => {})
+                    }
+                    className="btn-ghost text-2xs px-1.5 py-0.5 opacity-0 group-hover:opacity-100 text-text-muted"
+                    title={t("health.secretScan.copy")}
+                    aria-label={t("health.secretScan.copy")}
+                  >
+                    <CopyIcon size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {(scan.truncated || scan.hit_cap_reached) && (
+            <p className="mt-2 text-2xs text-text-muted">
+              {scan.hit_cap_reached
+                ? t("health.secretScan.hitCap")
+                : t("health.secretScan.truncated", { count: scan.scanned_commits })}
+            </p>
+          )}
+          {scan.hits.length > 0 && (
+            <p className="mt-2 text-2xs text-text-muted">{t("health.secretScan.advice")}</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+/** 代码热点分区：最近提交中改动最频繁的文件 Top N（churn）。 */
+function HotspotSection({ repoPath }: { repoPath: string }) {
+  const { t } = useTranslation();
+  const [report, setReport] = useState<HotspotReport | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const runScan = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setReport(await gitService.analyzeCodeHotspots(repoPath));
+    } catch (e) {
+      setError(formatError(e));
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const maxCount = report?.hotspots[0]?.commit_count ?? 0;
+
+  return (
+    <section className="rounded-lg border border-border bg-bg-surface p-4">
+      <div className="flex items-center gap-2 mb-1">
+        <h3 className="text-sm font-semibold flex-1">{t("health.hotspots.title")}</h3>
+        <button
+          onClick={() => void runScan()}
+          disabled={loading}
+          aria-busy={loading}
+          className="btn-ghost text-2xs px-1.5 py-0.5 text-text-muted hover:text-text-primary"
+        >
+          {loading ? <SpinnerIcon size={12} /> : <BarChartIcon size={12} />}
+          {report ? t("health.hotspots.rescan") : t("health.hotspots.scan")}
+        </button>
+      </div>
+      <p className="text-sm text-text-muted">{t("health.hotspots.hint")}</p>
+
+      {error && (
+        <p className="mt-2 text-sm text-danger break-words whitespace-pre-wrap">{error}</p>
+      )}
+
+      {report && (
+        <>
+          {report.hotspots.length === 0 ? (
+            <p className="mt-2 text-sm text-text-secondary">{t("health.hotspots.empty")}</p>
+          ) : (
+            <div className="mt-2 space-y-1">
+              {report.hotspots.map((hotspot) => (
+                <div key={hotspot.path} className="flex items-center gap-2 text-sm">
+                  <span className="font-mono truncate w-1/2" title={hotspot.path}>
+                    {hotspot.path}
+                  </span>
+                  <div className="flex-1 h-2 rounded bg-bg-hover overflow-hidden">
+                    <div
+                      className="h-full bg-accent/60"
+                      style={{
+                        width: `${maxCount > 0 ? (hotspot.commit_count / maxCount) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
+                  <span className="text-2xs text-text-muted shrink-0 w-10 text-right">
+                    {hotspot.commit_count}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          {report.truncated && (
+            <p className="mt-2 text-2xs text-text-muted">
+              {t("health.hotspots.truncated", { count: report.scanned_commits })}
+            </p>
+          )}
+          <p className="mt-2 text-2xs text-text-muted">{t("health.hotspots.advice")}</p>
+        </>
       )}
     </section>
   );
