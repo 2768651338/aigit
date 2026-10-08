@@ -1,2 +1,4 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+# shell 脚本必须 LF，CRLF 会让 bash 报 $'\r': command not found
+*.sh text eol=lf

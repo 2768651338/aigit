@@ -31,6 +31,20 @@ cargo test --manifest-path src-tauri/Cargo.toml
 cargo check --manifest-path src-tauri/Cargo.toml
 ```
 
+### 维护者预检流程（preflight）
+
+维护环境没有本地 Rust 工具链时，CI 是唯一的编译验证环境。较大的改动走预检流程，
+保证 main 只接收 CI 通过的提交（历史保持线性、SHA 不变）：
+
+```bash
+git preflight setup   # 每个克隆执行一次，安装 git preflight / git land 两个 alias
+git commit ...        # 照常在本地 main 提交
+git preflight         # 推 HEAD 到 origin/preflight 触发 Windows CI 并盯到结束
+git land              # 预检通过后快进推送 origin/main；无绿记录会拒绝（--force 可绕过）
+```
+
+纯文档、文案等无需编译验证的小改动可直接推 main。
+
 ## 代码约定
 
 - TypeScript 保持严格类型，避免 `any`；Rust 错误通过 `AppError` 返回。
