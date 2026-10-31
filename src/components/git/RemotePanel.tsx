@@ -52,7 +52,11 @@ export function RemotePanel() {
       refreshStatus: s.refreshStatus,
     })),
   );
-  const toast = useToastStore();
+  const toast = useToastStore(useShallow((state) => ({
+    error: state.error,
+    success: state.success,
+    info: state.info,
+  })));
   const { showGitHubCreate } = useGitHubCreate();
   const [form, setForm] = useState<RemoteForm | null>(null);
   const [selectedRemote, setSelectedRemote] = useState("");

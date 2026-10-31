@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, RepositoryInsights } from "@/types";
 import { aiService } from "@/services/ai";
+import { useToastStore } from "@/stores/toastStore";
+import { formatError } from "@/utils/error";
 import { exportInsights } from "@/utils/exportInsights";
 import { generateProjectIntroduction, generateWeeklyReport, type InsightReportLabels } from "@/utils/insights";
 
@@ -30,7 +32,16 @@ export function ReportGenerator({ insights, config, repoPath }: { insights: Repo
   };
   useEffect(() => {
     setContent(kind === "week" ? generateWeeklyReport(insights, labels) : generateProjectIntroduction(insights, labels));
-  }, [insights, labels]);
+  }, [insights, labels, kind]);
+  const runExport = async (format: "markdown" | "text") => {
+    if (working) return;
+    setWorking(true);
+    try {
+      const path = await exportInsights({ format, content, fileName: `${insights.repository_name}-${kind}-${insights.start_date || "all"}-${insights.end_date || "all"}.${format === "text" ? "txt" : "md"}` });
+      if (path) useToastStore.getState().success(t("insights.exportSuccess", { format: format === "text" ? "TXT" : "Markdown" }));
+    } catch (error) { useToastStore.getState().error(formatError(error)); }
+    finally { setWorking(false); }
+  };
   const polish = async () => {
     if (!config) return;
     setWorking(true);
@@ -60,6 +71,8 @@ export function ReportGenerator({ insights, config, repoPath }: { insights: Repo
       ].join("\n");
       const response = await aiService.repoChat([{ role: "user", content: prompt }], repoPath);
       setContent(response);
+    } catch (error) {
+      useToastStore.getState().error(formatError(error));
     } finally {
       setWorking(false);
     }
@@ -70,7 +83,8 @@ export function ReportGenerator({ insights, config, repoPath }: { insights: Repo
       <button type="button" onClick={() => generate("intro")} className={kind === "intro" ? "text-accent font-medium" : "text-text-muted"}>{t("insights.report.projectSummary")}</button>
       <span className="flex-1" />
       <button type="button" onClick={() => navigator.clipboard?.writeText(content)} className="text-xs">{t("insights.report.copy")}</button>
-      <button type="button" onClick={() => exportInsights({ format: "markdown", content, fileName: `${insights.repository_name}-${kind}-${insights.start_date || "all"}-${insights.end_date || "all"}.md` })} className="text-xs">{t("insights.report.exportMarkdown")}</button>
+      <button type="button" disabled={working} onClick={() => void runExport("markdown")} className="text-xs disabled:opacity-50">{t("insights.report.exportMarkdown")}</button>
+      <button type="button" disabled={working} onClick={() => void runExport("text")} className="text-xs disabled:opacity-50">{t("insights.report.exportText")}</button>
       <button type="button" disabled={!config || working} onClick={polish} className="text-xs rounded bg-accent px-2 py-1 text-white disabled:opacity-50">{working ? t("insights.report.polishing") : t("insights.report.polish")}</button>
     </div>
     <textarea value={content} onChange={(e) => setContent(e.target.value)} className="w-full min-h-48 bg-bg-base border border-border rounded p-3 text-sm font-mono" aria-label={t("insights.report.content")} />

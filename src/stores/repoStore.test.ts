@@ -292,9 +292,9 @@ describe("repoStore switchBranch dirty-worktree guard", () => {
     await useRepoStore.getState().openRepo("/a");
     git.switchBranch.mockRejectedValueOnce(uncommittedError);
 
-    const result = await useRepoStore.getState().switchBranch("feature", true);
-
-    expect(result).toBe(false);
+    await expect(
+      useRepoStore.getState().switchBranch("feature", true)
+    ).rejects.toBe(uncommittedError);
     expect(dialog.confirmDialog).not.toHaveBeenCalled();
     expect(git.switchBranch).toHaveBeenCalledTimes(1);
   });
@@ -307,9 +307,9 @@ describe("repoStore switchBranch dirty-worktree guard", () => {
       retryable: false,
     });
 
-    const result = await useRepoStore.getState().switchBranch("feature");
-
-    expect(result).toBe(false);
+    await expect(
+      useRepoStore.getState().switchBranch("feature")
+    ).rejects.toMatchObject({ code: "git_error", message: "boom" });
     expect(dialog.confirmDialog).not.toHaveBeenCalled();
     expect(useRepoStore.getState().tabs["/a"].error).toContain("boom");
   });

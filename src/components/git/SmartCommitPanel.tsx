@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import type { CommitPlan, StageGroupResult } from "@/types";
 import { aiService } from "@/services/ai";
 import { gitService } from "@/services/git";
@@ -15,7 +16,12 @@ export function SmartCommitPanel({ onClose }: { onClose: () => void }) {
   const currentPath = useRepoStore((state) => state.currentPath);
   const refreshStatus = useRepoStore((state) => state.refreshStatus);
   const refreshLog = useRepoStore((state) => state.refreshLog);
-  const toast = useToastStore();
+  const refreshRepoInfo = useRepoStore((state) => state.refreshRepoInfo);
+  const toast = useToastStore(useShallow((state) => ({
+    error: state.error,
+    success: state.success,
+    info: state.info,
+  })));
   const [plan, setPlan] = useState<CommitPlan | null>(null);
   const [loading, setLoading] = useState(true);
   const [busyGroup, setBusyGroup] = useState<string | null>(null);
@@ -86,6 +92,7 @@ export function SmartCommitPanel({ onClose }: { onClose: () => void }) {
       setRecovery(result.recovery);
       await refreshStatus(true);
       await refreshLog(true);
+      await refreshRepoInfo();
       toast.success(t("smartCommit.groupCommitted"));
     } catch (error) {
       setRecovery(formatError(error));

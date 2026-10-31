@@ -42,11 +42,7 @@ pub fn abort_rebase(repo: &Repository) -> AppResult<String> {
 
 /// Continue an in-progress merge after conflicts have been resolved.
 pub fn continue_merge(repo: &Repository) -> AppResult<String> {
-    run_git_simple(
-        repo,
-        ["merge", "--continue", "--no-edit"],
-        "继续 merge 失败",
-    )
+    run_git_simple(repo, ["merge", "--continue"], "继续 merge 失败")
 }
 
 /// Continue an in-progress rebase after conflicts have been resolved.
@@ -342,6 +338,40 @@ mod tests {
         assert!(!is_merging(&repo));
         assert_eq!(
             std::fs::read_to_string(root.join("tracked.txt")).expect("worktree restored"),
+            "main line\n"
+        );
+    }
+
+    #[test]
+    fn resolved_merge_continues_and_records_both_parents() {
+        let (root, repo) = temp_repo("continue");
+        let original_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+        {
+            let tip = repo.head().unwrap().peel_to_commit().unwrap();
+            repo.branch("feature", &tip, false).unwrap();
+        }
+        crate::git::branch::switch_branch(&repo, "feature", false).unwrap();
+        commit_file(&repo, &root, "feature line\n", "feature");
+        let feature = repo.head().unwrap().target().unwrap();
+        crate::git::branch::switch_branch(&repo, &original_branch, false).unwrap();
+        commit_file(&repo, &root, "main line\n", "main");
+        let main = repo.head().unwrap().target().unwrap();
+
+        assert!(merge_branch(&repo, "feature", false).unwrap().has_conflicts);
+        assert!(continue_merge(&repo).is_err());
+        assert_eq!(repo.head().unwrap().target(), Some(main));
+        assert!(is_merging(&repo));
+        resolve_ours(&repo, &["tracked.txt".to_owned()]).unwrap();
+        continue_merge(&repo).unwrap();
+
+        let merged = repo.head().unwrap().peel_to_commit().unwrap();
+        assert_eq!(merged.parent_count(), 2);
+        assert_eq!(merged.parent_id(0).unwrap(), main);
+        assert_eq!(merged.parent_id(1).unwrap(), feature);
+        assert!(!is_merging(&repo));
+        assert!(repo.statuses(None).unwrap().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(root.join("tracked.txt")).unwrap(),
             "main line\n"
         );
     }

@@ -110,6 +110,7 @@ pub struct SearchHit {
 #[derive(Default)]
 pub struct IndexManager {
     jobs: Mutex<HashMap<String, JobState>>,
+    writes: Mutex<()>,
 }
 
 #[derive(Clone)]
@@ -926,6 +927,10 @@ impl IndexManager {
         // cancel and rebuild for the whole write. Check the generation first,
         // write unlocked, then re-check so a cancel that raced the write is
         // still reported as not-current.
+        let _write = self
+            .writes
+            .lock()
+            .map_err(|_| AppError::General("Index storage unavailable".into()))?;
         if !self.is_current(repo, generation) {
             return Ok(false);
         }
@@ -981,14 +986,33 @@ impl IndexManager {
     }
 
     pub fn delete(&self, repo: &str) -> AppResult<bool> {
-        let _ = self.cancel(repo);
-        let path = index_path(repo)?;
-        if path.exists() {
-            fs::remove_file(path)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        // Serialize with publication so a finishing build cannot resurrect
+        // files after deletion. Keep its invalidated generation as a tombstone.
+        let _write = self
+            .writes
+            .lock()
+            .map_err(|_| AppError::General("Index storage unavailable".into()))?;
+        {
+            let mut jobs = self
+                .jobs
+                .lock()
+                .map_err(|_| AppError::General("Index manager unavailable".into()))?;
+            if let Some(job) = jobs.get_mut(repo) {
+                job.cancelled
+                    .store(true, std::sync::atomic::Ordering::Release);
+                job.generation = job.generation.wrapping_add(1);
+                job.status = IndexStatus::default();
+            }
         }
+        let mut removed = false;
+        for path in [index_path(repo)?, embeddings_path(repo)?] {
+            match fs::remove_file(path) {
+                Ok(()) => removed = true,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error.into()),
+            }
+        }
+        Ok(removed)
     }
 
     pub async fn rebuild(&self, repo_path: &str, force: bool) -> AppResult<IndexStatus> {

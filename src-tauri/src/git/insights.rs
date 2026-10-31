@@ -37,6 +37,8 @@ pub struct AuthorActivity {
     pub email: String,
     pub commit_count: usize,
     pub active_days: usize,
+    #[serde(default)]
+    pub active_dates: Vec<String>,
     pub first_date: String,
     pub last_date: String,
     pub activity: Vec<usize>,
@@ -49,6 +51,7 @@ pub struct TimelineBucket {
     pub contributors: usize,
     pub cumulative_commits: usize,
     pub cumulative_contributors: usize,
+    pub author_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -257,6 +260,7 @@ fn aggregate(records: &[CommitRecord]) -> RepositoryInsights {
                 email: r.email.clone(),
                 commit_count: 0,
                 active_days: 0,
+                active_dates: Vec::new(),
                 first_date: date.clone(),
                 last_date: date.clone(),
                 activity: vec![0; 168],
@@ -280,10 +284,12 @@ fn aggregate(records: &[CommitRecord]) -> RepositoryInsights {
         } else {
             a.email.clone()
         };
-        a.active_days = daily_authors
-            .values()
-            .filter(|authors| authors.contains(&key))
-            .count();
+        a.active_dates = daily_authors
+            .iter()
+            .filter(|(_, authors)| authors.contains(&key))
+            .map(|(date, _)| date.clone())
+            .collect();
+        a.active_days = a.active_dates.len();
     }
     let mut cumulative = 0;
     let mut cumulative_authors = HashSet::new();
@@ -298,6 +304,7 @@ fn aggregate(records: &[CommitRecord]) -> RepositoryInsights {
                 contributors: authors.len(),
                 cumulative_commits: cumulative,
                 cumulative_contributors: cumulative_authors.len(),
+                author_ids: authors.into_iter().collect(),
             }
         })
         .collect();

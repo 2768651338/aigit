@@ -15,6 +15,8 @@ import {
   SpinnerIcon,
 } from "@/components/common/Icons";
 import clsx from "clsx";
+import { buildHunkPatch, buildSelectionPatch } from "@/utils/diffPatch";
+export { buildHunkPatch } from "@/utils/diffPatch";
 
 type DiffMode = "workdir" | "staged" | "view";
 
@@ -40,60 +42,6 @@ interface DiffViewerProps {
    *  afterwards. Defaults to false (all expanded).
    */
   defaultCollapsed?: boolean;
-}
-
-export function buildHunkPatch(
-  diff: FileDiff,
-  hunkIdx: number,
-  lineKeys?: Set<string>,
-): string {
-  const hunk = diff.hunks[hunkIdx];
-  const lines: string[] = [];
-  let oldCount = 0;
-  let newCount = 0;
-
-  for (let i = 0; i < hunk.lines.length; i++) {
-    const line = hunk.lines[i];
-    const key = `${diff.path}::${hunkIdx}:${i}`;
-    const isSelected = !lineKeys || lineKeys.has(key);
-
-    if (line.line_type === "context") {
-      lines.push(` ${line.content}`);
-      oldCount++;
-      newCount++;
-    } else if (line.line_type === "add") {
-      if (isSelected) {
-        lines.push(`+${line.content}`);
-        newCount++;
-      }
-    } else if (line.line_type === "delete") {
-      if (isSelected) {
-        lines.push(`-${line.content}`);
-        oldCount++;
-      } else {
-        lines.push(` ${line.content}`);
-        oldCount++;
-        newCount++;
-      }
-    } else if (line.line_type === "no_newline") {
-      lines.push(`\\${line.content}`);
-    }
-  }
-
-  const headerMatch = hunk.header.match(
-    /@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/,
-  );
-  const oldStart = headerMatch ? parseInt(headerMatch[1], 10) : 1;
-  const newStart = headerMatch ? parseInt(headerMatch[3], 10) : 1;
-  const oldPath = diff.old_path ?? diff.path;
-
-  return [
-    `diff --git a/${oldPath} b/${diff.path}`,
-    `--- a/${oldPath}`,
-    `+++ b/${diff.path}`,
-    `@@ -${oldStart},${oldCount} +${newStart},${newCount} @@`,
-    ...lines,
-  ].join("\n") + "\n";
 }
 
 /**
@@ -124,10 +72,13 @@ export function DiffViewer({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [applying, setApplying] = useState(false);
 
+  useEffect(() => {
+    setSelected(new Set());
+  }, [diffs, mode]);
+
   const interactive = mode === "workdir" || mode === "staged";
 
   const applyPatchToIndex = useRepoStore((s) => s.applyPatchToIndex);
-  const applyPatchToIndexReverse = useRepoStore((s) => s.applyPatchToIndexReverse);
   const toast = useToastStore();
   const { show: showMenu } = useContextMenu();
 
@@ -218,16 +169,11 @@ export function DiffViewer({
   // `buildHunkPatch` is exported above so patch edge cases can be unit tested.
 
   const handleStageHunk = async (diff: FileDiff, hunkIdx: number) => {
-    const patch = buildHunkPatch(diff, hunkIdx);
+    const patch = buildHunkPatch(diff, hunkIdx, undefined, mode === "staged");
     setApplying(true);
     try {
-      if (mode === "staged") {
-        await applyPatchToIndexReverse(patch);
-        toast.success(t("diffStage.unstageHunk"));
-      } else {
-        await applyPatchToIndex(patch);
-        toast.success(t("diffStage.stageHunk"));
-      }
+      await applyPatchToIndex(patch);
+      toast.success(t(mode === "staged" ? "diffStage.unstageHunk" : "diffStage.stageHunk"));
     } catch (e) {
       toast.error(formatError(e), t("diffStage.stageLinesFailed"));
     } finally {
@@ -237,33 +183,10 @@ export function DiffViewer({
 
   const handleStageSelected = async () => {
     if (selected.size === 0) return;
-    // Group selected line keys by `${path}::${hunkIdx}` and build one patch
-    // per hunk. Multiple hunks → multiple apply calls (git apply can handle
-    // multi-hunk patches, but applying per-hunk gives clearer error messages).
-    const byHunk = new Map<string, Set<string>>();
-    for (const key of selected) {
-      // key format: `${path}::${hunkIdx}:${lineIdx}`
-      const sepIdx = key.lastIndexOf("::");
-      const hunkKey = key.slice(0, sepIdx);
-      const group = byHunk.get(hunkKey) ?? new Set<string>();
-      group.add(key);
-      byHunk.set(hunkKey, group);
-    }
-
     setApplying(true);
     try {
-      for (const [hunkKey, lineKeys] of byHunk) {
-        const [path, hunkIdxStr] = hunkKey.split("::");
-        const diff = diffs.find((d) => d.path === path);
-        if (!diff) continue;
-        const hunkIdx = parseInt(hunkIdxStr, 10);
-        const patch = buildHunkPatch(diff, hunkIdx, lineKeys);
-        if (mode === "staged") {
-          await applyPatchToIndexReverse(patch);
-        } else {
-          await applyPatchToIndex(patch);
-        }
-      }
+      const patch = buildSelectionPatch(diffs, selected, mode === "staged");
+      await applyPatchToIndex(patch);
       if (mode === "staged") {
         toast.success(t("diffStage.unstageLinesSuccess"));
       } else {
@@ -371,6 +294,7 @@ export function DiffViewer({
             </button>
             {!isCollapsed && (
               <div>
+                {diff.is_binary && <p className="px-3 py-4 text-text-muted text-sm">{t("files.binaryFile")}</p>}
                 {diff.hunks.map((hunk, hi) => {
                   return (
                     <div key={hi}>

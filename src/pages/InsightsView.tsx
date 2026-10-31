@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { gitService } from "@/services/git";
 import { useRepoStore } from "@/stores/repoStore";
 import { useSettingsStore } from "@/stores/aiStore";
 import { useToastStore } from "@/stores/toastStore";
 import { formatError } from "@/utils/error";
-import { applyAuthorAliases, branchCounts, getAuthorAliasRules, saveAuthorAliasRules } from "@/utils/insights";
+import { applyAuthorAliases, applyTimelineAliases, branchCounts, getAuthorAliasRules, saveAuthorAliasRules, resetAuthorAliasRules } from "@/utils/insights";
 import { ContributionCalendar } from "@/components/insights/ContributionCalendar";
 import { DeveloperActivityHeatmap } from "@/components/insights/DeveloperActivityHeatmap";
 import { ProgressTimeline } from "@/components/insights/ProgressTimeline";
@@ -13,7 +13,7 @@ import { IdentityMergeDialog } from "@/components/insights/IdentityMergeDialog";
 import { ReportGenerator } from "@/components/insights/ReportGenerator";
 import { ReleaseNotesGenerator } from "@/components/insights/ReleaseNotesGenerator";
 import { RefreshIcon, SpinnerIcon } from "@/components/common/Icons";
-import type { RepositoryInsights } from "@/types";
+import type { AuthorAliasRule, RepositoryInsights } from "@/types";
 
 type RangePreset = "7" | "30" | "90" | "all" | "custom";
 type InsightDateRange = { startDate?: string; endDate?: string };
@@ -42,27 +42,41 @@ export function InsightsView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mergeOpen, setMergeOpen] = useState(false);
+  const [rules, setRules] = useState<AuthorAliasRule[]>([]);
+  useEffect(() => { setRules(currentPath ? getAuthorAliasRules(currentPath) : []); }, [currentPath]);
   const [preset, setPreset] = useState<RangePreset>("30");
-  const initialRange = presetDates("30");
+  const [initialRange] = useState(() => presetDates("30"));
   const [startDate, setStartDate] = useState(initialRange.startDate || "");
   const [endDate, setEndDate] = useState(initialRange.endDate || "");
+  const requestSequence = useRef(0);
 
-  const load = async (range: InsightDateRange = { startDate: startDate || undefined, endDate: endDate || undefined }) => {
-    if (!currentPath || loading) return;
+  const load = useCallback(async (range: InsightDateRange) => {
+    if (!currentPath) return;
+    const request = ++requestSequence.current;
     setLoading(true);
     setError(null);
     try {
-      setData(await gitService.getRepositoryInsights(currentPath, range.startDate, range.endDate));
+      const result = await gitService.getRepositoryInsights(currentPath, range.startDate, range.endDate);
+      if (request === requestSequence.current) setData(result);
     } catch (e) {
-      setError(formatError(e));
+      if (request === requestSequence.current) setError(formatError(e));
     } finally {
-      setLoading(false);
+      if (request === requestSequence.current) setLoading(false);
     }
-  };
-  useEffect(() => {
-    setData(null);
-    if (currentPath) void load({ startDate: initialRange.startDate, endDate: initialRange.endDate });
   }, [currentPath]);
+  useEffect(() => {
+    const range = presetDates("30");
+    setData(null);
+    setError(null);
+    setMergeOpen(false);
+    setPreset("30");
+    setStartDate(range.startDate || "");
+    setEndDate(range.endDate || "");
+    if (currentPath) void load(range);
+    else setLoading(false);
+    return () => { requestSequence.current += 1; };
+  }, [currentPath, load]);
+  const refresh = () => load({ startDate: startDate || undefined, endDate: endDate || undefined });
 
   const selectPreset = (next: RangePreset) => {
     setPreset(next);
@@ -81,24 +95,27 @@ export function InsightsView() {
     void load({ startDate: startDate || undefined, endDate: endDate || undefined });
   };
   const repoId = currentPath || "";
-  const rules = useMemo(() => currentPath ? getAuthorAliasRules(currentPath) : [], [currentPath, mergeOpen]);
   const contributors = useMemo(() => data ? applyAuthorAliases(data.contributors, rules) : [], [data, rules]);
+  const timeline = useMemo(() => data ? applyTimelineAliases(data.timeline, rules) : [], [data, rules]);
+  const reportInsights = useMemo(() => data ? { ...data, contributors, contributor_count: contributors.length, timeline } : null, [data, contributors, timeline]);
   const branches = data ? branchCounts(data) : { total: 0, local: 0, remote: 0 };
   const handleMerge = (newRules: { email: string; display_name: string }[]) => {
-    saveAuthorAliasRules(repoId, [...rules.filter((r) => !newRules.some((n) => n.email === r.email)), ...newRules]);
+    const next = [...rules.filter((r) => !newRules.some((n) => n.email === r.email)), ...newRules];
+    saveAuthorAliasRules(repoId, next);
+    setRules(next);
     setMergeOpen(false);
     toast.success(t("insights.identityMerged"));
   };
 
   if (!currentPath) return <div className="flex h-full items-center justify-center text-sm text-text-muted">{t("insights.openRepo")}</div>;
   if (loading && !data) return <div className="flex h-full items-center justify-center gap-2 text-sm text-text-muted"><SpinnerIcon size={16} />{t("insights.loading")}</div>;
-  if (error && !data) return <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted"><p>{t("insights.error")}: {error}</p><button type="button" onClick={() => void load()} className="rounded bg-accent px-3 py-1.5 text-white">{t("insights.retry")}</button></div>;
+  if (error && !data) return <div className="flex h-full flex-col items-center justify-center gap-3 text-sm text-text-muted"><p>{t("insights.error")}: {error}</p><button type="button" onClick={() => void refresh()} className="rounded bg-accent px-3 py-1.5 text-white">{t("insights.retry")}</button></div>;
 
   return <div className="flex h-full flex-col overflow-hidden">
     <header className="border-b border-border px-6 py-4 space-y-3">
       <div className="flex items-center justify-between">
         <div><h1 className="text-lg font-semibold">{t("insights.title")}</h1><p className="text-xs text-text-muted">{data?.repository_name || ""}{data ? ` · ${data.start_date || "—"} — ${data.end_date || "—"}` : ""}</p></div>
-        <div className="flex gap-2"><button type="button" onClick={() => setMergeOpen(true)} disabled={!data?.contributors.length} className="text-xs text-text-secondary disabled:opacity-50">{t("insights.mergeIdentity")}</button><button type="button" onClick={() => void load()} disabled={loading} aria-label={t("insights.refresh")}><RefreshIcon size={16} /></button></div>
+        <div className="flex gap-2"><button type="button" onClick={() => setMergeOpen(true)} disabled={!data?.contributors.length} className="text-xs text-text-secondary disabled:opacity-50">{t("insights.mergeIdentity")}</button><button type="button" onClick={() => void refresh()} disabled={loading} aria-label={t("insights.refresh")}><RefreshIcon size={16} /></button></div>
       </div>
       <div className="flex flex-wrap items-center gap-2" aria-label={t("insights.dateRange")}>
         {(["7", "30", "90", "all"] as const).map((value) => <button key={value} type="button" onClick={() => selectPreset(value)} className={`rounded border px-2 py-1 text-xs ${preset === value ? "border-accent text-accent" : "border-border text-text-muted"}`}>{t(`insights.range${value === "all" ? "All" : value}`)}</button>)}
@@ -110,8 +127,9 @@ export function InsightsView() {
     {!data || data.total_commits === 0 ? <div className="flex flex-1 items-center justify-center text-sm text-text-muted">{t("insights.emptyRange")}</div> : <div className="flex-1 overflow-auto p-6 space-y-4">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">{[["insights.commits", data.total_commits], ["insights.contributors", contributors.length], ["insights.localBranches", branches.local], ["insights.remoteBranches", branches.remote], ["insights.tags", data.tag_count]].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-border bg-bg-surface p-3"><div className="text-xs text-text-muted">{t(String(label))}</div><div className="text-xl font-semibold mt-1">{value}</div></div>)}</div>
       <ContributionCalendar values={data.daily_contributions} />
-      <div className="grid gap-4 lg:grid-cols-2"><DeveloperActivityHeatmap contributors={contributors} /><ProgressTimeline timeline={data.timeline} milestones={data.milestones} /></div>
-      <ReportGenerator insights={{ ...data, contributors }} config={config} repoPath={currentPath} />
+      {rules.length > 0 && <button type="button" className="btn-ghost text-xs" onClick={() => { resetAuthorAliasRules(repoId); setRules([]); }}>{t("insights.resetIdentity")}</button>}
+      <div className="grid gap-4 lg:grid-cols-2"><DeveloperActivityHeatmap contributors={contributors} /><ProgressTimeline timeline={timeline} milestones={data.milestones} /></div>
+      {reportInsights && <ReportGenerator insights={reportInsights} config={config} repoPath={currentPath} />}
       <ReleaseNotesGenerator config={config} repoPath={currentPath} />
     </div>}
     <IdentityMergeDialog open={mergeOpen} contributors={data?.contributors || []} onClose={() => setMergeOpen(false)} onSave={handleMerge} />

@@ -64,6 +64,7 @@ export function BranchesView() {
 
   const [newBranchName, setNewBranchName] = useState("");
   const [showNewBranch, setShowNewBranch] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [search, setSearch] = useState("");
   const [subTab, setSubTab] = useState<SubTab>("branches");
 
@@ -86,19 +87,26 @@ export function BranchesView() {
     : remoteBranches;
 
   const handleCreate = async () => {
-    if (!newBranchName.trim()) return;
+    if (!newBranchName.trim() || creating) return;
+    const name = newBranchName.trim();
+    const repoPath = currentPath;
+    setCreating(true);
     try {
-      await createBranch(newBranchName.trim());
+      await createBranch(name);
+      if (useRepoStore.getState().currentPath !== repoPath) return;
       await refreshBranches();
-      const switched = await switchBranch(newBranchName.trim());
+      if (useRepoStore.getState().currentPath !== repoPath) return;
+      const switched = await switchBranch(name);
       setNewBranchName("");
       setShowNewBranch(false);
       if (switched) {
-        toast.success(t("branches.branchCreated", { name: newBranchName.trim() }));
+        toast.success(t("branches.branchCreated", { name }));
       }
     } catch (e) {
       console.error(e);
       toast.error(formatError(e), t("branches.branchCreateFailed"));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -231,6 +239,7 @@ export function BranchesView() {
           <span className="text-base font-semibold flex-1">{t("branches.title")}</span>
           <button
             onClick={() => setShowNewBranch(!showNewBranch)}
+            disabled={creating}
             className="btn-ghost"
             title={t("branches.newBranch")}
             aria-label={t("branches.newBranch")}
@@ -254,6 +263,7 @@ export function BranchesView() {
             <input
               type="text"
               value={newBranchName}
+              disabled={creating}
               onChange={(e) => setNewBranchName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleCreate()}
               placeholder={t("branches.branchNamePlaceholder")}
@@ -262,10 +272,12 @@ export function BranchesView() {
             />
             <button
               onClick={handleCreate}
+              disabled={creating || !newBranchName.trim()}
+              aria-busy={creating}
               className="btn-primary px-2.5 py-1.5"
               aria-label={t("branches.newBranch")}
             >
-              <CheckIcon size={14} />
+              {creating ? <SpinnerIcon size={14} /> : <CheckIcon size={14} />}
             </button>
           </div>
         )}

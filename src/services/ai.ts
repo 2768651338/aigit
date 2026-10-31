@@ -40,10 +40,13 @@ async function streamCommand(
   ensureTauri();
   let content = "";
   let terminal = false;
+  let receivedEvent = false;
   let failure: Extract<AiStreamEvent, { type: "Failed" }> | null = null;
   const channel = new Channel<AiStreamEvent>();
   channel.onmessage = (event) => {
     if (event.requestId !== requestId) return;
+    if (terminal) return;
+    receivedEvent = true;
     if (event.type === "Delta") content += event.delta;
     if (event.type === "Failed") failure = event;
     if (event.type === "Completed" || event.type === "Cancelled" || event.type === "Failed") {
@@ -59,7 +62,10 @@ async function streamCommand(
     // Older backends do not know the stream command. Preserve compatibility by
     // falling back only when no stream event was delivered; provider failures
     // are sent as Failed events and must not trigger a duplicate request.
-    if (terminal || content) throw error;
+    const unknownCommand = typeof error === "string" &&
+      error.toLowerCase().includes(`command ${command}`) &&
+      error.toLowerCase().includes("not found");
+    if (receivedEvent || !unknownCommand) throw error;
     const value = await fallback();
     handlers.onEvent({ type: "Started", requestId, provider: "fallback", streaming: false });
     if (value) handlers.onEvent({ type: "Delta", requestId, delta: value });

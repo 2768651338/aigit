@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildHunkPatch } from "@/components/git/DiffViewer";
+import { buildHunkPatch } from "@/utils/diffPatch";
 import type { FileDiff } from "@/types";
 
 const renamedDiff: FileDiff = {
@@ -28,9 +28,9 @@ describe("buildHunkPatch", () => {
   it("uses the rename source path and preserves no-newline markers", () => {
     const patch = buildHunkPatch(renamedDiff, 0);
 
-    expect(patch).toContain("diff --git a/src/old name.ts b/src/new name.ts");
-    expect(patch).toContain("--- a/src/old name.ts");
-    expect(patch).toContain("+++ b/src/new name.ts");
+    expect(patch).toContain('diff --git "a/src/old name.ts" "b/src/new name.ts"');
+    expect(patch).toContain('--- "a/src/old name.ts"');
+    expect(patch).toContain('+++ "b/src/new name.ts"');
     expect(patch).toContain("\\ No newline at end of file");
     expect(patch.endsWith("\n")).toBe(true);
   });

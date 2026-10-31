@@ -12,6 +12,7 @@ import type {
   LogEntry,
 } from "@/types";
 import { codeIndexService } from "@/services/codeIndex";
+import { formatError } from "@/utils/error";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -175,19 +176,21 @@ export function FilesView() {
   useEffect(() => {
     setSemanticHits(null);
     setSemanticError(null);
+    setSemanticLoading(false);
     if (searchMode !== "semantic" || !q || !currentPath) return;
+    let alive = true;
     const timer = window.setTimeout(() => {
       setSemanticLoading(true);
       codeIndexService
         .search(currentPath, q.trim(), 12)
-        .then(setSemanticHits)
+        .then((hits) => { if (alive) setSemanticHits(hits); })
         .catch((e) => {
           console.error(e);
-          setSemanticError(e instanceof Error ? e.message : String(e));
+          if (alive) setSemanticError(formatError(e));
         })
-        .finally(() => setSemanticLoading(false));
+        .finally(() => { if (alive) setSemanticLoading(false); });
     }, 500);
-    return () => window.clearTimeout(timer);
+    return () => { alive = false; window.clearTimeout(timer); };
   }, [searchMode, q, currentPath]);
 
   // 选中文件变化：重置右侧全部数据。
@@ -201,7 +204,7 @@ export function FilesView() {
     setHistoryDiff(null);
     setBlame(null);
     setBlameError(null);
-  }, [selectedFile]);
+  }, [selectedFile, currentPath]);
 
   // 内容就绪后滚动到语义命中的目标行。
   useEffect(() => {
@@ -218,49 +221,55 @@ export function FilesView() {
   useEffect(() => {
     if (!currentPath || !selectedFile) return;
     if (activeTab !== "content" && activeTab !== "blame") return;
-    if (content || contentLoading) return;
+    let alive = true;
     setContentLoading(true);
+    setContentError(null);
     gitService
       .getFileContent(currentPath, selectedFile)
       .then((data) => {
-        setContent((prev) => (prev ? prev : data));
+        if (alive) setContent(data);
       })
       .catch((e) => {
         console.error(e);
-        setContentError(e instanceof Error ? e.message : String(e));
+        if (alive) setContentError(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setContentLoading(false));
-  }, [activeTab, selectedFile, currentPath, content, contentLoading]);
+      .finally(() => { if (alive) setContentLoading(false); });
+    return () => { alive = false; };
+  }, [activeTab, selectedFile, currentPath]);
 
   // 文件历史。
   useEffect(() => {
     if (!currentPath || !selectedFile || activeTab !== "history") return;
-    if (history || historyLoading) return;
+    let alive = true;
     setHistoryLoading(true);
+    setHistoryError(null);
     gitService
       .getFileHistory(currentPath, selectedFile)
-      .then((data) => setHistory((prev) => prev ?? data))
+      .then((data) => { if (alive) setHistory(data); })
       .catch((e) => {
         console.error(e);
-        setHistoryError(e instanceof Error ? e.message : String(e));
+        if (alive) setHistoryError(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setHistoryLoading(false));
-  }, [activeTab, selectedFile, currentPath, history, historyLoading]);
+      .finally(() => { if (alive) setHistoryLoading(false); });
+    return () => { alive = false; };
+  }, [activeTab, selectedFile, currentPath]);
 
   // blame 行归属。
   useEffect(() => {
     if (!currentPath || !selectedFile || activeTab !== "blame") return;
-    if (blame || blameLoading) return;
+    let alive = true;
     setBlameLoading(true);
+    setBlameError(null);
     gitService
       .getFileBlame(currentPath, selectedFile)
-      .then((data) => setBlame((prev) => prev ?? data))
+      .then((data) => { if (alive) setBlame(data); })
       .catch((e) => {
         console.error(e);
-        setBlameError(e instanceof Error ? e.message : String(e));
+        if (alive) setBlameError(e instanceof Error ? e.message : String(e));
       })
-      .finally(() => setBlameLoading(false));
-  }, [activeTab, selectedFile, currentPath, blame, blameLoading]);
+      .finally(() => { if (alive) setBlameLoading(false); });
+    return () => { alive = false; };
+  }, [activeTab, selectedFile, currentPath]);
 
   // 历史详情 diff。
   useEffect(() => {
@@ -793,13 +802,13 @@ export function FilesView() {
                               title={`${group.info.summary} (${group.info.author})`}
                             >
                               <span className="font-mono text-accent shrink-0 cursor-pointer">
-                                {group.info.short_hash}
+                                {group.info.timestamp === 0 ? t("files.uncommitted") : group.info.short_hash}
                               </span>
                               <span className="text-text-secondary shrink-0 truncate max-w-40">
                                 {group.info.author}
                               </span>
                               <span className="text-text-muted shrink-0">
-                                {formatTime(group.info.timestamp)}
+                                {group.info.timestamp === 0 ? "" : formatTime(group.info.timestamp)}
                               </span>
                               <span className="text-text-muted truncate">
                                 {group.info.summary}

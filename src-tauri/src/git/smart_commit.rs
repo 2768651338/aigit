@@ -109,6 +109,8 @@ fn head(repo: &Repository) -> AppResult<String> {
 
 fn index_tree(repo: &Repository) -> AppResult<String> {
     let mut index = repo.index()?;
+    // Staging runs Git CLI, which updates the disk index outside libgit2.
+    index.read(true)?;
     Ok(index.write_tree()?.to_string())
 }
 
@@ -539,6 +541,68 @@ mod tests {
         git(&root, &["commit", "-m", "initial"]);
         let repo = Repository::open(&root).unwrap();
         (root, repo)
+    }
+
+    #[test]
+    fn staged_group_reports_disk_tree_and_commits_after_reopening() {
+        let (root, repo) = temp_repo("stage-confirm");
+        fs::write(root.join("file.txt"), "changed observation\n").unwrap();
+        let draft = create_draft(&repo).unwrap();
+        let plan = fallback_plan(&draft, "generated text observation");
+        let group_id = plan.groups[0].id.clone();
+        let staged = stage_group(&repo, &plan, &group_id).unwrap();
+
+        // Tauri opens a fresh Repository for the later confirmation command.
+        let reopened = Repository::open(&root).unwrap();
+        let disk_tree = index_tree(&reopened).unwrap();
+        assert_ne!(disk_tree, draft.snapshot.index_tree);
+        assert_eq!(staged.staged_tree, disk_tree);
+        let result = commit_group(&reopened, plan, &group_id, &staged.staged_tree).unwrap();
+        let committed = reopened
+            .find_commit(git2::Oid::from_str(&result.commit_hash).unwrap())
+            .unwrap();
+        assert_eq!(committed.parent_count(), 1);
+        assert_eq!(
+            committed.parent_id(0).unwrap().to_string(),
+            draft.snapshot.head
+        );
+        assert_eq!(committed.tree_id().to_string(), disk_tree);
+        assert!(reopened.statuses(None).unwrap().is_empty());
+        assert_eq!(
+            fs::read_to_string(root.join("file.txt")).unwrap(),
+            "changed observation\n"
+        );
+        drop(committed);
+        drop(reopened);
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn confirmation_rejects_a_later_index_change_without_touching_head_or_text() {
+        let (root, repo) = temp_repo("stage-interference");
+        fs::write(root.join("file.txt"), "pending observation\n").unwrap();
+        let draft = create_draft(&repo).unwrap();
+        let plan = fallback_plan(&draft, "generated text observation");
+        let group_id = plan.groups[0].id.clone();
+        let staged = stage_group(&repo, &plan, &group_id).unwrap();
+        let reopened = Repository::open(&root).unwrap();
+        super::super::commit::unstage_files(&reopened, &["file.txt".into()]).unwrap();
+        let confirmation = Repository::open(&root).unwrap();
+        assert!(commit_group(&confirmation, plan, &group_id, &staged.staged_tree).is_err());
+        assert_eq!(head(&confirmation).unwrap(), draft.snapshot.head);
+        assert_eq!(
+            index_tree(&confirmation).unwrap(),
+            draft.snapshot.index_tree
+        );
+        assert_eq!(
+            fs::read_to_string(root.join("file.txt")).unwrap(),
+            "pending observation\n"
+        );
+        drop(confirmation);
+        drop(reopened);
+        drop(repo);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

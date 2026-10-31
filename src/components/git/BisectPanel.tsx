@@ -149,23 +149,23 @@ export function BisectPanel({ onBack }: { onBack?: () => void }) {
         {state && state.in_progress && (
           <div className="max-w-xl space-y-3">
             <div className="rounded border border-warning/40 bg-warning/10 px-3 py-2.5 text-sm text-warning">
-              {t("bisect.inProgress")}
+              {state.first_bad_commit ? t("bisect.found") : t("bisect.inProgress")}
             </div>
             <div className="rounded border border-border bg-bg-surface px-3 py-2.5">
-              <div className="text-xs text-text-muted">{t("bisect.current")}</div>
+              <div className="text-xs text-text-muted">{t(state.first_bad_commit ? "bisect.firstBad" : "bisect.current")}</div>
               <div className="font-mono text-sm text-text-primary break-all">
-                {state.current_commit || "—"}
+                {state.first_bad_commit || state.current_commit || "—"}
               </div>
             </div>
-            <p className="text-xs text-text-secondary">{t("bisect.testHint")}</p>
+            {!state.first_bad_commit && <p className="text-xs text-text-secondary">{t("bisect.testHint")}</p>}
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="btn-primary text-xs" disabled={busy} onClick={() => mark("bad")}>
+              <button type="button" className="btn-primary text-xs" disabled={busy || Boolean(state.first_bad_commit)} onClick={() => mark("bad")}>
                 {t("bisect.markBad")}
               </button>
-              <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => mark("good")}>
+              <button type="button" className="btn-secondary text-xs" disabled={busy || Boolean(state.first_bad_commit)} onClick={() => mark("good")}>
                 {t("bisect.markGood")}
               </button>
-              <button type="button" className="btn-ghost text-xs" disabled={busy} onClick={() => mark("skip")}>
+              <button type="button" className="btn-ghost text-xs" disabled={busy || Boolean(state.first_bad_commit)} onClick={() => mark("skip")}>
                 {t("bisect.markSkip")}
               </button>
               <button type="button" className="btn-ghost text-xs text-danger" disabled={busy} onClick={() => void reset()}>

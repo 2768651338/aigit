@@ -98,6 +98,10 @@ function AppShell() {
     }
   }, [config, i18n]);
 
+  useEffect(() => {
+    document.documentElement.lang = i18n.resolvedLanguage || i18n.language || "zh";
+  }, [i18n, i18n.resolvedLanguage, i18n.language]);
+
   // Global keyboard shortcuts:
   //   Cmd/Ctrl + 1..5  — switch views (changes/branches/review/chat/settings)
   //   Cmd/Ctrl + R     — refresh current repo status

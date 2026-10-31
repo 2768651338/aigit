@@ -65,6 +65,7 @@ pub fn run() {
             git_cmd::get_log_range,
             git_cmd::get_commit_diff,
             git_cmd::get_commit_diff_files,
+            git_cmd::get_stash_diff_files,
             git_cmd::get_commit_file_diff,
             git_cmd::list_files,
             git_cmd::list_tree,

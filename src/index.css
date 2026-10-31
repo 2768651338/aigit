@@ -7,6 +7,11 @@
 .insight-level-2 { background-color: rgb(var(--color-accent) / 0.45); }
 .insight-level-3 { background-color: rgb(var(--color-accent) / 0.7); }
 .insight-level-4 { background-color: rgb(var(--color-accent)); }
+svg .insight-level-0 { fill: rgb(var(--color-bg-hover)); }
+svg .insight-level-1 { fill: rgb(var(--color-accent) / 0.25); }
+svg .insight-level-2 { fill: rgb(var(--color-accent) / 0.45); }
+svg .insight-level-3 { fill: rgb(var(--color-accent) / 0.7); }
+svg .insight-level-4 { fill: rgb(var(--color-accent)); }
 
 @layer base {
   /* Dark theme (default). Light theme overrides via `.theme-light`. */
@@ -157,7 +162,12 @@
   }
 
   .input {
-    @apply w-full bg-bg-base border border-border rounded px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-border-strong transition-colors;
+    @apply w-full bg-bg-base border border-transparent rounded px-3 py-2.5 text-sm text-text-primary placeholder:text-text-muted focus:outline-none transition-colors;
+    box-shadow: inset 0 0 0 1px rgb(var(--color-text-primary) / 0.08);
+  }
+
+  .input:focus {
+    box-shadow: inset 0 0 0 2px rgb(var(--color-accent) / 0.65), 0 0 0 2px rgb(var(--color-accent) / 0.25);
   }
 
   .card {

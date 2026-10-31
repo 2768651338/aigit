@@ -31,8 +31,8 @@ import clsx from "clsx";
  * capture the current working-tree state with an optional message and the
  * `--include-untracked` / `--keep-index` flags.
  *
- * Selecting a stash expands an inline diff preview (fetched via the existing
- * `get_commit_diff_files` command — a stash is just a commit).
+ * Selecting a stash expands its tracked and untracked content via
+ * `get_stash_diff_files`; selection follows the immutable stash commit ID.
  */
 export function StashPanel() {
   const { t } = useTranslation();
@@ -64,7 +64,10 @@ export function StashPanel() {
   const [includeUntracked, setIncludeUntracked] = useState(false);
   const [keepIndex, setKeepIndex] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState<StashInfo | null>(null);
+  const [selection, setSelection] = useState<{ repoPath: string; hash: string } | null>(null);
+  const selected = selection?.repoPath === currentPath
+    ? stashes?.find((entry) => entry.hash === selection.hash) ?? null : null;
+  const selectedHash = selected?.hash;
   const [files, setFiles] = useState<FileDiff[]>([]);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
@@ -76,17 +79,28 @@ export function StashPanel() {
     }
   }, [currentPath, refreshStashes]);
 
-  // Reset selection when stash list changes (e.g. after pop/drop).
+  // Follow immutable stash identity: saving or dropping another entry renumbers indices.
   useEffect(() => {
-    if (selected) {
-      const stillExists = stashes?.some((s) => s.index === selected.index);
-      if (!stillExists) {
-        setSelected(null);
-        setFiles([]);
-        setDiffError(null);
-      }
-    }
-  }, [stashes, selected]);
+    let alive = true;
+    setFiles([]);
+    setDiffError(null);
+    setDiffLoading(false);
+    if (!currentPath || !selectedHash) return;
+    setDiffLoading(true);
+    gitService.getStashFiles(currentPath, selectedHash)
+      .then((result) => { if (alive) setFiles(result); })
+      .catch((error) => { if (alive) setDiffError(formatError(error)); })
+      .finally(() => { if (alive) setDiffLoading(false); });
+    return () => { alive = false; };
+  }, [currentPath, selectedHash]);
+
+  const entryIndex = (s: StashInfo) => {
+    const state = useRepoStore.getState();
+    const entry = state.currentPath === currentPath
+      ? state.stashes?.find((item) => item.hash === s.hash) : null;
+    if (!entry) throw new Error(t("stashes.selectionStale"));
+    return entry.index;
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -110,8 +124,9 @@ export function StashPanel() {
 
   const handleApply = async (s: StashInfo) => {
     try {
-      await stashApply(s.index);
-      toast.success(t("stashes.stashApplied", { index: s.index }));
+      const index = entryIndex(s);
+      await stashApply(index);
+      toast.success(t("stashes.stashApplied", { ref: `stash@{${index}}` }));
     } catch (e) {
       toast.error(formatError(e), t("stashes.stashFailed"));
     }
@@ -119,8 +134,9 @@ export function StashPanel() {
 
   const handlePop = async (s: StashInfo) => {
     try {
-      await stashPop(s.index);
-      toast.success(t("stashes.stashPopped", { index: s.index }));
+      const index = entryIndex(s);
+      await stashPop(index);
+      toast.success(t("stashes.stashPopped", { ref: `stash@{${index}}` }));
     } catch (e) {
       toast.error(formatError(e), t("stashes.stashFailed"));
     }
@@ -129,39 +145,22 @@ export function StashPanel() {
   const handleDrop = async (s: StashInfo) => {
     const confirmed = await confirmDialog(
       t("stashes.dropTitle"),
-      t("stashes.dropConfirm", { index: s.index }),
+      t("stashes.dropConfirm", { ref: `stash@{${s.index}}` }),
       "warning"
     );
     if (!confirmed) return;
     try {
-      await stashDrop(s.index);
-      toast.success(t("stashes.stashDropped", { index: s.index }));
+      const index = entryIndex(s);
+      if (index !== s.index) throw new Error(t("stashes.selectionStale"));
+      await stashDrop(index);
+      toast.success(t("stashes.stashDropped", { ref: `stash@{${index}}` }));
     } catch (e) {
       toast.error(formatError(e), t("stashes.stashFailed"));
     }
   };
 
-  const handleSelect = async (s: StashInfo) => {
-    if (selected?.index === s.index) {
-      setSelected(null);
-      setFiles([]);
-      setDiffError(null);
-      return;
-    }
-    setSelected(s);
-    setFiles([]);
-    setDiffError(null);
-    if (!currentPath) return;
-    setDiffLoading(true);
-    try {
-      // A stash is a commit — its hash can be passed to get_commit_diff_files.
-      const fileDiffs = await gitService.getCommitFiles(currentPath, s.hash);
-      setFiles(fileDiffs);
-    } catch (e) {
-      setDiffError(formatError(e));
-    } finally {
-      setDiffLoading(false);
-    }
+  const handleSelect = (s: StashInfo) => {
+    setSelection(currentPath && selected?.hash !== s.hash ? { repoPath: currentPath, hash: s.hash } : null);
   };
 
   if (!currentPath) {
@@ -267,10 +266,10 @@ export function StashPanel() {
             ) : (
               <div className="px-2 py-2 space-y-0.5">
                 {stashes.map((s) => {
-                  const isSelected = selected?.index === s.index;
+                  const isSelected = selected?.hash === s.hash;
                   return (
                     <div
-                      key={s.index}
+                      key={s.hash}
                       className={clsx(
                         "group rounded cursor-pointer border",
                         isSelected
@@ -357,7 +356,7 @@ export function StashPanel() {
                 </span>
                 <button
                   onClick={() => {
-                    setSelected(null);
+                    setSelection(null);
                     setFiles([]);
                     setDiffError(null);
                   }}

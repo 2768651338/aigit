@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import clsx from "clsx";
 import { aiService } from "@/services/ai";
 import { githubService } from "@/services/github";
@@ -14,7 +15,11 @@ export function PullRequestsPanel({ onBack }: { onBack?: () => void }) {
   const { t } = useTranslation();
   const path = useRepoStore((s) => s.currentPath);
   const repoInfo = useRepoStore((s) => s.repoInfo);
-  const toast = useToastStore();
+  const toast = useToastStore(useShallow((state) => ({
+    error: state.error,
+    success: state.success,
+    info: state.info,
+  })));
   const reviewPullRequest = useAiStore((s) => s.reviewPullRequest);
   const prReviewLoading = useAiStore((s) => (path ? Boolean(s.activeRequestByScope?.[`${path}\u0000pr-review`]) : false));
   const [items, setItems] = useState<PullRequest[]>([]);

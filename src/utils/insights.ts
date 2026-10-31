@@ -10,12 +10,19 @@ export function applyAuthorAliases(contributors: ContributorInsights[], rules: A
   const byEmail = new Map(rules.map((r) => [normalizeEmail(r.email), r.display_name.trim()]));
   const grouped = new Map<string, ContributorInsights>();
   for (const item of contributors) {
-    const name = byEmail.get(normalizeEmail(item.email)) || item.name;
-    const key = name.trim().toLocaleLowerCase();
+    const alias = byEmail.get(normalizeEmail(item.email));
+    const name = alias || item.name;
+    const key = alias ? `alias:${alias.toLocaleLowerCase()}` : `email:${normalizeEmail(item.email) || item.name.toLocaleLowerCase()}`;
     const existing = grouped.get(key);
     if (!existing) { grouped.set(key, { ...item, name }); continue; }
     existing.commit_count += item.commit_count;
-    existing.active_days += item.active_days;
+    if (existing.active_dates && item.active_dates) {
+      existing.active_dates = [...new Set([...existing.active_dates, ...item.active_dates])].sort();
+      existing.active_days = existing.active_dates.length;
+    } else {
+      existing.active_days += item.active_days;
+      existing.active_dates = undefined;
+    }
     existing.first_date = existing.first_date < item.first_date ? existing.first_date : item.first_date;
     existing.last_date = existing.last_date > item.last_date ? existing.last_date : item.last_date;
     existing.activity = existing.activity.map((v, i) => v + (item.activity[i] || 0));
@@ -74,6 +81,17 @@ export function saveAuthorAliasRules(repoId: string, rules: AuthorAliasRule[]): 
   localStorage.setItem(`aigit:insight-aliases:${safeRepoId}`, JSON.stringify(safeRules));
 }
 export function resetAuthorAliasRules(repoId: string): void { localStorage.removeItem(`aigit:insight-aliases:${repoId}`); }
+
+export function applyTimelineAliases(timeline: TimelineBucket[], rules: AuthorAliasRule[]): TimelineBucket[] {
+  const aliases = new Map(rules.map((rule) => [normalizeEmail(rule.email), `alias:${rule.display_name.trim().toLocaleLowerCase()}`]));
+  const cumulative = new Set<string>();
+  return timeline.map((bucket) => {
+    if (!bucket.author_ids) return bucket;
+    const authors = new Set(bucket.author_ids.map((email) => aliases.get(normalizeEmail(email)) || `email:${normalizeEmail(email)}`));
+    authors.forEach((author) => cumulative.add(author));
+    return { ...bucket, contributors: authors.size, cumulative_contributors: cumulative.size };
+  });
+}
 
 export interface InsightReportLabels {
   weeklyTitle: string;

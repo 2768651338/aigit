@@ -42,9 +42,9 @@ const VIEW_TARGETS: { view: ViewType; icon: typeof FileEditIcon; shortcut: strin
   { view: "review", icon: ScanSearchIcon, shortcut: "Ctrl+4" },
   { view: "chat", icon: MessageSquareIcon, shortcut: "Ctrl+5" },
   { view: "insights", icon: BarChartIcon, shortcut: "Ctrl+6" },
-  { view: "dashboard", icon: LayoutDashboardIcon, shortcut: "Ctrl+8" },
-  { view: "history", icon: HistoryIcon, shortcut: "Ctrl+9" },
-  { view: "settings", icon: SettingsIcon, shortcut: "Ctrl+7" },
+  { view: "dashboard", icon: LayoutDashboardIcon, shortcut: "Ctrl+7" },
+  { view: "history", icon: HistoryIcon, shortcut: "Ctrl+8" },
+  { view: "settings", icon: SettingsIcon, shortcut: "Ctrl+9" },
 ];
 
 /** 命令面板（Ctrl+K / ? 唤起）：视图跳转 + 常用操作 + 快捷键速查。 */

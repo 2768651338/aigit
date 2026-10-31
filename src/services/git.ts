@@ -222,6 +222,11 @@ export const gitService = {
     return invoke<FileDiff[]>("get_commit_diff_files", { path, hash });
   },
 
+  getStashFiles: (path: string, hash: string) => {
+    ensureTauri();
+    return invoke<FileDiff[]>("get_stash_diff_files", { path, hash });
+  },
+
   /** 多仓库仪表盘聚合快照：逐仓库独立容错。 */
   getReposDashboard: (paths: string[]) => {
     ensureTauri();
@@ -360,9 +365,9 @@ export const gitService = {
   },
 
   /** Rewrite the branch tail: reword / squash / drop (oldest first). */
-  rewriteHistory: (path: string, steps: RewriteStep[]) => {
+  rewriteHistory: (path: string, steps: RewriteStep[], startHash: string, expectedHead: string) => {
     ensureTauri();
-    return invoke<string>("rewrite_history", { path, steps });
+    return invoke<string>("rewrite_history", { path, steps, startHash, expectedHead });
   },
 
   listRemotes: (path: string) => {

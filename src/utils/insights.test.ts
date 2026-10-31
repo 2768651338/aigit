@@ -17,6 +17,16 @@ const insights: RepositoryInsights = { repository_name: "demo", start_date: "202
 describe("insights utilities", () => {
   it("fills missing dates with zero and includes both boundaries", () => expect(fillDateRange([{ date: "2024-01-02", count: 2 }], "2024-01-01", "2024-01-03")).toEqual([{ date: "2024-01-01", count: 0 }, { date: "2024-01-02", count: 2 }, { date: "2024-01-03", count: 0 }]));
   it("groups aliases case-insensitively", () => expect(applyAuthorAliases([contributor("A", "A@EXAMPLE.COM", 2), contributor("B", "b@example.com", 3)], [{ email: "a@example.com", display_name: "Team" }, { email: "b@example.com", display_name: "Team" }])[0].commit_count).toBe(5));
+  it("counts overlapping active dates once when identities are merged", () => {
+    const originals = [
+      { ...contributor("A", "a@example.com", 2), active_days: 2, active_dates: ["2024-01-01", "2024-01-02"] },
+      { ...contributor("B", "b@example.com", 3), active_days: 2, active_dates: ["2024-01-02", "2024-01-03"] },
+    ];
+    const merged = applyAuthorAliases(originals, [{ email: "a@example.com", display_name: "Team" }, { email: "b@example.com", display_name: "Team" }]);
+    expect(merged[0].active_days).toBe(3);
+    expect(merged[0].active_dates).toEqual(["2024-01-01", "2024-01-02", "2024-01-03"]);
+    expect(originals[0].active_days).toBe(2);
+  });
   it("assigns intensity and caps timeline frames", () => { expect(contributionIntensity(0, 5)).toBe(0); expect(contributionIntensity(5, 5)).toBe(4); expect(createTimelineFrames(Array.from({ length: 10 }, (_, i) => ({ period: String(i), cumulative_commits: i, cumulative_contributors: 1, commits: 1, contributors: 1 })), 3)).toHaveLength(3); });
   it("generates reports from selected-range statistics and writes the range", () => {
     const report = generateWeeklyReport(insights, labels);

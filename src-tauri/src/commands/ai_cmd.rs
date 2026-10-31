@@ -1,4 +1,6 @@
-use crate::ai::stream::{AiStreamEvent, CancellationRegistry, RegistrationGuard};
+use crate::ai::stream::{
+    AiStreamEvent, CancellationRegistry, CancellationToken, RegistrationGuard,
+};
 use crate::ai::{self, ChatMessage, ProviderEvent};
 use crate::config::{AppConfig, CredentialStore, ModelProfile, SystemCredentialStore};
 use crate::error::{AppError, AppResult};
@@ -1007,6 +1009,9 @@ pub async fn repo_chat_stream(
     on_event: Channel<AiStreamEvent>,
     registry: State<'_, CancellationRegistry>,
 ) -> AppResult<()> {
+    validate_request_id(&request_id)?;
+    let cancellation = registry.register(&request_id)?;
+    let _guard = RegistrationGuard::new(&registry, &request_id);
     let (config, api_key) = load_ai_context()?;
     let query = messages
         .iter()
@@ -1014,7 +1019,13 @@ pub async fn repo_chat_stream(
         .find(|message| message.role == "user")
         .map(|message| message.content.as_str())
         .unwrap_or("");
-    let context = build_repo_context(repo_path.as_deref(), attachments.as_deref(), query).await?;
+    let context = tokio::select! {
+        _ = cancellation.cancelled() => {
+            send_stream_event(&on_event, AiStreamEvent::Cancelled { request_id })?;
+            return Ok(());
+        }
+        context = build_repo_context(repo_path.as_deref(), attachments.as_deref(), query) => context?,
+    };
     let base_prompt = repo_chat_prompt(&config);
     let system_prompt = if context.is_empty() {
         base_prompt.to_string()
@@ -1022,14 +1033,14 @@ pub async fn repo_chat_stream(
         format!("{base_prompt}\n\n--- Repository Context ---\n{context}")
     };
     ai::ensure_no_secrets(&system_prompt, &messages, confirm_secrets.unwrap_or(false))?;
-    run_stream(
+    run_registered_stream(
         &request_id,
         &system_prompt,
         &messages,
         &config,
         api_key.as_deref(),
         &on_event,
-        &registry,
+        cancellation,
         true,
     )
     .await
@@ -1163,6 +1174,39 @@ async fn run_stream(
     validate_request_id(request_id)?;
     let cancellation = registry.register(request_id)?;
     let _guard = RegistrationGuard::new(registry, request_id);
+    run_registered_stream(
+        request_id,
+        system_prompt,
+        messages,
+        config,
+        api_key,
+        on_event,
+        cancellation,
+        send_completed,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_registered_stream(
+    request_id: &str,
+    system_prompt: &str,
+    messages: &[ChatMessage],
+    config: &AppConfig,
+    api_key: Option<&str>,
+    on_event: &Channel<AiStreamEvent>,
+    cancellation: CancellationToken,
+    send_completed: bool,
+) -> AppResult<Option<String>> {
+    if cancellation.is_cancelled() {
+        send_stream_event(
+            on_event,
+            AiStreamEvent::Cancelled {
+                request_id: request_id.to_string(),
+            },
+        )?;
+        return Ok(None);
+    }
     let provider_name = config.ai.active_provider.clone();
     let provider = ai::get_provider(&provider_name)?;
     send_stream_event(

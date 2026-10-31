@@ -295,7 +295,7 @@ function RepoEntryDialog({
                 onKeyDown={(event) => { if (event.key === "Enter") void submit(); }}
                 disabled={busy}
                 placeholder={t("repoEntry.directoryPlaceholder")}
-                className="flex-1 min-w-0 bg-bg-base border border-border rounded px-3 py-2 text-sm focus:outline-none focus:border-border-strong"
+                className="input flex-1 min-w-0 py-2"
               />
               <button type="button" onClick={chooseDirectory} disabled={busy} className="btn-secondary">
                 <FolderIcon size={14} /> {t("repoEntry.browse")}

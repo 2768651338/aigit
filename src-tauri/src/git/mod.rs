@@ -45,6 +45,10 @@ pub struct DiffLine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffHunk {
     pub header: String,
+    #[serde(default)]
+    pub old_start: u32,
+    #[serde(default)]
+    pub new_start: u32,
     pub lines: Vec<DiffLine>,
 }
 
@@ -55,6 +59,12 @@ pub struct FileDiff {
     pub hunks: Vec<DiffHunk>,
     pub additions: u32,
     pub deletions: u32,
+    #[serde(default)]
+    pub is_binary: bool,
+    #[serde(default)]
+    pub is_new: bool,
+    #[serde(default)]
+    pub is_deleted: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

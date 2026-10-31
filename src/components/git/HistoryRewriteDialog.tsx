@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useRepoStore } from "@/stores/repoStore";
 import { useToastStore } from "@/stores/toastStore";
@@ -26,7 +26,7 @@ interface Row {
 }
 
 /** 历史整理对话框：对从所选提交到 HEAD 的提交做改写（reword）、
- *  合并（squash）与丢弃（drop）。不支持调换顺序（快照树语义限制）。 */
+ *  合并（squash）与丢弃（drop）。保留原始范围与先后顺序。 */
 export function HistoryRewriteDialog({
   startEntry,
   loadedLog,
@@ -36,44 +36,47 @@ export function HistoryRewriteDialog({
   const currentPath = useRepoStore((s) => s.currentPath);
   const refreshLog = useRepoStore((s) => s.refreshLog);
   const refreshBranches = useRepoStore((s) => s.refreshBranches);
+  const refreshRepoInfo = useRepoStore((s) => s.refreshRepoInfo);
+  const refreshStatus = useRepoStore((s) => s.refreshStatus);
   const toast = useToastStore();
   const [applying, setApplying] = useState(false);
+  const [targetPath] = useState(currentPath);
 
   // loadedLog 最新在前；切为最老在前并截取从所选提交到 HEAD 的区段。
-  const rows = useMemo<Row[]>(() => {
+  const [rows] = useState<Row[]>(() => {
     const idx = loadedLog.findIndex((e) => e.hash === startEntry.hash);
     const tail = (idx >= 0 ? loadedLog.slice(0, idx + 1) : [startEntry])
       .slice()
       .reverse();
     return tail.map((entry) => ({
       hash: entry.hash,
-      original: entry.message,
+      original: entry.body ? `${entry.message}\n\n${entry.body}` : entry.message,
       message: entry.message,
       squash: false,
       dropped: false,
     }));
-  }, [loadedLog, startEntry]);
+  });
 
   const [messages, setMessages] = useState<Record<string, string>>({});
   const [squashed, setSquashed] = useState<Record<string, boolean>>({});
   const [dropped, setDropped] = useState<Record<string, boolean>>({});
 
   const panelRef = useRef<HTMLDivElement>(null);
-  useModalAccessibility(panelRef, onClose, true);
+  useModalAccessibility(panelRef, () => { if (!applying) onClose(); }, true);
 
   const getValue = (row: Row) => messages[row.hash] ?? row.original;
 
   const buildSteps = () =>
     rows
       .filter((row) => !dropped[row.hash])
-      .map((row) => ({
+      .map((row, index) => ({
         hash: row.hash,
         message: getValue(row).trim() || row.original,
-        squash: squashed[row.hash] ?? false,
+        squash: index > 0 && (squashed[row.hash] ?? false),
       }));
 
   const apply = async () => {
-    if (!currentPath) return;
+    if (!targetPath || currentPath !== targetPath) return;
     const steps = buildSteps();
     if (steps.length === 0) {
       toast.error(t("rewrite.emptySteps"));
@@ -81,8 +84,10 @@ export function HistoryRewriteDialog({
     }
     setApplying(true);
     try {
-      await gitService.rewriteHistory(currentPath, steps);
-      await Promise.all([refreshLog(true), refreshBranches(true)]);
+      await gitService.rewriteHistory(targetPath, steps, rows[0].hash, rows[rows.length - 1].hash);
+      if (useRepoStore.getState().currentPath === targetPath) {
+        await Promise.all([refreshLog(true), refreshBranches(true), refreshRepoInfo(), refreshStatus(true)]);
+      }
       toast.success(t("rewrite.applied"));
       onClose();
     } catch (e) {
@@ -93,7 +98,6 @@ export function HistoryRewriteDialog({
   };
 
   const firstKept = rows.find((row) => !dropped[row.hash]);
-  const firstIsSquash = firstKept ? (squashed[firstKept.hash] ?? false) : false;
 
   return (
     <div
@@ -111,7 +115,7 @@ export function HistoryRewriteDialog({
           <h2 className="font-semibold">{t("rewrite.title")}</h2>
           <span className="text-xs text-text-muted">{t("rewrite.rangeHint")}</span>
           <div className="flex-1" />
-          <button className="btn-ghost" onClick={onClose} aria-label={t("common.close")}>
+          <button className="btn-ghost" onClick={onClose} disabled={applying} aria-label={t("common.close")}>
             <XIcon size={16} />
           </button>
         </div>
@@ -123,8 +127,8 @@ export function HistoryRewriteDialog({
         <div className="flex-1 overflow-auto p-4 space-y-1.5">
           {rows.map((row, idx) => {
             const isDropped = dropped[row.hash] ?? false;
-            const isSquash = squashed[row.hash] ?? false;
             const isFirstKept = firstKept?.hash === row.hash;
+            const isSquash = !isFirstKept && (squashed[row.hash] ?? false);
             return (
               <div
                 key={row.hash}
@@ -138,8 +142,8 @@ export function HistoryRewriteDialog({
                 <span className="font-mono text-xs text-accent shrink-0">
                   {row.hash.slice(0, 7)}
                 </span>
-                <input
-                  type="text"
+                <textarea
+                  rows={2}
                   value={getValue(row)}
                   disabled={applying || isSquash || isDropped}
                   onChange={(e) =>
@@ -187,7 +191,7 @@ export function HistoryRewriteDialog({
           </button>
           <button
             className="btn-primary text-xs"
-            disabled={applying || firstIsSquash}
+            disabled={applying || !firstKept || currentPath !== targetPath}
             onClick={() => void apply()}
           >
             {applying && <SpinnerIcon size={13} />}

@@ -199,12 +199,23 @@ mod tests {
     fn stash_save_includes_untracked_files_when_requested() {
         let (root, repo) = temp_repo("untracked");
         fs::write(root.join("new.txt"), "new file\n").expect("untracked file");
+        fs::write(root.join("tracked.txt"), "saved change\n").expect("tracked change");
 
         stash_save(&repo, Some("with untracked"), true, false).expect("stash save");
         assert!(
             !root.join("new.txt").exists(),
             "untracked file must be stashed away"
         );
+        let stash_hash = repo.refname_to_id("refs/stash").unwrap().to_string();
+        let files = crate::git::diff::get_stash_diff_files(&repo, &stash_hash).unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files.iter().any(|file| file.path == "tracked.txt"));
+        let untracked = files.iter().find(|file| file.path == "new.txt").unwrap();
+        assert_eq!(untracked.additions, 1);
+        assert!(untracked
+            .hunks
+            .iter()
+            .any(|hunk| hunk.lines.iter().any(|line| line.content == "new file")));
 
         stash_pop(&repo, 0).expect("stash pop");
         assert_eq!(

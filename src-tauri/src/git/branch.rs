@@ -83,12 +83,20 @@ pub fn switch_branch(repo: &Repository, name: &str, force: bool) -> AppResult<()
             "switching to '{name}' would discard them"
         )));
     }
-    repo.set_head(&refname)?;
-    let mut checkout = git2::build::CheckoutBuilder::new();
+    repo.find_branch(name, BranchType::Local)?;
+    let mut args = vec!["switch", "--no-guess"];
     if force {
-        checkout.force();
+        args.push("--discard-changes");
     }
-    repo.checkout_head(Some(&mut checkout))?;
+    args.extend(["--", name]);
+    // Let Git update HEAD, index and worktree together. Setting HEAD before
+    // libgit2 checkout makes the old index look like user-staged changes.
+    super::cli::run_checked(
+        super::cli::workdir(repo)?,
+        args,
+        super::cli::LOCAL_TIMEOUT,
+        "切换分支失败",
+    )?;
     Ok(())
 }
 
@@ -389,6 +397,82 @@ mod tests {
 
         switch_branch(&repo, "other", false).expect("switch on clean worktree");
         assert_eq!(repo.head().unwrap().shorthand(), Some("other"));
+    }
+
+    #[test]
+    fn switching_between_different_trees_restores_files_and_a_clean_index() {
+        let (root, repo) = temp_repo("different-trees");
+        let original_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+        create_branch_at_head(&repo, "smaller");
+        let extra_path = root.join("中文 文件.txt");
+        fs::write(&extra_path, "committed richer branch content\n").unwrap();
+        stage_all(&repo).unwrap();
+        let richer = {
+            let mut index = repo.index().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            let signature = Signature::now("Test User", "test@example.com").unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "extra file",
+                &tree,
+                &[&parent],
+            )
+            .unwrap()
+        };
+
+        switch_branch(&repo, "smaller", false).unwrap();
+        assert!(!extra_path.exists());
+        assert!(repo.statuses(None).unwrap().is_empty());
+        switch_branch(&repo, &original_branch, false).unwrap();
+        assert_eq!(repo.head().unwrap().target(), Some(richer));
+        assert_eq!(
+            fs::read_to_string(extra_path).unwrap(),
+            "committed richer branch content\n"
+        );
+        assert!(repo.statuses(None).unwrap().is_empty());
+    }
+
+    #[test]
+    fn failed_checkout_preserves_head_index_and_untracked_file() {
+        let (root, repo) = temp_repo("untracked-collision");
+        let original_branch = repo.head().unwrap().shorthand().unwrap().to_owned();
+        create_branch_at_head(&repo, "smaller");
+        fs::write(root.join("collision.txt"), "committed\n").unwrap();
+        stage_all(&repo).unwrap();
+        {
+            let mut index = repo.index().unwrap();
+            let tree = repo.find_tree(index.write_tree().unwrap()).unwrap();
+            let parent = repo.head().unwrap().peel_to_commit().unwrap();
+            let signature = Signature::now("Test User", "test@example.com").unwrap();
+            repo.commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                "target file",
+                &tree,
+                &[&parent],
+            )
+            .unwrap();
+        }
+        switch_branch(&repo, "smaller", false).unwrap();
+        let head_before = repo.head().unwrap().target();
+        fs::write(root.join("collision.txt"), "keep this untracked file\n").unwrap();
+
+        assert!(switch_branch(&repo, &original_branch, false).is_err());
+        assert_eq!(repo.head().unwrap().target(), head_before);
+        assert_eq!(repo.head().unwrap().shorthand(), Some("smaller"));
+        assert!(repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("collision.txt"), 0)
+            .is_none());
+        assert_eq!(
+            fs::read_to_string(root.join("collision.txt")).unwrap(),
+            "keep this untracked file\n"
+        );
     }
 
     #[test]

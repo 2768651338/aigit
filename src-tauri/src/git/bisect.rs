@@ -13,6 +13,8 @@ pub struct BisectState {
     pub in_progress: bool,
     /// Commit currently checked out for testing (empty when not bisecting).
     pub current_commit: String,
+    #[serde(default)]
+    pub first_bad_commit: Option<String>,
     /// Raw `git bisect log` output (empty when not bisecting).
     pub log: String,
 }
@@ -34,40 +36,48 @@ fn bisect_in_progress(repo: &Repository) -> bool {
     repo.path().join("BISECT_LOG").is_file()
 }
 
-/// Whether `oid` is `head` itself or an ancestor of it.
-pub(crate) fn commit_reachable_from(
-    repo: &Repository,
-    oid: git2::Oid,
-    head: git2::Oid,
-) -> AppResult<bool> {
-    if oid == head {
-        return Ok(true);
-    }
-    let mut revwalk = repo.revwalk()?;
-    revwalk.push(head)?;
-    for id in revwalk {
-        if id? == oid {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
 pub fn get_state(repo: &Repository) -> AppResult<BisectState> {
     if !bisect_in_progress(repo) {
         return Ok(BisectState {
             in_progress: false,
             current_commit: String::new(),
+            first_bad_commit: None,
             log: String::new(),
         });
     }
     let log = run_bisect(repo, &["log"])?;
     let head_args: Vec<std::ffi::OsString> = vec!["rev-parse".into(), "HEAD".into()];
     let head = cli::run(cli::workdir(repo)?, head_args, LOCAL_TIMEOUT)?;
+    let first_bad_commit = find_first_bad_commit(repo)?;
     Ok(BisectState {
         in_progress: true,
         current_commit: head.combined_lossy().trim().to_string(),
+        first_bad_commit,
         log,
+    })
+}
+
+fn find_first_bad_commit(repo: &Repository) -> AppResult<Option<String>> {
+    let bad = match repo.find_reference("refs/bisect/bad") {
+        Ok(reference) => reference.peel_to_commit()?.id(),
+        Err(error) if error.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let mut walk = repo.revwalk()?;
+    walk.push(bad)?;
+    let mut has_good = false;
+    for reference in repo.references_glob("refs/bisect/good-*")? {
+        walk.hide(reference?.peel_to_commit()?.id())?;
+        has_good = true;
+    }
+    if !has_good {
+        return Ok(None);
+    }
+    let mut candidates = walk.take(2).collect::<Result<Vec<_>, _>>()?;
+    Ok(if candidates.len() == 1 && candidates[0] == bad {
+        Some(candidates.remove(0).to_string())
+    } else {
+        None
     })
 }
 
@@ -185,6 +195,7 @@ mod tests {
 
         let state = mark(&repo, "good", None).expect("mark good");
         assert!(state.in_progress || !state.log.is_empty());
+        assert_eq!(state.first_bad_commit, Some(bad));
 
         reset(&repo).expect("reset");
         let state = get_state(&repo).expect("state after reset");

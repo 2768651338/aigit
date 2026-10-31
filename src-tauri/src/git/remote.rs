@@ -130,6 +130,16 @@ pub fn set_remote_url(repo: &Repository, name: &str, url: &str, push: bool) -> A
 }
 
 pub fn tracking_info(repo: &Repository) -> AppResult<TrackingInfo> {
+    if repo.head_detached()? {
+        return Ok(TrackingInfo {
+            branch: String::new(),
+            upstream: None,
+            remote: None,
+            remote_branch: None,
+            ahead: 0,
+            behind: 0,
+        });
+    }
     // A fresh `git init` repo has an unborn HEAD: repo.head() would fail with
     // UnbornBranch and take down the whole remote panel load. No commits —
     // no upstream and nothing to compare, so report the bare branch name.

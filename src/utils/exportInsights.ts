@@ -11,7 +11,29 @@ function bytesFromDataUrl(dataUrl: string): Uint8Array {
   const base64 = dataUrl.split(",")[1] || ""; const binary = atob(base64); const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i); return bytes;
 }
-function svgText(svg: SVGElement | string): string { return typeof svg === "string" ? svg : new XMLSerializer().serializeToString(svg); }
+export function serializeSvg(svg: SVGElement | string): string {
+  if (typeof svg === "string") return svg;
+  const clone = svg.cloneNode(true) as SVGElement;
+  const originals = [svg, ...svg.querySelectorAll("*")];
+  const copies = [clone, ...clone.querySelectorAll("*")];
+  const properties = ["color", "fill", "fill-opacity", "stroke", "stroke-width", "stroke-opacity", "stroke-dasharray", "opacity", "font-family", "font-size", "font-weight", "font-style", "text-anchor", "dominant-baseline"];
+  originals.forEach((element, index) => {
+    const computed = getComputedStyle(element);
+    const copy = copies[index] as SVGElement;
+    for (const property of properties) copy.style.setProperty(property, computed.getPropertyValue(property));
+  });
+  let surface: Element | null = svg;
+  while (surface) {
+    const background = getComputedStyle(surface).backgroundColor;
+    if (background !== "rgba(0, 0, 0, 0)" && background !== "transparent") {
+      clone.style.backgroundColor = background;
+      break;
+    }
+    surface = surface.parentElement;
+  }
+  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  return new XMLSerializer().serializeToString(clone);
+}
 function extension(format: ExportFormat): string { return format === "text" ? "txt" : format === "markdown" ? "md" : format; }
 function defaultName(format: ExportFormat): string { return `insights-${new Date().toISOString().slice(0, 10)}.${extension(format)}`; }
 
@@ -35,10 +57,11 @@ function safeDefaultPath(fileName: string | undefined, format: ExportFormat): st
   return `${sanitizeFileName(withoutExtension, "insights")}.${extension(format)}`;
 }
 function svgSize(source: string): { width: number; height: number } {
-  const root = source.match(/<svg\b[^>]*>/i)?.[0] || "";
-  const viewBox = root.match(/viewBox=["']\s*[-\d.]+\s+[-\d.]+\s+([\d.]+)\s+([\d.]+)/i);
-  const width = Number(root.match(/\bwidth=["']([\d.]+)/i)?.[1]) || (viewBox ? Number(viewBox[1]) : 1200);
-  const height = Number(root.match(/\bheight=["']([\d.]+)/i)?.[1]) || (viewBox ? Number(viewBox[2]) : 800);
+  const document = new DOMParser().parseFromString(source, "image/svg+xml");
+  if (document.querySelector("parsererror") || document.documentElement.localName !== "svg") throw new Error("SVG 无效");
+  const root = document.documentElement as unknown as SVGSVGElement;
+  const width = Number(root.getAttribute("width")) || root.viewBox.baseVal.width || 1200;
+  const height = Number(root.getAttribute("height")) || root.viewBox.baseVal.height || 800;
   return { width: Math.max(1, width), height: Math.max(1, height) };
 }
 async function rasterizeSvg(source: string, width: number, height: number): Promise<Uint8Array> {
@@ -60,7 +83,7 @@ async function rasterizeSvgRgba(source: string, width: number, height: number): 
 async function frameRgba(frame: ExportFrame): Promise<{ rgba: Uint8ClampedArray; width: number; height: number }> {
   if (frame.rgba) return { rgba: frame.rgba, width: frame.width || 1, height: frame.height || 1 };
   if (frame.canvas) { const ctx = frame.canvas.getContext("2d"); const data = ctx?.getImageData(0, 0, frame.canvas.width, frame.canvas.height).data; if (data) return { rgba: data, width: frame.canvas.width, height: frame.canvas.height }; }
-  if (frame.svg) { const source = svgText(frame.svg); const size = svgSize(source); return { rgba: await rasterizeSvgRgba(source, size.width, size.height), width: size.width, height: size.height }; }
+  if (frame.svg) { const source = serializeSvg(frame.svg); const size = svgSize(source); return { rgba: await rasterizeSvgRgba(source, size.width, size.height), width: size.width, height: size.height }; }
   throw new Error("GIF 帧缺少图像数据");
 }
 function resizeRgba(source: { rgba: Uint8ClampedArray; width: number; height: number }, width: number, height: number): Uint8ClampedArray {
@@ -73,15 +96,16 @@ function resizeRgba(source: { rgba: Uint8ClampedArray; width: number; height: nu
 }
 
 export async function exportInsights(request: ExportRequest): Promise<string | null> {
+  const svgSource = request.svg ? serializeSvg(request.svg) : undefined;
   const selected = await save({ defaultPath: safeDefaultPath(request.fileName, request.format), filters: [{ name: request.format.toUpperCase(), extensions: [extension(request.format)] }] });
   if (!selected) return null;
   const path = validateExportPath(selected, request.format);
   const format = request.format;
   if (format === "markdown" || format === "text") { await writeTextFile(path, request.content || ""); return path; }
   let bytes: Uint8Array;
-  if (format === "svg") bytes = new TextEncoder().encode(svgText(request.svg || "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"));
+  if (format === "svg") bytes = new TextEncoder().encode(svgSource || "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
   else if (format === "png") {
-    const source = request.svg ? svgText(request.svg) : request.canvas ? undefined : undefined;
+    const source = svgSource;
     const base = source ? svgSize(source) : { width: request.canvas?.width || request.width || 1200, height: request.canvas?.height || request.height || 800 };
     const dimensions = getExportDimensions(base.width, base.height, request.scale);
     if (source) bytes = await rasterizeSvg(source, dimensions.width, dimensions.height);

@@ -25,6 +25,12 @@ pub fn get_config() -> AppResult<AppConfig> {
 #[tauri::command]
 pub fn save_config(mut config: AppConfig) -> AppResult<AppConfig> {
     let _guard = lock_config_writes()?;
+    // Session commands own these fields; a settings form can hold an older
+    // snapshot after tabs have been opened, closed or activated.
+    let current = AppConfig::load(&SystemCredentialStore)?;
+    config.open_repos = current.open_repos;
+    config.active_repo = current.active_repo;
+    config.recent_repos = current.recent_repos;
     // The active profile is authoritative for the `ai` fields, so a frontend
     // snapshot that drifted from it is reconciled before validation.
     config.materialize_active_profile();

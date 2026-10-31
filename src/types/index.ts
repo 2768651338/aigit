@@ -33,6 +33,8 @@ export interface DiffLine {
 
 export interface DiffHunk {
   header: string;
+  old_start?: number;
+  new_start?: number;
   lines: DiffLine[];
 }
 
@@ -42,6 +44,9 @@ export interface FileDiff {
   hunks: DiffHunk[];
   additions: number;
   deletions: number;
+  is_binary?: boolean;
+  is_new?: boolean;
+  is_deleted?: boolean;
 }
 
 export interface CommitSnapshot {
@@ -288,6 +293,7 @@ export interface HookInfo {
 export interface BisectState {
   in_progress: boolean;
   current_commit: string;
+  first_bad_commit?: string | null;
   log: string;
 }
 
@@ -750,6 +756,7 @@ export interface ContributorInsights {
   email: string;
   commit_count: number;
   active_days: number;
+  active_dates?: string[];
   first_date: string;
   last_date: string;
   activity: number[];
@@ -760,6 +767,7 @@ export interface TimelineBucket {
   cumulative_contributors: number;
   commits: number;
   contributors: number;
+  author_ids?: string[];
 }
 export interface InsightMilestone { name: string; hash: string; date: string; message: string; }
 export interface InsightCommitSummary { hash: string; author: string; date: string; message: string; }

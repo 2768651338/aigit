@@ -135,6 +135,7 @@ export function ChatView() {
   const chatMessages = sessions.find((session) => session.id === activeSessionId)?.messages ?? [];
   const loading = useAiStore((s) => currentPath ? Boolean(s.activeRequestByScope[`${currentPath}\u0000chat`]) : false);
   const streamingText = useAiStore((s) => currentPath ? s.streamingTextByRepo[currentPath] ?? null : null);
+  const streamingSessionId = useAiStore((s) => currentPath ? s.taskFor(currentPath, "chat")?.sessionId : undefined);
   const sendChatMessage = useAiStore((s) => s.sendChatMessage);
   const cancelTask = useAiStore((s) => s.cancelTask);
   const loadSessions = useAiStore((s) => s.loadSessions);
@@ -396,7 +397,7 @@ export function ChatView() {
           // `streamingTextByRepo`; render it in the placeholder bubble so the
           // session map does not need to be rebuilt on every delta.
           const isStreamingBubble =
-            loading && streamingText !== null && msg.role === "assistant" && idx === chatMessages.length - 1;
+            loading && streamingSessionId === activeSessionId && streamingText !== null && msg.role === "assistant" && idx === chatMessages.length - 1;
           const content = isStreamingBubble ? streamingText : msg.content;
           return <MessageBubble key={idx} role={msg.role} content={content} />;
         })}

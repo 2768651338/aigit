@@ -132,6 +132,8 @@ interface AiTaskState {
   inputTokens?: number | null;
   outputTokens?: number | null;
   error?: string;
+  sessionId?: string;
+  assistantId?: string;
 }
 
 export function aiTaskKey(repoPath: string, kind: AiRequestKind, requestId: string): string {
@@ -142,7 +144,8 @@ function hasActiveTasks(activeRequestByScope: Record<string, string | null>): bo
   return Object.values(activeRequestByScope).some(Boolean);
 }
 
-function clearActiveScope(state: Pick<AiState, "activeRequestByScope">, scope: string): Pick<AiState, "activeRequestByScope" | "loading"> {
+function clearActiveScope(state: Pick<AiState, "activeRequestByScope">, scope: string, requestId: string): Partial<Pick<AiState, "activeRequestByScope" | "loading">> {
+  if (state.activeRequestByScope[scope] !== requestId) return {};
   const activeRequestByScope = { ...state.activeRequestByScope, [scope]: null };
   return { activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
 }
@@ -224,6 +227,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     const key = aiTaskKey(repoPath, "commit", requestId);
     const onEvent = (event: AiStreamEvent) => set((state) => {
       const task = state.tasks[key] ?? { repoPath, kind: "commit" as const, requestId, status: "started" as const, content: "" };
+      if (state.activeRequestByScope[scope] !== requestId) return state;
       const next = { ...task };
       if (event.type === "Delta") { next.content += event.delta; next.status = "streaming"; }
       if (event.type === "Usage") { next.inputTokens = event.inputTokens; next.outputTokens = event.outputTokens; }
@@ -240,10 +244,11 @@ export const useAiStore = create<AiState>((set, get) => ({
       };
     });
     set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "commit", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, loading: true }));
-    const { done } = await withSecretsConfirmation((confirmSecrets) =>
-      aiService.streamCommitMessage(repoPath, { onEvent }, requestId, confirmSecrets)
-    );
-    try { return await done; } catch (e) { set((state) => clearActiveScope(state, scope)); throw e; }
+    try {
+      return await withSecretsConfirmation((confirmSecrets) =>
+        aiService.streamCommitMessage(repoPath, { onEvent }, requestId, confirmSecrets).done
+      );
+    } catch (e) { set((state) => clearActiveScope(state, scope, requestId)); throw e; }
   },
   reviewCode: async (repoPath, filePath, stagedOnly) => {
     const requestId = aiService.createRequestId();
@@ -251,6 +256,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     const key = aiTaskKey(repoPath, "review", requestId);
     const onEvent = (event: AiStreamEvent) => set((state) => {
       const task = state.tasks[key] ?? { repoPath, kind: "review" as const, requestId, status: "started" as const, content: "" };
+      if (state.activeRequestByScope[scope] !== requestId) return state;
       const next = { ...task };
       if (event.type === "Delta") { next.content += event.delta; next.status = "streaming"; }
       if (event.type === "Usage") { next.inputTokens = event.inputTokens; next.outputTokens = event.outputTokens; }
@@ -262,17 +268,16 @@ export const useAiStore = create<AiState>((set, get) => ({
       return { tasks: { ...state.tasks, [key]: next }, lastResultByRepo: { ...state.lastResultByRepo, [repoPath]: next.content }, activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
     });
     set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "review", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, lastResultByRepo: { ...state.lastResultByRepo, [repoPath]: "" }, loading: true }));
-    const { done } = await withSecretsConfirmation((confirmSecrets) =>
-      aiService.streamReviewCode(repoPath, filePath, stagedOnly, { onEvent }, requestId, confirmSecrets)
-    );
     try {
-      await done;
+      await withSecretsConfirmation((confirmSecrets) =>
+        aiService.streamReviewCode(repoPath, filePath, stagedOnly, { onEvent }, requestId, confirmSecrets).done
+      );
       const report = await aiService.loadReviewReport(repoPath);
       if (!report) throw new Error(i18n.t("review.loadFailed"));
       set((state) => ({ reviewByRepo: { ...state.reviewByRepo, [repoPath]: report } }));
       useToastStore.getState().success(i18n.t("review.reviewDone"));
       return report;
-    } catch (e) { set((state) => clearActiveScope(state, scope)); toastAiError(e, "review.reviewFailed"); throw e; }
+    } catch (e) { set((state) => clearActiveScope(state, scope, requestId)); toastAiError(e, "review.reviewFailed"); throw e; }
   },
   loadReview: async (repoPath) => { try { const report = await aiService.loadReviewReport(repoPath); set((state) => ({ reviewByRepo: { ...state.reviewByRepo, [repoPath]: report } })); } catch (e) { toastAiError(e, "review.loadFailed"); } },
   updateFindingStatus: async (repoPath, findingId, status) => { try { const report = await aiService.updateReviewFinding(repoPath, findingId, status); set((state) => ({ reviewByRepo: { ...state.reviewByRepo, [repoPath]: report } })); } catch (e) { toastAiError(e, "review.updateFailed"); throw e; } },
@@ -282,6 +287,7 @@ export const useAiStore = create<AiState>((set, get) => ({
     const key = aiTaskKey(repoPath, "pr-review", requestId);
     const onEvent = (event: AiStreamEvent) => set((state) => {
       const task = state.tasks[key] ?? { repoPath, kind: "pr-review" as const, requestId, status: "started" as const, content: "" };
+      if (state.activeRequestByScope[scope] !== requestId) return state;
       const next = { ...task };
       if (event.type === "Delta") { next.content += event.delta; next.status = "streaming"; }
       if (event.type === "Usage") { next.inputTokens = event.inputTokens; next.outputTokens = event.outputTokens; }
@@ -294,17 +300,16 @@ export const useAiStore = create<AiState>((set, get) => ({
       return { tasks: { ...state.tasks, [key]: next }, activeRequestByScope, loading: hasActiveTasks(activeRequestByScope) };
     });
     set((state) => ({ tasks: { ...state.tasks, [key]: { repoPath, kind: "pr-review", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, loading: true }));
-    const { done } = await withSecretsConfirmation((confirmSecrets) =>
-      aiService.streamReviewPullRequest(repoPath, pullNumber, { onEvent }, requestId, confirmSecrets)
-    );
     try {
-      await done;
+      await withSecretsConfirmation((confirmSecrets) =>
+        aiService.streamReviewPullRequest(repoPath, pullNumber, { onEvent }, requestId, confirmSecrets).done
+      );
       const report = await aiService.loadPrReviewReport(repoPath, pullNumber);
       if (!report) throw new Error(i18n.t("review.loadFailed"));
       set((state) => ({ prReviewByRepo: { ...state.prReviewByRepo, [repoPath]: report } }));
       useToastStore.getState().success(i18n.t("review.reviewDone"));
       return report;
-    } catch (e) { set((state) => clearActiveScope(state, scope)); toastAiError(e, "review.reviewFailed"); throw e; }
+    } catch (e) { set((state) => clearActiveScope(state, scope, requestId)); toastAiError(e, "review.reviewFailed"); throw e; }
   },
   loadPrReview: async (repoPath, pullNumber) => {
     try {
@@ -320,6 +325,7 @@ export const useAiStore = create<AiState>((set, get) => ({
   },
   sendChatMessage: async (content, repoPath, attachments = []) => {
     if (!repoPath) return;
+    if (get().activeRequestByScope[`${repoPath}\u0000chat`]) return;
     let session = (get().sessionsByRepo[repoPath] ?? []).find((item) => item.id === get().activeSessionByRepo[repoPath]);
     if (!session) { get().createSession(repoPath); session = (get().sessionsByRepo[repoPath] ?? [])[0]; }
     if (!session) return;
@@ -327,19 +333,28 @@ export const useAiStore = create<AiState>((set, get) => ({
     const user = { id: id(), role: "user" as const, content, created_at: now, attachments: toMetadata(attachments) };
     const next: ChatSession = { ...session, title: session.messages.length === 0 ? titleFor(content) : session.title, updated_at: now, messages: [...session.messages, user] };
     set((state) => ({ sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: [next, ...(state.sessionsByRepo[repoPath] ?? []).filter((item) => item.id !== next.id)] } }));
-    if (get().localSaveEnabled) {
-      try { await chatHistoryService.save(next); }
-      catch (e) { toastAiError(e, "chat.historyError"); }
-    }
+    const requestId = aiService.createRequestId();
+    const scope = `${repoPath}\u0000chat`;
+    const key = aiTaskKey(repoPath, "chat", requestId);
+    const assistantId = id();
     try {
       const context = buildContext(toWire(next.messages), get().contextLimit);
-      const requestId = aiService.createRequestId();
-      const scope = `${repoPath}\u0000chat`;
-      const key = aiTaskKey(repoPath, "chat", requestId);
-      const assistantId = id();
       const streaming: ChatSession = { ...next, messages: [...next.messages, { id: assistantId, role: "assistant", content: "", created_at: Date.now(), attachments: [] }] };
-      set((state) => ({ sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: [streaming, ...(state.sessionsByRepo[repoPath] ?? []).filter((item) => item.id !== streaming.id)] }, tasks: { ...state.tasks, [key]: { repoPath, kind: "chat", requestId, status: "started", content: "" } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId } }));
-      const onEvent = (event: AiStreamEvent) => set((state) => {
+      set((state) => ({ sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: [streaming, ...(state.sessionsByRepo[repoPath] ?? []).filter((item) => item.id !== streaming.id)] }, tasks: { ...state.tasks, [key]: { repoPath, kind: "chat", requestId, status: "started", content: "", sessionId: streaming.id, assistantId } }, activeRequestByScope: { ...state.activeRequestByScope, [scope]: requestId }, loading: true }));
+      if (get().localSaveEnabled) {
+        try { await chatHistoryService.save(next); }
+        catch (e) { toastAiError(e, "chat.historyError"); }
+      }
+      if (get().activeRequestByScope[scope] !== requestId) return;
+      const onEvent = (event: AiStreamEvent) => {
+        if (get().activeRequestByScope[scope] !== requestId) {
+          if (event.type === "Started" && get().tasks[key]?.status === "cancelled") {
+            void aiService.cancel(requestId).catch((error) => toastAiError(error, "chat.errorTitle"));
+          }
+          return;
+        }
+        set((state) => {
+        if (state.activeRequestByScope[scope] !== requestId) return state;
         const task = state.tasks[key] ?? { repoPath, kind: "chat" as const, requestId, status: "started" as const, content: "" };
         const updated = { ...task };
         if (event.type === "Delta") { updated.content += event.delta; updated.status = "streaming"; }
@@ -347,6 +362,8 @@ export const useAiStore = create<AiState>((set, get) => ({
         if (event.type === "Completed") updated.status = "completed";
         if (event.type === "Cancelled") updated.status = "cancelled";
         if (event.type === "Failed") { updated.status = "failed"; updated.error = event.message; }
+        if (event.type === "Cancelled") updated.content = updated.content || i18n.t("chat.stopped");
+        if (event.type === "Failed" && !updated.content) updated.content = event.message;
         const terminal = updated.status === "completed" || updated.status === "cancelled" || updated.status === "failed";
         const activeRequestByScope = terminal ? { ...state.activeRequestByScope, [scope]: null } : state.activeRequestByScope;
 
@@ -370,27 +387,54 @@ export const useAiStore = create<AiState>((set, get) => ({
           activeRequestByScope,
           loading: hasActiveTasks(activeRequestByScope),
         };
-      });
-      const { done } = await withSecretsConfirmation((confirmSecrets) =>
-        aiService.streamRepoChat(context.messages, repoPath, attachments, { onEvent }, requestId, confirmSecrets)
+        });
+      };
+      await withSecretsConfirmation((confirmSecrets) =>
+        aiService.streamRepoChat(context.messages, repoPath, attachments, { onEvent }, requestId, confirmSecrets).done
       );
-      await done;
       const completed = (get().sessionsByRepo[repoPath] ?? []).find((item) => item.id === streaming.id);
       if (completed && get().localSaveEnabled) {
         try { await chatHistoryService.save(completed); }
         catch (e) { toastAiError(e, "chat.historyError"); }
       }
     } catch (e) {
-      set((state) => ({
-        ...clearActiveScope(state, `${repoPath}\u0000chat`),
-        streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: null },
-      }));
-      toastAiError(e, "chat.errorTitle");
+      if (get().activeRequestByScope[scope] === requestId) {
+        const message = formatError(e);
+        set((state) => ({
+          ...clearActiveScope(state, scope, requestId),
+          tasks: { ...state.tasks, [key]: { ...state.tasks[key], repoPath, kind: "chat", requestId, status: "failed", content: state.tasks[key]?.content || message, error: message } },
+          streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: null },
+          sessionsByRepo: { ...state.sessionsByRepo, [repoPath]: (state.sessionsByRepo[repoPath] ?? []).map((item) => item.id === next.id ? { ...item, messages: item.messages.map((entry) => entry.id === assistantId ? { ...entry, content: entry.content || message } : entry) } : item) },
+        }));
+        toastAiError(e, "chat.errorTitle");
+      }
     }
   },
   cancelTask: async (repoPath, kind) => {
-    const requestId = get().activeRequestByScope[`${repoPath}\u0000${kind}`];
-    if (requestId) await aiService.cancel(requestId);
+    const scope = `${repoPath}\u0000${kind}`;
+    const requestId = get().activeRequestByScope[scope];
+    if (!requestId) return;
+    try {
+      const accepted = await aiService.cancel(requestId);
+      if ((!accepted && kind !== "chat") || get().activeRequestByScope[scope] !== requestId) return;
+      const key = aiTaskKey(repoPath, kind, requestId);
+      const task = get().tasks[key];
+      if (!task) return;
+      const content = task.content || i18n.t("chat.stopped");
+      set((state) => ({
+        ...clearActiveScope(state, scope, requestId),
+        tasks: { ...state.tasks, [key]: { ...task, status: "cancelled", content } },
+        streamingTextByRepo: { ...state.streamingTextByRepo, [repoPath]: null },
+        sessionsByRepo: kind !== "chat" ? state.sessionsByRepo : {
+          ...state.sessionsByRepo,
+          [repoPath]: (state.sessionsByRepo[repoPath] ?? []).map((session) => session.id === task.sessionId
+            ? { ...session, updated_at: Date.now(), messages: session.messages.map((message) => message.id === task.assistantId ? { ...message, content } : message) }
+            : session),
+        },
+      }));
+      const session = get().sessionsByRepo[repoPath]?.find((item) => item.id === task.sessionId);
+      if (session && get().localSaveEnabled) await chatHistoryService.save(session);
+    } catch (error) { toastAiError(error, "chat.errorTitle"); }
   },
   taskFor: (repoPath, kind) => {
     const requestId = get().activeRequestByScope[`${repoPath}\u0000${kind}`];

@@ -185,7 +185,7 @@ pub fn get_status(path: String) -> AppResult<Vec<git::FileStatus>> {
 #[tauri::command]
 pub fn get_workdir_diff(path: String, file_path: Option<String>) -> AppResult<Vec<git::FileDiff>> {
     let repo = git::repo::open_repo(&path)?;
-    git::diff::get_workdir_diff(&repo, file_path.as_deref())
+    git::diff::get_unstaged_diff(&repo, file_path.as_deref())
 }
 
 #[tauri::command]
@@ -404,6 +404,12 @@ pub fn get_commit_diff_files(path: String, hash: String) -> AppResult<Vec<git::F
 }
 
 #[tauri::command]
+pub fn get_stash_diff_files(path: String, hash: String) -> AppResult<Vec<git::FileDiff>> {
+    let repo = git::repo::open_repo(&path)?;
+    git::diff::get_stash_diff_files(&repo, &hash)
+}
+
+#[tauri::command]
 pub fn list_files(path: String) -> AppResult<Vec<String>> {
     let repo = git::repo::open_repo(&path)?;
     git::branch::list_files(&repo)
@@ -524,11 +530,16 @@ pub fn bisect_reset(path: String) -> AppResult<()> {
 }
 
 #[tauri::command]
-pub fn rewrite_history(path: String, steps: Vec<git::history::RewriteStep>) -> AppResult<String> {
+pub fn rewrite_history(
+    path: String,
+    start_hash: String,
+    expected_head: String,
+    steps: Vec<git::history::RewriteStep>,
+) -> AppResult<String> {
     let repo = git::repo::open_repo(&path)?;
     let position = git::op_log::capture_position(&repo);
     let step_count = steps.len();
-    let result = git::history::rewrite_history(&repo, &steps);
+    let result = git::history::rewrite_history(&repo, &start_hash, &expected_head, &steps);
     if result.is_ok() {
         git::op_log::record(
             &path,
